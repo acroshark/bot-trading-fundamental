@@ -1,0 +1,675 @@
+"""Servidor local: sirve la web, le envía los eventos en directo por WebSocket y expone la API de solo lectura."""
+import asyncio
+import json
+import logging
+import re
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any, Callable
+from zoneinfo import ZoneInfo
+
+from aiohttp import WSCloseCode, WSMsgType, web
+
+from . import aprendizaje, config
+from .backtest import filter_results
+from .bus import Bus
+from .market import bias_of, funding_8h
+from .models import now_ms
+from .regions import MARKETS, REGIONS
+
+log = logging.getLogger("server")
+LIVE_FLAG = '<script>window.RADAR_LIVE = {ws: "/events"};</script>'
+MAD = ZoneInfo("Europe/Madrid")
+TIER_ADJ = {"T0": 5, "T1": 2, "T2": 0, "T3": -5}   # suave: la IA local ya ve el nivel de la fuente
+NEWS_MAX = 60
+NEWS_KINDS = ("captured", "triaged", "lowprio", "corroborated", "srcstate")
+STORY_MAX = 128             # ids de historia: «n…», «w-…», «a-…»
+LOOPBACK = ("127.0.0.1", "::1")
+# Órdenes de la web sobre las fuentes (bot/fuentes_vivas.py: accion) y valores admitidos en las rutas
+FUENTE_ACCIONES = ("restaurar", "silenciar", "retirar", "activar", "a_prueba", "anadir")
+MEDIOS_ORDEN = ("peso", "acierto", "casos", "ruido", "ops", "R")
+APR_POR = ("nivel", "region", "idioma", "tipo", "ventana", "fase", "rol", "moneda")
+HORIZONTES = (15, 60, 240, 1440)
+SEMANA = re.compile(r"\d{4}-W\d{2}")
+
+
+@dataclass
+class Services:
+    """Módulos que la API consulta. Cualquiera puede faltar (pruebas, arranque parcial)."""
+    feeds: Any = None        # FeedPoller
+    predictor: Any = None    # Predictor
+    broker: Any = None       # PaperBroker
+    phase2: Any = None       # Phase2
+    backtest: Callable[[], dict | None] | None = None   # resultados del backtest (con caché)
+    openings: Any = None     # OpeningEngine (motor de aperturas)
+    vigilancia: Any = None   # Vigilancia (prueba en avance de las estrategias del laboratorio, sin operar)
+    aprendizaje: Any = None  # Aprendizaje (medida de noticias y medios, pesos y post-mortems)
+    evolucion: Any = None    # Evolucion (historial de cambios, campeón y aspirantes, propuestas e informe semanal)
+    fuentes_vivas: Any = None   # FuentesVivas (estado de cada fuente y descubrimiento de medios)
+
+
+def _hora(ms: int) -> str:
+    return datetime.fromtimestamp(ms / 1000, MAD).strftime("%d-%m %H:%M")
+
+
+def _dumps(o) -> str:
+    return json.dumps(o, ensure_ascii=False)
+
+
+def adjusted_credibility(cred: float | None, tier: str | None, confirmations: int) -> int | None:
+    """Credibilidad del triaje ajustada por el nivel de la fuente y las confirmaciones de otros medios (contrato 2.7)."""
+    if cred is None:
+        return None
+    return int(max(0, min(100, cred + TIER_ADJ.get(tier or "", 0) + min(15, 5 * confirmations))))
+
+
+def _w(x, default: float = 1.0) -> float:
+    try:
+        return default if x is None else float(x)
+    except (TypeError, ValueError):
+        return default
+
+
+def news_credibility(cred: float | None, tier: str | None, confirmations: int, outlet: str | None,
+                     src_weight: float = 1.0) -> int | None:
+    """La de adjusted_credibility multiplicada por el peso aprendido del medio (aprendizaje.source_weight: 1 mientras
+    no haya datos) y por el peso del estado de la fuente (fuentes_vivas: silenciada o retirada = 0)."""
+    base = adjusted_credibility(cred, tier, confirmations)
+    if base is None:
+        return None
+    return aprendizaje.adjusted_credibility(base, outlet, weight=aprendizaje.source_weight(outlet) * src_weight)
+
+
+def _pick_stories(db, since: int, min_imp: int, bolsa: str | None) -> list[str]:
+    """Las historias que devolverá /api/noticias, sin leer los cuerpos enteros: el último triaje de cada una (importancia
+    y bolsas, con json_extract) y las captadas de la más nueva a la más vieja hasta tener NEWS_MAX que pasen el filtro."""
+    tri: dict[str, tuple] = {}
+    if min_imp > 0 or bolsa:
+        bolsas = "json_extract(body, '$.patch.triage.repercusion.bolsas')" if bolsa else "NULL"
+        for story, _ts, imp, bols in db.execute(
+                f"SELECT story, MAX(ts), json_extract(body, '$.patch.triage.importancia'), {bolsas} FROM events "
+                "WHERE kind IN ('triaged', 'lowprio') AND ts >= ? GROUP BY story", (since,)):
+            tri[story] = (imp, json.loads(bols) if isinstance(bols, str) and bols.startswith("[") else [])
+    region = "json_extract(body, '$.patch.region')" if bolsa else "NULL"
+    out, done = [], set()
+    for story, reg in db.execute(f"SELECT story, {region} FROM events WHERE kind = 'captured' AND ts >= ? "
+                                 "ORDER BY ts DESC, rowid DESC", (since,)):
+        if story in done:   # la primera vez que sale es su captura más reciente
+            continue
+        done.add(story)
+        imp, listed = tri.get(story, (None, []))
+        if (imp is None and min_imp > 0) or (imp is not None and imp < min_imp):
+            continue   # con un mínimo de importancia solo cuentan las ya puntuadas por la IA local
+        if bolsa and bolsa != REGIONS.get(reg or "", (None, None))[1] and bolsa not in listed:
+            continue
+        out.append(story)
+        if len(out) == NEWS_MAX:
+            break
+    return out
+
+
+def recent_news(bus: Bus, hours: float, min_imp: int, bolsa: str | None = None) -> list[dict]:
+    """Noticias relevantes recientes con su triaje local, en el formato que leen las skills de OpenClaw.
+    Usa su propia conexión de solo lectura: se puede (y se debe) llamar desde un hilo, fuera del bucle."""
+    since = now_ms() - int(hours * 3600_000)
+    with bus.store.reader() as db:
+        pick = _pick_stories(db, since, min_imp, bolsa)
+        if not pick:
+            return []
+        rows = db.execute(f"SELECT body FROM events WHERE story IN ({','.join('?' * len(pick))}) AND ts >= ? "
+                          f"AND kind IN ({','.join('?' * len(NEWS_KINDS))}) ORDER BY ts, rowid",
+                          (*pick, since, *NEWS_KINDS)).fetchall()
+    evs = [json.loads(r[0]) for r in rows]
+    by: dict[str, dict] = {}
+    for e in evs:
+        s, p = by.setdefault(e["story"], {}), e.get("patch", {})
+        if e["kind"] == "captured":
+            s.update(ts=e["ts"], hora=_hora(e["ts"]), titular=p.get("headline"), fuente=p.get("src"), nivel=p.get("tier"),
+                     monedas=p.get("coins"), url=p.get("url"), region=p.get("region"), idioma=p.get("lang"),
+                     fresca=p.get("fresh", True), temas_reglas=p.get("topics", []),
+                     medio=p.get("outlet") or aprendizaje.outlet_from_patch(p) or None,
+                     estado_fuente=p.get("srcState") or "activa", peso_fuente=_w(p.get("srcWeight")))
+        elif e["kind"] in ("triaged", "lowprio"):
+            tr = p.get("triage", {})
+            s.update(importancia=tr.get("importancia"), tipo=tr.get("tipo"), sentimiento=tr.get("sentimiento"),
+                     resumen=tr.get("resumen"), motivo=tr.get("motivo"), archivada=e["kind"] == "lowprio",
+                     credibilidad=tr.get("credibilidad"), alcance=tr.get("alcance"), temporalidad=tr.get("temporalidad"),
+                     repercusion=tr.get("repercusion"), novedad=tr.get("novedad"), temas=tr.get("temas"))
+        else:
+            if e["kind"] == "corroborated":   # una confirmación de una fuente silenciada no es independiente
+                s["confirmaciones"] = sum(1 for c in p.get("corrob", []) if _w((c or {}).get("srcWeight")) > 0)
+            if p.get("srcState"):   # la historia sube de estado (la trae o la confirma una fuente mejor)
+                s.update(estado_fuente=p["srcState"], peso_fuente=_w(p.get("srcWeight")))
+    out = []
+    for s in by.values():   # el filtro de importancia y bolsa ya lo hizo _pick_stories
+        if not s.get("titular"):
+            continue
+        s["peso_medio"] = aprendizaje.source_weight(s.get("medio"))
+        s["credibilidad_ajustada"] = news_credibility(s.get("credibilidad"), s.get("nivel"), s.get("confirmaciones", 0),
+                                                      s.get("medio"), s.get("peso_fuente", 1.0))
+        out.append(s)
+    return sorted(out, key=lambda s: -s["ts"])[:NEWS_MAX]
+
+
+def ws_origins() -> set[str]:
+    """Orígenes que pueden abrir /events desde un navegador: la propia web del bot (y los de BOT_WS_ORIGINS)."""
+    hosts = {"127.0.0.1", "localhost", "[::1]", config.HOST}
+    return {f"http://{h}:{config.PORT}" for h in hosts} | set(config.WS_ORIGINS)
+
+
+def _story(m: dict) -> str | None:
+    s = m.get("story")
+    return s if isinstance(s, str) and 0 < len(s) <= STORY_MAX else None
+
+
+def state_summary(bus: Bus) -> dict:
+    st = bus.state
+    market = st.get("market", {})
+    flow = {}
+    for c, f in (market.get("flow") or {}).items():
+        b = bias_of(f["ls"], funding_8h(f), f.get("pctl"))
+        flow[c] = {"sesgo_minorista": b["label"], "pct_cuentas_largo": round(b["longPct"]), "ratio_ls": round(f["ls"], 2),
+                   "percentil_7_dias": round(f["pctl"]) if f.get("pctl") is not None else None,
+                   "funding_pct_8h": round(funding_8h(f), 4), "funding_periodo_h": f.get("funding_h"), "oi_1h_pct": round(f["oi"], 2), "compras_agresivas_pct": round(f["taker"] * 100),
+                   "prima_coinbase_pct": round(f["prem"], 3) if f.get("prem") is not None else None, "extremo": b["extreme"]}
+    now = now_ms()
+    agenda = [{"cuando": _hora(e["t"]), "evento": e["name"], "fuente": e["src"], "impacto": e["impact"]}
+              for e in (st.get("calendar") or {}).get("events", []) if e["t"] > now][:8]
+    fuentes = [{"nombre": s["name"], "ok": s["ok"], "noticias": s["n"], "error": s.get("err") or None}
+               for s in (st.get("sources") or {}).get("sources", [])]
+    masivas = (st.get("sources_summary") or {}).get("totals")
+    bolsas = {k: {"estado": m.get("state"), "cambio_pct": m.get("change_pct"), "ultima_sesion": m.get("last_session")}
+              for k, m in ((st.get("trend") or {}).get("markets") or {}).items()}
+    libro = {c: {"desequilibrio": o.get("imbalance"), "cvd_5m": o.get("cvd_5m"), "compras_5m": o.get("buy_ratio_5m"),
+                 "tendencia": o.get("trend")} for c, o in ((st.get("orderflow") or {}).get("coins") or {}).items()}
+    local = st.get("agent:local", {}).get("patch", {})
+    cartera = st.get("portfolio") or {}
+    return {"fase": config.PHASE, "hora_madrid": _hora(now), "precios_usdc": market.get("prices", {}), "flujo_minorista": flow,
+            "libro_y_operaciones": libro, "bolsas": bolsas, "agenda_macro": agenda, "fuentes": fuentes, "fuentes_masivas": masivas,
+            "ia_local": {"encendida": not local.get("off", True), "estado": local.get("note") or local.get("now")},
+            "cartera_paper": {"capital": cartera.get("equity"), "pnl_dia": cartera.get("day_pnl"),
+                              "posiciones": len(cartera.get("positions", []))} if cartera else None}
+
+
+BT_BLOCK = re.compile(r'<script type="application/json" id="bt(?:Open)?Data">.*?</script>', re.S)
+
+
+def make_app(bus: Bus, health, services: Services | None = None) -> web.Application:
+    sv = services or Services()
+    page = {"mtime": None, "html": ""}
+
+    def live_page() -> str:
+        """La web con la marca de modo en directo y sin el backtest incrustado de la demostración (llega por /api/backtest).
+        Se vuelve a leer solo si el archivo cambia."""
+        mt = config.DASHBOARD.stat().st_mtime
+        if mt != page["mtime"]:
+            html = BT_BLOCK.sub("<!--BT-->", config.DASHBOARD.read_text(encoding="utf-8"))
+            page["html"], page["mtime"] = "<!doctype html>\n" + LIVE_FLAG + "\n" + html, mt
+        return page["html"]
+
+    async def index(_request: web.Request) -> web.Response:
+        return web.Response(text=await asyncio.to_thread(live_page), content_type="text/html", charset="utf-8",
+                            headers={"Cache-Control": "no-store"})
+
+    def broker_call(name: str, *args):
+        """Llama a un método del paper solo si existe (halt, resume y cancel llegan con el paper nuevo)."""
+        fn = getattr(sv.broker, name, None)
+        if not callable(fn):
+            log.warning("El paper aún no admite «%s» desde la web: orden ignorada", name)
+            return None
+        return fn(*args)
+
+    def order_done(area: str, accion, oid, res: dict | None) -> None:
+        """Resultado de una orden de la web sobre fuentes o pesos: queda en el estado «orden_web» (la web lo enseña)."""
+        res = res if isinstance(res, dict) else {"ok": False, "why": "No encontrado"}
+        why = res.get("why") or res.get("error")
+        bus.publish({"type": "orden_web", "ts": now_ms(), "area": area, "accion": accion,
+                     "id": oid if isinstance(oid, (str, int)) and not isinstance(oid, bool) else None,
+                     "ok": bool(res.get("ok", True)), "why": why})
+        (log.info if res.get("ok", True) else log.warning)("Orden de la web (%s %s %s): %s", area, accion, oid,
+                                                           why or "hecha")
+
+    def source_order(m: dict) -> None:
+        """{"type": "fuente", "accion": "restaurar|silenciar|retirar|activar|a_prueba|anadir", "id": "…", "motivo"}:
+        cambia el estado de una fuente (fuentes_vivas.accion). El cambio queda en evolution_log con su motivo."""
+        acc, fid, why = m.get("accion"), m.get("id"), m.get("motivo")
+        if not sv.fuentes_vivas:
+            log.warning("Orden de fuentes sin el módulo fuentes_vivas: ignorada")
+        elif acc not in FUENTE_ACCIONES or not (isinstance(fid, str) and 0 < len(fid) <= 300):
+            log.warning("Orden de fuentes no válida (%r, %r): ignorada", acc, fid)
+        else:
+            res = sv.fuentes_vivas.accion({"accion": acc, "id": fid,
+                                           "motivo": " ".join(why.split())[:200] if isinstance(why, str) else None})
+            order_done("fuentes", acc, fid, res)
+
+    def weight_order(kind: str, m: dict) -> None:
+        """Peso de un medio a mano ({"type": "peso_medio", "medio", "peso": número o null, "motivo"}) o deshacer un
+        cambio de peso ({"type": "revertir_peso", "id"}); también con «cmd» aprendizaje_peso / aprendizaje_revertir."""
+        apr = sv.aprendizaje
+        if not apr:
+            log.warning("Orden de pesos sin el módulo de aprendizaje: ignorada")
+            return
+        if kind in ("peso_medio", "aprendizaje_peso"):
+            outlet, peso, why = m.get("medio") or m.get("outlet"), m.get("peso"), m.get("motivo")
+            if not (isinstance(outlet, str) and 0 < len(outlet) <= 200) or isinstance(peso, bool) \
+                    or not (peso is None or isinstance(peso, (int, float))):
+                log.warning("Orden de peso no válida (%r, %r): ignorada", outlet, peso)
+                return
+            motivo = " ".join(why.split())[:300] if isinstance(why, str) and why.strip() else "Fijado a mano desde la web"
+            order_done("aprendizaje", "peso", outlet, apr.fijar_peso(outlet, peso, motivo))
+        else:
+            cid = m.get("id")
+            if isinstance(cid, bool) or not (isinstance(cid, int) or (isinstance(cid, str) and cid.isdigit())):
+                log.warning("Orden de revertir peso sin id numérico (%r): ignorada", cid)
+                return
+            # «n.º N» en el motivo: la evolución enlaza la reversión con el cambio deshecho (revierte / revertida_por)
+            order_done("aprendizaje", "revertir", int(cid),
+                       apr.revertir(int(cid), f"Revertido el cambio n.º {int(cid)} desde la web"))
+
+    tasks: set[asyncio.Task] = set()
+
+    async def discard_and_log(m: dict) -> None:
+        """Descarta una propuesta (Evolucion.atender) y deja la decisión en evolution_log: lo descartado queda
+        bloqueado (no se vuelve a proponer sin datos posteriores)."""
+        evo = sv.evolucion
+        try:
+            res = await evo.atender(m)
+            if not res.get("ok"):
+                return
+            pid, why = m["id"], m.get("motivo") if isinstance(m.get("motivo"), str) else ""
+            props = (await evo.api_propuestas("descartada", 200)).get("propuestas") or []
+            prop = next((x for x in props if x.get("id") == pid), {})
+            title = (prop.get("cuerpo") or {}).get("titulo") or pid
+            evo.registrar("propuesta_descartada", prop.get("sujeto") or pid, {"propuesta": pid, "estado": "pendiente"},
+                          {"propuesta": pid, "estado": "descartada"},
+                          f"Propuesta descartada por ti desde la web: «{title}»" + (f" ({why[:200]})" if why.strip() else ""),
+                          {"propuesta": pid, "tipo": prop.get("tipo"), "clave": prop.get("clave")}, "web")
+        except Exception:
+            log.exception("No pude descartar la propuesta %s o apuntarlo en el historial", m.get("id"))
+
+    def evolution_order(m: dict) -> None:
+        """{"type": "evolucion", "accion": "aplicar|descartar|revertir|evaluar|modo", "id", "motivo", "modo"}: la
+        atiende la evolución en una tarea (su resultado sale en «evolucion».ultima_orden). Aplicar y revertir quedan en
+        evolution_log por la propia evolución; descartar, aquí."""
+        evo = sv.evolucion
+        if not evo:
+            log.warning("Orden de la evolución sin el módulo: ignorada")
+        elif m.get("accion") == "descartar" and isinstance(m.get("id"), str) and 0 < len(m["id"]) <= 128:
+            t = asyncio.get_running_loop().create_task(discard_and_log(m))
+            tasks.add(t)
+            t.add_done_callback(tasks.discard)
+        elif not evo.orden_web(m):   # valida la acción y la atiende en una tarea
+            log.warning("Orden de la evolución no válida: %s", str(m)[:200])
+
+    def on_ws_message(data: str) -> None:
+        """Órdenes de la web: sobre el paper (aprobar o rechazar, cerrar una posición, cambiar el modo de aprobación,
+        detener o reanudar la ejecución y cancelar una orden pendiente o programada), sobre las fuentes (fuente), la
+        evolución (evolucion: aplicar, descartar o revertir propuestas, evaluar y modo) y los pesos de los medios."""
+        try:
+            m = json.loads(data)
+        except ValueError:
+            return
+        if not isinstance(m, dict):
+            return
+        kind = m.get("type") or m.get("cmd")
+        if kind == "fuente":
+            return source_order(m)
+        if kind == "evolucion":
+            return evolution_order(m)
+        if kind in ("peso_medio", "revertir_peso", "aprendizaje_peso", "aprendizaje_revertir"):
+            return weight_order(kind, m)
+        if not sv.broker:
+            return
+        story = _story(m)
+        if kind == "decision" and story:
+            ok = m.get("ok")
+            if not isinstance(ok, bool):   # solo true o false de JSON: la cadena "false" no aprueba nada
+                log.warning("Decisión de la web sobre %s sin ok booleano (%r): ignorada", story, ok)
+                return
+            done = sv.broker.decide(story, ok, "Aprobada por ti" if ok else "Rechazada por ti")
+            log.info("Decisión de la web sobre %s: %s (%s)", story, "sí" if ok else "no", "aplicada" if done else "nada pendiente")
+        elif kind == "close" and story:
+            sv.broker.close(story, "Cierre manual desde la web")
+        elif kind == "mode" and m.get("mode") in ("auto", "veto", "manual"):
+            sv.broker.set_mode(m["mode"])
+        elif kind == "halt":
+            broker_call("halt", "Detenida desde la web")
+        elif kind == "resume":
+            broker_call("resume", "Reanudada desde la web")
+        elif kind == "cancel" and story:
+            broker_call("cancel", story, "Cancelada por ti desde la web")
+        else:
+            log.warning("Mensaje de la web no reconocido: %s", str(data)[:200])
+
+    def origin_ok(request: web.Request) -> bool:
+        """Solo la propia web del bot. Sin cabecera Origin (no es un navegador) solo se admite desde este PC."""
+        origin = request.headers.get("Origin")
+        if origin is None:
+            return request.remote in LOOPBACK
+        return origin.rstrip("/") in ws_origins()
+
+    open_ws: set[web.WebSocketResponse] = set()
+
+    async def close_ws(_app: web.Application) -> None:
+        """Al apagar, cierra las webs conectadas: si no, el cierre espera hasta 60 s a que se vayan solas."""
+        for w in list(open_ws):
+            await w.close(code=WSCloseCode.GOING_AWAY, message=b"apagando")
+
+    async def events(request: web.Request) -> web.WebSocketResponse:
+        # Los WebSocket no tienen CORS: sin esto, cualquier página abierta en el navegador podría mandar órdenes.
+        if not origin_ok(request):
+            log.warning("WebSocket rechazado: origen %s desde %s", request.headers.get("Origin"), request.remote)
+            raise web.HTTPForbidden(text="origen no permitido")
+        ws = web.WebSocketResponse(heartbeat=20)
+        await ws.prepare(request)
+        open_ws.add(ws)
+        q = bus.subscribe()
+        snap = bus.snapshot()   # sin await entre suscribirse y la foto: no se pierde ni se duplica nada
+        log.info("Web conectada (%d clientes)", len(bus.clients))
+
+        async def pump():
+            while True:
+                first = await q.get()
+                batch, slow = [], first is None   # None: el bus la ha echado por lenta
+                if not slow:
+                    batch.append(first)
+                while not slow and not q.empty() and len(batch) < 200:
+                    m = q.get_nowait()
+                    if m is None:
+                        slow = True
+                    else:
+                        batch.append(m)
+                if batch:
+                    await ws.send_str(batch[0] if len(batch) == 1 else "[" + ",".join(batch) + "]")
+                if slow:   # al cerrar, la web se reconecta sola y recibe una foto nueva
+                    log.warning("Web lenta: se cierra su conexión para que vuelva con el historial")
+                    await ws.close(code=WSCloseCode.TRY_AGAIN_LATER, message=b"web lenta")
+                    return
+
+        sender = None
+        try:
+            await ws.send_str(json.dumps(snap, ensure_ascii=False))
+            sender = asyncio.create_task(pump())
+            async for msg in ws:
+                if msg.type == WSMsgType.TEXT:
+                    try:
+                        on_ws_message(msg.data)
+                    except Exception:
+                        log.exception("Mensaje de la web no procesado")
+        finally:
+            bus.unsubscribe(q)
+            open_ws.discard(ws)
+            if sender:
+                sender.cancel()
+            log.info("Web desconectada")
+        return ws
+
+    async def health_route(_request: web.Request) -> web.Response:
+        return web.json_response(health(), dumps=_dumps)
+
+    # Solo lectura, para la web, las skills del OpenClaw de trading y otras herramientas locales.
+    def j(o) -> web.Response:
+        return web.json_response(o, dumps=_dumps)
+
+    async def api_state(_request: web.Request) -> web.Response:
+        return j(state_summary(bus))
+
+    async def api_news(request: web.Request) -> web.Response:
+        try:
+            hours = max(0.0, min(48.0, float(request.query.get("horas", "3"))))
+            min_imp = int(request.query.get("min", "0"))
+        except ValueError:
+            raise web.HTTPBadRequest(text="horas y min deben ser números")
+        bolsa = request.query.get("bolsa")
+        if bolsa and bolsa not in MARKETS:
+            raise web.HTTPBadRequest(text=f"bolsa desconocida; usa una de: {', '.join(MARKETS)}")
+        return j(await asyncio.to_thread(recent_news, bus, hours, min_imp, bolsa))   # en un hilo: 48 h son miles de filas
+
+    async def api_sources(request: web.Request) -> web.Response:
+        """Feeds con su estado de ciclo de vida (estado y peso, de fuentes_vivas); ?estado= filtra por él."""
+        rows = sv.feeds.api_list(request.query.get("region")) if sv.feeds else []
+        estado = request.query.get("estado")
+        return j([r for r in rows if r.get("estado", "activa") == estado] if estado else rows)
+
+    def q_int(request: web.Request, name: str, default: int | None, lo: int, hi: int) -> int | None:
+        raw = request.query.get(name)
+        if raw in (None, ""):
+            return default
+        try:
+            return max(lo, min(hi, int(raw)))
+        except ValueError:
+            raise web.HTTPBadRequest(text=f"{name} debe ser un número entero")
+
+    async def safe(coro, default):
+        """Parte opcional de una respuesta: si falla, la respuesta sale igual (sin esa parte)."""
+        try:
+            return await coro
+        except Exception:
+            log.exception("API: una parte de la respuesta falló")
+            return default
+
+    # ---- fuentes vivas (estado de cada fuente y descubrimiento)
+
+    async def api_fv(request: web.Request) -> web.Response:
+        """Estado «fuentes_vivas» con la lista filtrada (?region=&estado=&tipo=feed|medio&limite=) y los candidatos."""
+        fv = sv.fuentes_vivas
+        if not fv:
+            return j(bus.state.get("fuentes_vivas") or {"type": "fuentes_vivas", "estado": "apagado", "lista": [],
+                                                        "candidatos": []})
+        q = request.query
+        tipo = q.get("tipo") or None
+        if tipo not in (None, "feed", "medio"):
+            raise web.HTTPBadRequest(text="tipo debe ser feed o medio")
+        out = {**fv.estado(), "ts": now_ms()}
+        out["lista"] = fv.lista(q.get("region") or None, q.get("estado") or None, tipo, q_int(request, "limite", 300, 1, 10_000))
+        out["candidatos"] = fv.candidatos(50)
+        return j(out)
+
+    async def api_fv_lista(request: web.Request) -> web.Response:
+        q = request.query
+        tipo = q.get("tipo") or None
+        if tipo not in (None, "feed", "medio"):
+            raise web.HTTPBadRequest(text="tipo debe ser feed o medio")
+        if not sv.fuentes_vivas:
+            return j([])
+        return j(sv.fuentes_vivas.lista(q.get("region") or None, q.get("estado") or None, tipo,
+                                        q_int(request, "limite", 10_000, 1, 10_000)))
+
+    async def api_fv_candidatos(request: web.Request) -> web.Response:
+        return j(sv.fuentes_vivas.candidatos(q_int(request, "limite", 200, 1, 1000)) if sv.fuentes_vivas else [])
+
+    async def api_fv_historial(request: web.Request) -> web.Response:
+        fid = request.query.get("id") or None
+        if fid is not None and len(fid) > 300:
+            raise web.HTTPBadRequest(text="id demasiado largo")
+        return j(sv.fuentes_vivas.historial(q_int(request, "n", 200, 1, 2000), fid) if sv.fuentes_vivas else [])
+
+    # ---- aprendizaje (medios, noticias que funcionaron y fallaron, post-mortems)
+
+    def apr_or_404():
+        if not sv.aprendizaje:
+            raise web.HTTPNotFound(text="El aprendizaje no está en marcha (BOT_APRENDIZAJE=0 o no arrancó)")
+        return sv.aprendizaje
+
+    async def api_apr(_request: web.Request) -> web.Response:
+        """El estado «aprendizaje» con el ranking de medios, los post-mortems, los cambios de peso y las noticias que
+        mejor y peor funcionaron (a 4 h)."""
+        apr = sv.aprendizaje
+        if not apr:
+            return j(bus.state.get("aprendizaje") or {"type": "aprendizaje", "estado": "apagado", "medios": [],
+                                                      "postmortems": [], "cambios": [], "noticias": None})
+        out = await apr.view()
+        out["noticias"] = {"mejores": await safe(apr.noticias("mejores"), []),
+                           "peores": await safe(apr.noticias("peores"), [])}
+        return j(out)
+
+    async def api_apr_medios(request: web.Request) -> web.Response:
+        q, apr = request.query, apr_or_404()
+        orden = q.get("orden") or "peso"
+        if orden not in MEDIOS_ORDEN:
+            raise web.HTTPBadRequest(text=f"orden debe ser uno de: {', '.join(MEDIOS_ORDEN)}")
+        try:
+            min_casos = max(0.0, float(q.get("min_casos") or 0))
+        except ValueError:
+            raise web.HTTPBadRequest(text="min_casos debe ser un número")
+        return j(apr.medios(orden, q_int(request, "limit", 100, 1, 1000), q.get("veredicto") or None, min_casos,
+                            (q.get("q") or "")[:100] or None))
+
+    async def api_apr_medio(request: web.Request) -> web.Response:
+        outlet = request.query.get("id") or request.query.get("outlet") or ""
+        if not 0 < len(outlet) <= 200:
+            raise web.HTTPBadRequest(text="falta el medio (?id=dominio)")
+        m = apr_or_404().medio(outlet)
+        if m is None:
+            raise web.HTTPNotFound(text="Sin datos de ese medio")
+        return j(m)
+
+    async def api_apr_noticias(request: web.Request) -> web.Response:
+        q, apr = request.query, apr_or_404()
+        cuales = q.get("cuales") or "mejores"
+        horizonte = q_int(request, "horizonte", 240, 1, 1440)
+        if cuales not in ("mejores", "peores") or horizonte not in HORIZONTES:
+            raise web.HTTPBadRequest(text="cuales: mejores|peores; horizonte: 15|60|240|1440")
+        return j(await apr.noticias(cuales, horizonte, q_int(request, "dias", 30, 1, 400), q_int(request, "limit", 20, 1, 200),
+                                    q.get("solo_senal") != "0"))
+
+    async def api_apr_estadisticas(request: web.Request) -> web.Response:
+        por = request.query.get("por") or "nivel"
+        if por not in APR_POR:
+            raise web.HTTPBadRequest(text=f"por debe ser uno de: {', '.join(APR_POR)}")
+        return j(apr_or_404().estadisticas(por))
+
+    async def api_apr_postmortems(request: web.Request) -> web.Response:
+        origen = request.query.get("origen") or None
+        if origen not in (None, "paper", "vigilancia"):
+            raise web.HTTPBadRequest(text="origen debe ser paper o vigilancia")
+        return j(await apr_or_404().postmortems(q_int(request, "limit", 50, 1, 500), origen))
+
+    async def api_apr_cambios(request: web.Request) -> web.Response:
+        outlet = request.query.get("medio") or request.query.get("outlet") or None
+        return j(await apr_or_404().cambios(q_int(request, "limit", 100, 1, 1000), outlet[:200] if outlet else None))
+
+    # ---- evolución (historial, campeón y aspirantes, propuestas, informe semanal)
+
+    def evo_or_404():
+        if not sv.evolucion:
+            raise web.HTTPNotFound(text="La evolución no está en marcha (BOT_EVOLUCION=0 o no arrancó)")
+        return sv.evolucion
+
+    async def api_evo(_request: web.Request) -> web.Response:
+        """El estado «evolucion» (campeón, aspirantes, propuestas, últimos cambios) con el último informe semanal entero."""
+        evo = sv.evolucion
+        if not evo:
+            return j(bus.state.get("evolucion") or {"type": "evolucion", "estado": "apagada", "aspirantes": [],
+                                                    "propuestas": [], "cambios": [], "informe_semanal": None})
+        out = dict(await evo.api_vista())
+        inf = await safe(evo.api_informes(None, 1), {"informes": []})
+        out["informe_semanal"] = (inf.get("informes") or [None])[0]
+        return j(out)
+
+    async def api_evo_historial(request: web.Request) -> web.Response:
+        q = request.query
+        tipo = q.get("tipo") or None
+        return j(await evo_or_404().api_historial(tipo[:500] if tipo else None, (q.get("sujeto") or "")[:300] or None,
+                                                  (q.get("origen") or "")[:60] or None,
+                                                  q_int(request, "desde", None, 0, 10 ** 14),
+                                                  q_int(request, "hasta", None, 0, 10 ** 14),
+                                                  q_int(request, "limite", 200, 1, 2000)))
+
+    async def api_evo_informes(request: web.Request) -> web.Response:
+        semana = request.query.get("semana") or None
+        if semana and not SEMANA.fullmatch(semana):
+            raise web.HTTPBadRequest(text="semana con el formato AAAA-Wss (p. ej. 2026-W44)")
+        return j(await evo_or_404().api_informes(semana, q_int(request, "limite", 12, 1, 200)))
+
+    async def api_evo_propuestas(request: web.Request) -> web.Response:
+        return j(await evo_or_404().api_propuestas(request.query.get("estado") or None,
+                                                   q_int(request, "limite", 100, 1, 1000)))
+
+    async def api_trend(_request: web.Request) -> web.Response:
+        return j({"trend": bus.state.get("trend"), "orderflow": bus.state.get("orderflow")})
+
+    async def api_predictions(_request: web.Request) -> web.Response:
+        return j(sv.predictor.view() if sv.predictor else bus.state.get("predictions") or {"type": "predictions", "items": []})
+
+    async def api_predictions_done(request: web.Request) -> web.Response:
+        raw = request.query.get("n", "50")
+        n = max(1, min(500, int(raw))) if raw.isdigit() else 50
+        return j(sv.predictor.evaluated(n) if sv.predictor else [])
+
+    async def api_backtest(request: web.Request) -> web.Response:
+        q = request.query
+        res = await asyncio.to_thread(sv.backtest) if sv.backtest else None   # relee el archivo (varios MB) solo si cambió
+        return j(filter_results(res, q.get("family"), q.get("verdict"), q.get("id"), q.get("curvas") != "0"))
+
+    async def api_results(_request: web.Request) -> web.Response:
+        return j(sv.broker.results() if sv.broker else {"start_equity": config.PAPER_EQUITY, "equity": config.PAPER_EQUITY,
+                                                          "trades": [], "by_strategy": [], "by_window": [], "by_coin": [],
+                                                          "equity_curve": [], "daily": []})
+
+    async def api_portfolio(_request: web.Request) -> web.Response:
+        return j(sv.broker.portfolio() if sv.broker else bus.state.get("portfolio"))
+
+    async def api_phase2(_request: web.Request) -> web.Response:
+        return j(sv.phase2.view() if sv.phase2 else {"claude": False, "estado": "apagada"})
+
+    async def api_openings(_request: web.Request) -> web.Response:
+        return j(sv.openings.view() if sv.openings else bus.state.get("openings") or {"type": "openings", "windows": []})
+
+    async def api_vigilancia(_request: web.Request) -> web.Response:
+        if sv.vigilancia:
+            return j(sv.vigilancia.view())
+        return j(bus.state.get("vigilancia") or {"type": "vigilancia", "estado": "apagada", "estrategias": []})
+
+    bt_open = {"mtime": None, "res": None}
+
+    def load_bt_open() -> dict | None:
+        path = config.BACKTEST_DIR / "aperturas.json"
+        try:
+            mt = path.stat().st_mtime
+        except OSError:
+            return None
+        if mt != bt_open["mtime"]:
+            bt_open["res"], bt_open["mtime"] = json.loads(path.read_text(encoding="utf-8")), mt
+        return bt_open["res"]
+
+    async def api_bt_openings(_request: web.Request) -> web.Response:
+        res = await asyncio.to_thread(load_bt_open)
+        if res is None:
+            raise web.HTTPNotFound(text="Aún no hay backtest de aperturas: python -m bot.backtest_aperturas")
+        return j(res)
+
+    app = web.Application()
+    app.on_shutdown.append(close_ws)
+    app.router.add_get("/", index)
+    app.router.add_get("/events", events)
+    app.router.add_get("/health", health_route)
+    app.router.add_get("/api/estado", api_state)
+    app.router.add_get("/api/noticias", api_news)
+    app.router.add_get("/api/fuentes", api_sources)
+    app.router.add_get("/api/tendencia", api_trend)
+    app.router.add_get("/api/predicciones", api_predictions)
+    app.router.add_get("/api/predicciones/evaluadas", api_predictions_done)
+    app.router.add_get("/api/backtest", api_backtest)
+    app.router.add_get("/api/resultados", api_results)
+    app.router.add_get("/api/cartera", api_portfolio)
+    app.router.add_get("/api/fase2", api_phase2)
+    app.router.add_get("/api/aperturas", api_openings)
+    app.router.add_get("/api/backtest/aperturas", api_bt_openings)
+    app.router.add_get("/api/vigilancia", api_vigilancia)
+    app.router.add_get("/api/fuentes_vivas", api_fv)
+    app.router.add_get("/api/fuentes_vivas/lista", api_fv_lista)
+    app.router.add_get("/api/fuentes_vivas/candidatos", api_fv_candidatos)
+    app.router.add_get("/api/fuentes_vivas/historial", api_fv_historial)
+    app.router.add_get("/api/aprendizaje", api_apr)
+    app.router.add_get("/api/aprendizaje/medios", api_apr_medios)
+    app.router.add_get("/api/aprendizaje/medio", api_apr_medio)
+    app.router.add_get("/api/aprendizaje/noticias", api_apr_noticias)
+    app.router.add_get("/api/aprendizaje/estadisticas", api_apr_estadisticas)
+    app.router.add_get("/api/aprendizaje/postmortems", api_apr_postmortems)
+    app.router.add_get("/api/aprendizaje/cambios", api_apr_cambios)
+    app.router.add_get("/api/evolucion", api_evo)
+    app.router.add_get("/api/evolucion/historial", api_evo_historial)
+    app.router.add_get("/api/evolucion/informes", api_evo_informes)
+    app.router.add_get("/api/evolucion/propuestas", api_evo_propuestas)
+    return app

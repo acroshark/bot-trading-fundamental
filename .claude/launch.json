@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "bot",
+      "runtimeExecutable": "M:\\BotFundamental-runtime\\venv\\Scripts\\python.exe",
+      "runtimeArgs": ["-X", "utf8", "-m", "bot"],
+      "port": 8765
+    },
+    {
+      "name": "radar-dashboard",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8091", "--bind", "127.0.0.1", "--directory", "dashboard"],
+      "port": 8091
+    }
+  ]
+}

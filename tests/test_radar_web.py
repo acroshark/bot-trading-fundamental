@@ -1,0 +1,1230 @@
+"""La web (dashboard/radar.html): su JavaScript se ejecuta con Node sobre un DOM mínimo de prueba.
+
+Cada prueba arranca la página (en directo con un WebSocket falso, o la simulación), le pasa mensajes como los del bot
+y mira lo que pinta o lo que envía al bot. Sin Node, se saltan."""
+import json
+import os
+import shutil
+import subprocess
+from pathlib import Path
+
+import pytest
+
+HTML = Path(__file__).resolve().parents[1] / "dashboard" / "radar.html"
+_NODE_M = Path(r"M:\OpenClaw-runtime\node\node.exe")
+NODE = os.environ.get("NODE") or (str(_NODE_M) if _NODE_M.exists() else shutil.which("node"))
+pytestmark = pytest.mark.skipif(not NODE, reason="hace falta Node para probar la web")
+
+# Arnés: extrae el <script> de la página, lo ejecuta en un contexto vm con un DOM falso y luego el escenario (stdin).
+HARNESS = r"""
+const fs = require("fs"), vm = require("vm");
+const [htmlPath, mode] = process.argv.slice(1);
+const html = fs.readFileSync(htmlPath, "utf8");
+const js = [...html.matchAll(/<script(?![^>]*\bsrc=)([^>]*)>([\s\S]*?)<\/script>/g)]
+  .filter(m => !/json|text\/plain/.test(m[1])).map(m => m[2]).join("\n;\n");
+const errors = [], sockets = [], fetches = [], timers = [], timeouts = [];
+const H = {errors, sockets, fetches, timers, timeouts, confirmAnswer: true, fetchReply: null, perf: 1000};
+function makeEl(sel){
+  const el = {_sel: sel, innerHTML: "", textContent: "", hidden: false, className: "", title: "", value: "", dataset: {},
+    _attrs: {}, _listeners: {}, offsetHeight: 0, offsetWidth: 0, scrollWidth: 0,
+    style: {setProperty(){}, getPropertyValue(){ return ""; }},
+    classList: {_s: new Set(), add(c){ this._s.add(c); }, remove(c){ this._s.delete(c); }, toggle(c, on){ on ? this._s.add(c) : this._s.delete(c); }, contains(c){ return this._s.has(c); }},
+    setAttribute(k, v){ this._attrs[k] = String(v); }, getAttribute(k){ return k in this._attrs ? this._attrs[k] : null; },
+    hasAttribute(k){ return k in this._attrs; }, removeAttribute(k){ delete this._attrs[k]; },
+    addEventListener(t, f){ (this._listeners[t] = this._listeners[t] || []).push(f); },
+    getContext(){ return new Proxy({}, {get: () => () => {}}); },
+    getBoundingClientRect(){ return {left: 0, top: 0, width: 0, height: 0}; },
+    closest(){ return null; }, matches(){ return false; }, querySelector(){ return makeEl("?"); },
+    scrollIntoView(){}, focus(){}, appendChild(){}, setPointerCapture(){}};
+  return el;
+}
+const els = new Map(), $q = sel => { if (!els.has(sel)) els.set(sel, makeEl(sel)); return els.get(sel); };
+const docL = {};
+const document = {querySelector: $q, querySelectorAll: () => [], getElementById: () => null,
+  addEventListener(t, f){ (docL[t] = docL[t] || []).push(f); },
+  createElement: () => makeEl("nuevo"), documentElement: makeEl("html"), body: makeEl("body"), head: makeEl("head"),
+  fullscreenElement: null, activeElement: null, contains: () => true, exitFullscreen(){}};
+class FakeWS { constructor(url){ this.url = url; this.readyState = 0; this.sent = []; sockets.push(this); }
+  send(d){ this.sent.push(JSON.parse(d)); } close(){ this.readyState = 3; if (this.onclose) this.onclose(); } }
+// Destino falso de un evento: closest() reconoce selectores de atributo ([data-x] o [data-x="v"]) separados por comas.
+function target(attrs){
+  const t = {dataset: {}, hasAttribute: k => k in attrs, getAttribute: k => (k in attrs ? attrs[k] : null),
+    closest(sel){ return sel.split(",").some(s => { const m = s.trim().match(/^\[([\w-]+)(?:="(.*)")?\]$/);
+      return m && (m[1] in attrs) && (m[2] === undefined || m[2] === attrs[m[1]]); }) ? t : null; },
+    matches(sel){ return !!t.closest(sel); }};
+  for (const [k, v] of Object.entries(attrs)) if (k.startsWith("data-")) t.dataset[k.slice(5).replace(/-(\w)/g, (_, c) => c.toUpperCase())] = v;
+  return t;
+}
+const ctx = {
+  console: {log(){}, info(){}, warn(){}, debug(){}, error: (...a) => errors.push(a.map(x => (x && x.stack) || String(x)).join(" "))},
+  document, location: {href: "http://127.0.0.1:8765/", hash: "", host: "127.0.0.1:8765", protocol: "http:"},
+  history: {replaceState(){}}, localStorage: {getItem: () => null, setItem(){}}, navigator: {},
+  innerWidth: 1400, innerHeight: 900, devicePixelRatio: 1,
+  setInterval: (f, ms) => { timers.push({f, ms}); return timers.length; }, clearInterval(){},
+  setTimeout: (f, ms) => { timeouts.push({f, ms}); return timeouts.length; }, clearTimeout(){},
+  requestAnimationFrame: () => 0, cancelAnimationFrame(){},
+  performance: {now: () => H.perf},
+  getComputedStyle: () => ({display: "block", flexDirection: "row", getPropertyValue: () => ""}),
+  ResizeObserver: class { observe(){} }, CSS: {escape: s => String(s)},
+  WebSocket: FakeWS, confirm: () => H.confirmAnswer, addEventListener(){},
+  fetch: async url => { fetches.push(url); return H.fetchReply ? H.fetchReply(url) : {ok: false}; }};
+ctx.window = ctx;
+if (mode === "live") ctx.RADAR_LIVE = {ws: "/events"};
+vm.createContext(ctx);
+let result = null;
+(async () => {
+  try {
+    vm.runInContext(js, ctx, {filename: "radar.js"});
+    Object.assign(H, {el: $q, target,
+      ws: () => sockets[sockets.length - 1],
+      open(){ const w = H.ws(); w.readyState = 1; if (w.onopen) w.onopen(); return w; },
+      recv(...msgs){ H.ws().onmessage({data: JSON.stringify(msgs.length === 1 ? msgs[0] : msgs)}); },
+      sent: () => (H.ws() ? H.ws().sent : []),
+      fire(type, attrs, extra = {}){ (docL[type] || []).forEach(f => f({target: target(attrs), button: 0, isPrimary: true, ...extra})); },
+      elFire(sel, type, ev){ ($q(sel)._listeners[type] || []).forEach(f => f(ev)); }});
+    const code = fs.readFileSync(0, "utf8");
+    result = await vm.runInContext(`(async function(H){\n${code}\n})`, ctx)(H);
+  } catch (e) { errors.push("excepción: " + ((e && e.stack) || e)); }
+  process.stdout.write(JSON.stringify({result, errors}) + "\n");
+})();
+"""
+
+# Ayudas comunes de los escenarios en directo: eventos y cartera con el formato del bot (contrato 2.5 y 2.6).
+LIVE = r"""
+const now = Date.now();
+const ev = (kind, story, patch, extra = {}) => ({type: "event", kind, story, title: kind, text: "", coins: [], patch, ts: Date.now(), ...extra});
+const strat = (coin = "BTC", side = "long", o = {}) => ({coin, side, mode: "seguir-bolsa", risk: 0.5, stopPct: 1.2, trailPct: 0.8,
+  timing: "now", win: "Apertura Londres", winAt: null, entryType: "Mercado", tp1R: 1.5, tp2R: null, valid: "60 min",
+  inval: "pierde el VWAP", why: "Prueba", llm: null, ...o});
+const pf = (o = {}) => ({type: "portfolio", ts: now, equity: 10000, start_equity: 10000, day_pnl: 0, day_pnl_pct: 0,
+  positions: [], pending: [], scheduled: [], closed: [],
+  limits: {risk_per_trade_pct: 0.5, max_daily_loss_pct: 3, max_positions: 4, day_loss_pct: 0, halted: false, halt_until: null},
+  mode: "veto", ...o});
+const reset = () => H.recv({type: "reset", phase: 2, started: now - 3600e3});
+"""
+
+
+def run(code: str, live: bool = True):
+    p = subprocess.run([NODE, "-e", HARNESS, str(HTML), "live" if live else "sim"],
+                       input=(LIVE if live else "") + code, capture_output=True, text=True, encoding="utf-8", timeout=180)
+    assert p.returncode == 0, p.stderr
+    out = json.loads(p.stdout.strip().splitlines()[-1])
+    assert out["errors"] == [], out["errors"]
+    return out["result"]
+
+
+def test_en_directo_se_ven_el_modo_y_la_parada():
+    """#13 #20 #49: en directo solo se ocultan los mandos de la simulación; el selector de modo se ve y la parada (paper),
+    solo cuando la cartera del bot dice que la admite (caps o «halted» en la raíz; limits.halted es el límite diario)."""
+    r = run("""H.open(); reset();
+      const kill0 = H.el("#killBtn").hidden;
+      H.recv(pf()); const kill1 = H.el("#killBtn").hidden;
+      H.recv(pf({halted: false})); const kill2 = H.el("#killBtn").hidden;
+      H.recv(pf({caps: ["cancel"]})); const kill3 = H.el("#killBtn").hidden;
+      H.recv(pf({caps: ["halt", "cancel"]}));
+      return {speed: H.el("#speedSeg").hidden, ctrl: H.el(".top .ctrl").hidden, sel: H.el("#approvalSel").hidden,
+              kill0, kill1, kill2, kill3, kill: H.el("#killBtn").hidden, killTxt: H.el("#killBtn").textContent,
+              tag: H.el("#modeTag").textContent, note: H.el("#tradesNote").hidden};""")
+    assert r["speed"] is True and r["ctrl"] is False and r["sel"] is False
+    assert r["kill0"] is True and r["kill1"] is True and r["kill2"] is False and r["kill3"] is True and r["kill"] is False
+    assert r["killTxt"] == "Detener paper"
+    assert "paper" in r["tag"] and r["note"] is False
+
+
+def test_sin_soporte_del_bot_no_se_ofrece_parar_ni_cancelar():
+    """Revisión de #13/#20/#49: si el bot no declara halt ni cancel, la web no los ofrece ni envía, y no da por hecho nada."""
+    r = run("""H.open(); reset();
+      const at = now + 3600e3;
+      H.recv(ev("strategy", "n2", {headline: "h", src: "s", tier: "T1", t0: now, strat: strat()}),
+             ev("riskok", "n2", {risk: {checks: [], ok: true}}),
+             ev("humanok", "n2", {human: {mode: "auto", by: "Automático (paper)", at: now}}),
+             ev("scheduled", "n2", {exec: {scheduled: at}}));
+      H.recv(pf({scheduled: [{story: "n2", at, expires: at + 600e3, coin: "BTC", side: "long"}]}));
+      S.sel = "n2"; renderTrace(); const tr0 = H.el("#trace").innerHTML;
+      userHalt(); const t1 = H.el("#toast").textContent;
+      H.fire("click", {"data-cancel": "n2"}); const t2 = H.el("#toast").textContent;
+      const sent0 = H.sent().length;
+      H.recv(pf({caps: ["halt", "cancel"], scheduled: [{story: "n2", at, expires: at + 600e3, coin: "BTC", side: "long"}]}));
+      renderTrace();
+      return {tr0, t1, t2, sent0, tr1: H.el("#trace").innerHTML, stop: S.execStop};""")
+    assert "Programada para" in r["tr0"] and "data-cancel" not in r["tr0"]
+    assert "aún no admite" in r["t1"] and "aún no admite" in r["t2"] and r["sent0"] == 0 and r["stop"] is False
+    assert 'data-cancel="n2"' in r["tr1"]
+
+
+def test_parada_y_cancelacion_sin_confirmar_avisan():
+    """Con soporte declarado, el aviso es «pedido, pendiente de confirmar»; si la cartera no lo confirma, se avisa."""
+    r = run("""H.open(); reset();
+      const at = now + 3600e3, sch = [{story: "n2", at, expires: at + 600e3, coin: "BTC", side: "long"}];
+      H.recv(pf({caps: ["halt", "cancel"], scheduled: sch}));
+      H.elFire("#killBtn", "click", {}); const t1 = H.el("#toast").textContent;
+      H.timeouts.filter(x => x.ms === 10000).forEach(x => x.f()); const t2 = H.el("#toast").textContent;
+      H.timeouts.length = 0;
+      H.fire("click", {"data-cancel": "n2"}); const t3 = H.el("#toast").textContent;
+      H.timeouts.filter(x => x.ms === 10000).forEach(x => x.f()); const t4 = H.el("#toast").textContent;
+      H.timeouts.length = 0;
+      H.fire("click", {"data-cancel": "n2"});
+      H.recv(pf({caps: ["halt", "cancel"], scheduled: []})); H.el("#toast").textContent = "";
+      H.timeouts.filter(x => x.ms === 10000).forEach(x => x.f());
+      return {t1, t2, t3, t4, t5: H.el("#toast").textContent, sent: H.sent()};""")
+    assert "Pendiente de que la confirme" in r["t1"] and "enviada" not in r["t1"]
+    assert "no ha confirmado la parada" in r["t2"]
+    assert "Pendiente de que la confirme" in r["t3"] and "no ha confirmado la cancelación" in r["t4"]
+    assert r["t5"] == ""
+    assert r["sent"] == [{"type": "halt"}, {"type": "cancel", "story": "n2"}, {"type": "cancel", "story": "n2"}]
+
+
+def test_sin_conexion_avisa_y_no_pierde_el_modo():
+    """#14: sin WebSocket abierto, aprobar avisa con un toast y el selector vuelve al modo real del bot."""
+    r = run("""reset(); H.recv(pf({mode: "veto"}));
+      userDecide("n1", true);
+      const t1 = H.el("#toast").textContent, s1 = H.sent().length;
+      const sel = H.el("#approvalSel"); sel.value = "manual"; H.elFire("#approvalSel", "change", {target: sel});
+      const back = sel.value;
+      H.open(); userDecide("n1", false);
+      return {t1, s1, back, approval: S.approval, sent: H.sent()};""")
+    assert "Sin conexión" in r["t1"] and r["s1"] == 0
+    assert r["back"] == "veto" and r["approval"] == "veto"
+    assert r["sent"] == [{"type": "decision", "story": "n1", "ok": False}]
+
+
+def test_aprobar_va_en_click_y_no_se_redibuja_mientras_se_pulsa():
+    """#15: pulsar no decide nada; el clic sí. Mientras el botón está pulsado no se redibuja el expediente."""
+    r = run("""H.open(); reset();
+      H.recv(ev("strategy", "n1", {headline: "Titular", src: "X", tier: "T1", t0: now, strat: strat()}),
+             ev("riskok", "n1", {risk: {checks: [{ok: true, t: "ok"}], ok: true}}),
+             ev("humanwait", "n1", {human: {mode: "manual", deadline: now + 600000}}));
+      H.recv(pf({pending: [{story: "n1", deadline: now + 600000, mode: "manual", coin: "BTC", side: "long"}], mode: "manual"}));
+      S.sel = "n1"; render(true);
+      const hasBtn = H.el("#trace").innerHTML.includes('data-approve="n1"');
+      H.fire("pointerdown", {"data-approve": "n1"});
+      const afterDown = H.sent().length;
+      H.el("#trace").innerHTML = "SENTINEL"; render(true); const held = H.el("#trace").innerHTML;
+      H.fire("pointerup", {"data-approve": "n1"}); H.fire("click", {"data-approve": "n1"});
+      return {hasBtn, afterDown, held, sent: H.sent(), redrawn: H.el("#trace").innerHTML !== "SENTINEL"};""")
+    assert r["hasBtn"] and r["afterDown"] == 0 and r["held"] == "SENTINEL"
+    assert r["sent"] == [{"type": "decision", "story": "n1", "ok": True}] and r["redrawn"]
+
+
+def test_mandos_en_directo_envian_al_bot():
+    """#20: modo, detener/reanudar (confirmado por la cartera), cancelar y cerrar salen por el WebSocket."""
+    r = run("""H.open(); reset(); H.recv(pf({mode: "veto", caps: ["halt", "cancel"]}));
+      const sel = H.el("#approvalSel"); sel.value = "manual"; H.elFire("#approvalSel", "change", {target: sel});
+      H.elFire("#killBtn", "click", {});
+      const k1 = H.el("#killBtn").textContent;
+      H.recv(pf({mode: "manual", halted: true, caps: ["halt", "cancel"]}));
+      const k2 = H.el("#killBtn").textContent, st = agentState("exec").txt;
+      H.elFire("#killBtn", "click", {});
+      H.fire("click", {"data-cancel": "n2"});
+      H.fire("click", {"data-close": "n3"});
+      H.confirmAnswer = false; H.fire("click", {"data-close": "n4"});
+      return {sent: H.sent(), k1, k2, st};""")
+    assert r["sent"] == [{"type": "mode", "mode": "manual"}, {"type": "halt"}, {"type": "resume"},
+                         {"type": "cancel", "story": "n2"}, {"type": "close", "story": "n3"}]
+    assert r["k1"] == "Detener paper" and r["k2"] == "Reanudar paper" and r["st"] == "Detenido por ti"
+
+
+def test_expediente_de_planes_w_y_a():
+    """#10: los planes de ventana (w-) y del motor de aperturas (a-) muestran estrategia, riesgo y aprobación."""
+    r = run("""H.open(); reset();
+      const id = "w-1761400000000-BTC";
+      H.recv(ev("strategy", id, {headline: "Plan Apertura Londres: compra BTC", src: "Estratega · Reglas", tier: "Plan", t0: now, coins: ["BTC"], strat: strat()}),
+             ev("riskok", id, {risk: {checks: [{ok: true, t: "Riesgo 0,5 %"}], ok: true}}),
+             ev("humanwait", id, {human: {mode: "manual", deadline: now + 600000}}));
+      H.recv(pf({pending: [{story: id, deadline: now + 600000, mode: "manual", coin: "BTC", side: "long"}], mode: "manual"}));
+      S.sel = id; renderTrace(); const a = H.el("#trace").innerHTML;
+      const id2 = "a-londres-ETH-1";
+      H.recv(ev("strategy", id2, {headline: "Motor: venta ETH", src: "Motor de aperturas", tier: "Plan", t0: now, coins: ["ETH"], strat: strat("ETH", "short")}));
+      S.sel = id2; renderTrace();
+      return {a, b: H.el("#trace").innerHTML, id};""")
+    a, b = r["a"], r["b"]
+    assert "Estrategia propuesta" in a and f'data-approve="{r["id"]}"' in a and "Plan en curso" in a
+    assert "Triaje con IA local" not in a and "Control de riesgo" in a
+    assert "Motor de aperturas" in b and "Estrategia propuesta" in b
+
+
+def test_sin_titular_no_rompe_las_pestanas():
+    """#11: una estrategia cuyo «captured» quedó fuera del historial (sin titular) no rompe Estrategias ni el expediente."""
+    r = run("""H.open(); reset();
+      H.recv(ev("strategy", "n9", {strat: strat("SOL", "short")}), ev("riskok", "n9", {risk: {checks: [], ok: true}}),
+             ev("humanwait", "n9", {human: {mode: "veto", deadline: now + 30000}}));
+      H.recv(pf({pending: [{story: "n9", deadline: now + 30000, mode: "veto"}]}));
+      renderTrades(); const k = H.el("#kanban").innerHTML;
+      S.sel = "n9"; renderTrace(); renderMando();
+      return {k, tr: H.el("#trace").innerHTML, s: short(undefined)};""")
+    assert "Venta SOL" in r["k"]
+    assert "Estrategia propuesta" in r["tr"] and 'data-reject="n9"' in r["tr"]
+    assert r["s"] == ""
+
+
+def test_capital_en_directo_no_suma_dos_veces_lo_latente():
+    """#12 #21: el capital del bot ya va a precio de mercado; la base es start_equity, no 10.000 fijo."""
+    r = run("""H.open(); reset();
+      H.recv({type: "market", prices: {BTC: 110}});
+      H.recv(pf({equity: 10099, positions: [{story: "n1", coin: "BTC", side: "long", qty: 10, entry: 100, sl: 95,
+                 riskUsd: 50, notional: 1000, upnl: 99, headline: "x"}]}));
+      const eq = equityNow(); renderTrades(); const k = H.el("#kpis").innerHTML;
+      H.recv(pf({equity: 5100, start_equity: 5000})); renderTrades();
+      return {eq, k, k2: H.el("#kpis").innerHTML, base: eqBase()};""")
+    assert r["eq"] == 10099
+    assert "10.099,00" in r["k"] and "+99,00" in r["k"]
+    assert r["base"] == 5000 and "+100,00" in r["k2"] and "+2,00 %" in r["k2"]
+
+
+def test_balanza_no_usa_noticias_archivadas_por_impacto():
+    """#16: si el analista de impacto la archivó, su triaje no inclina la balanza."""
+    r = run("""H.open(); reset();
+      const tr = {tipo: "macro", importancia: 7, credibilidad: 80, sentimiento: "alcista",
+                  repercusion: {direccion: 60, magnitud: 70, activos: ["BTC"]}, monedas: ["BTC"]};
+      H.recv(ev("captured", "n1", {headline: "h", src: "s", tier: "T1", t0: now, coins: ["BTC"]}), ev("triaged", "n1", {triage: tr}),
+             ev("verified", "n1", {verify: {score: 0.9, checks: []}}),
+             ev("noimpact", "n1", {impact: {dir: -1, mag: 0.3, conf: 0.6, drop: "Movimiento pequeño", per: {BTC: 0.3}}}));
+      H.recv(ev("captured", "n2", {headline: "h2", src: "s", tier: "T1", t0: now, coins: ["BTC"]}), ev("triaged", "n2", {triage: tr}));
+      const b = newsTilt(S.stories.get("n2"), Date.now());
+      return {a: newsTilt(S.stories.get("n1"), Date.now()), b: b && b.dir};""")
+    assert r["a"] is None and r["b"] == 1
+
+
+def test_apertura_armada_no_es_buen_momento():
+    """#17: «armada» espera la ruptura: no es buen momento. «en_posicion» del motor sin posición en el paper (pendiente
+    de aprobar, programada o recién enviada) tampoco: solo una posición real del paper lo es."""
+    r = run("""H.open(); reset();
+      const sig = () => coinSignal("BTC", newsBalance(Date.now()), Date.now());
+      H.recv({type: "openings", windows: [{name: "Apertura Londres", state: "armada", coins: {BTC: {state: "armada", signal: 1, why: "Rango medido"}}}]});
+      const a = sig().mom;
+      H.recv({type: "openings", windows: [{name: "Apertura Londres", state: "en_posicion", coins: {BTC: {state: "en_posicion", signal: 1, entries: 1,
+              plan: {stopPct: 1.2, tp2R: 2, rr: 2, ok: true, why: "R:R 2,00"}}}}]});
+      H.recv(pf({mode: "manual", pending: [{story: "a-europa-BTC-1", deadline: now + 600000, mode: "manual", coin: "BTC", side: "long"}]}));
+      const b = sig();
+      H.recv(pf({halted: true})); const c = sig();
+      H.recv(pf({halted: false, positions: [{story: "a-europa-BTC-1", coin: "BTC", side: "long", qty: 1, entry: 100, sl: 98.8,
+                 riskUsd: 12, notional: 100, upnl: 6, headline: "x"}]}));
+      return {a, b, c, d: sig()};""")
+    assert r["a"] == "wait"
+    assert r["b"]["mom"] == "wait" and r["b"]["momTxt"] == "Entrada enviada al paper, pendiente: stop 1,20 % · R:R 2,00"
+    assert r["c"]["mom"] == "no" and r["c"]["momTxt"] == "Paper detenido: la entrada no se ejecutará"
+    assert r["d"]["mom"] == "ok" and r["d"]["momTxt"].startswith("En posición paper (compra)")
+    for s in (r["b"], r["c"]):
+        assert "En posición" not in s["momTxt"]
+
+
+def test_bloqueada_muestra_el_motivo_del_bot():
+    """#18: el expediente usa exec.why del bot, no «has detenido la ejecución»."""
+    html = run("""H.open(); reset();
+      H.recv(ev("strategy", "n1", {headline: "h", src: "s", tier: "T1", t0: now, strat: strat()}),
+             ev("riskok", "n1", {risk: {checks: [], ok: true}}),
+             ev("humanok", "n1", {human: {mode: "auto", by: "Automático (paper)", at: now}}),
+             ev("blocked", "n1", {exec: {blocked: true, why: "Máximo de 4 posiciones abiertas"}}));
+      S.sel = "n1"; renderTrace(); return H.el("#trace").innerHTML;""")
+    assert "No enviada: Máximo de 4 posiciones abiertas." in html and "has detenido" not in html
+
+
+def test_mando_refresca_resultados_y_usa_la_cartera():
+    """#19: con Mando abierto se recargan los resultados (cada 30 s y al cerrar una operación); capital y hoy, de la cartera."""
+    r = run("""H.open(); reset();
+      H.recv(pf({equity: 10250.5, day_pnl: 250, day_pnl_pct: 2.5}));
+      H.fetches.length = 0;
+      S.tab = "mando"; H.timers.find(x => x.ms === 30000).f();
+      const byTimer = H.fetches.slice(); H.fetches.length = 0;
+      H.recv(pf({equity: 10250.5, closed: [{story: "n1", closed: now, pnl: 1}]}));
+      const byClose = H.fetches.slice();
+      H.recv(pf({equity: 10250.5, day_pnl: 250, day_pnl_pct: 2.5}));
+      renderMando();
+      return {byTimer, byClose, book: H.el("#mdBook").innerHTML};""")
+    assert "/api/resultados" in r["byTimer"] and "/api/resultados" in r["byClose"]
+    assert "10.250,50" in r["book"] and "+2,50 %" in r["book"]
+
+
+def test_historias_con_tope():
+    """#22: S.stories no crece sin límite y conserva la elegida y los planes vivos."""
+    r = run("""H.open(); reset();
+      H.recv(ev("strategy", "plan-vivo", {headline: "plan", src: "s", tier: "Plan", t0: now, strat: strat()}));
+      S.sel = "n0";
+      const evs = []; for (let i = 0; i < 2600; i++) evs.push(ev("captured", "n" + i, {headline: "h" + i, src: "s", tier: "T2", t0: now}));
+      H.recv(...evs);
+      return {size: S.stories.size, sel: S.stories.has("n0"), plan: S.stories.has("plan-vivo"), last: S.stories.has("n2599")};""")
+    assert r["size"] <= 2000 and r["sel"] and r["plan"] and r["last"]
+
+
+def test_backtest_vacio_no_rompe():
+    """#43: un backtest vacío cuenta como no cargado y se avisa en vez de romper la pestaña."""
+    r = run("""H.fetchReply = url => url === "/api/backtest" ? {ok: true, json: async () => ({strategies: [], leadlag: {}})} : {ok: false};
+      H.open(); reset(); await loadApi("bt");
+      S.tab = "bt"; S.btSig = null; renderAll(true);
+      return {none: S.backtest === undefined, rows: H.el("#btRows").innerHTML};""")
+    assert r["none"] and "aún no ha generado" in r["rows"]
+
+
+def test_aprobaciones_automaticas_no_son_tuyas():
+    """#51: el embudo y la tarjeta «Tú» separan las aprobaciones automáticas de las tuyas."""
+    r = run("""H.open(); reset();
+      H.recv(ev("humanok", "n1", {human: {mode: "auto", by: "Automático (paper)", at: now}}),
+             ev("humanok", "n2", {human: {mode: "manual", by: "Aprobada por ti", at: now}}));
+      renderFunnel(); return {f: H.el("#funnel").innerHTML, auto: S.counts.humanauto};""")
+    assert r["auto"] == 1 and "1 por ti · 1 auto" in r["f"]
+
+
+def test_flujo_sin_datos_no_es_cero():
+    """#45: volumen, compras, CVD y rentabilidades nulos se muestran como «sin datos» o «–», no como 0."""
+    r = run("""H.open(); reset();
+      H.recv({type: "orderflow", coins: {BTC: {trend: null, buy_ratio_5m: null, vol_ratio: null, vol_5m_usd: null, imbalance: 0.1,
+              cvd_5m: null, cvd_15m: null, ret_15m_pct: null, ret_60m_pct: null}}});
+      const s = coinSignal("BTC", newsBalance(Date.now()), Date.now()); renderWorldMarkets();
+      return {why: s.why.join(" | "), of: H.el("#ofTiles").innerHTML};""")
+    assert "volumen sin datos" in r["why"] and "×0,0" not in r["why"] and "×0,0" not in r["of"]
+    for k in ("CVD 5 min", "CVD 15 min", "15 min", "60 min"):
+        assert f"<small>{k}</small><b>–</b>" in r["of"], k
+    assert "0,00" not in r["of"]
+
+
+def test_expediente_sin_objetivo_final_ni_promesas():
+    """#41 #42: sin tp2 no se pinta 0,0000000; importancia 4 no promete verificación."""
+    r = run("""H.open(); reset();
+      H.recv(ev("strategy", "n1", {headline: "h", src: "s", tier: "T1", t0: now, strat: strat()}),
+             ev("riskok", "n1", {risk: {checks: [], ok: true}}),
+             ev("humanok", "n1", {human: {mode: "auto", by: "Automático (paper)", at: now}}),
+             ev("filled", "n1", {exec: {px: 100, slip: 1, ms: 200, notional: 1000, sl: 98, tp1: 103, tp2: null, tp1Frac: 0}}));
+      S.sel = "n1"; renderTrace(); const a = H.el("#trace").innerHTML;
+      H.recv(ev("captured", "n2", {headline: "h2", src: "s", tier: "T2", t0: now}),
+             ev("triaged", "n2", {triage: {tipo: "otro", importancia: 4, temas: [], monedas: []}}));
+      S.sel = "n2"; renderTrace();
+      return {a, b: H.el("#trace").innerHTML};""")
+    assert "0,0000000" not in r["a"] and "sin tope: stop dinámico" in r["a"] and "a mercado, al momento" in r["a"]
+    assert "No se verifica" in r["b"] and "sin verificar" in r["b"]
+
+
+def test_simulacion_pinta_todas_las_pestanas():
+    """La demostración (sin bot) arranca y pinta todas las pestañas sin errores; cerrar una posición funciona."""
+    r = run("""for (const t of ["live", "world", "mando", "pred", "trades", "results", "bt", "market", "evo", "ai"]) H.fire("click", {"data-tab": t});
+      S.tab = "world"; renderAll(true);
+      const p = S.positions[0]; if (p) userClose(p.id);
+      H.elFire("#killBtn", "click", {});
+      return {closed: p ? !S.positions.includes(p) : true, kill: H.el("#killBtn").textContent, stop: S.execStop, sent: H.sockets.length};""", live=False)
+    assert r["closed"] and r["kill"] == "Reanudar ejecución" and r["stop"] is True and r["sent"] == 0
+
+
+# Mensaje «openings» del motor de aperturas v2 (bot/apertura.py, build_status): fuente de los parámetros, aviso, cupo del
+# día y, por moneda, puerta de probabilidades, bandera MOVING y plan.
+OPENINGS_V2 = r"""
+const coin = (o = {}) => ({signal: 1, strength: 0.6, why: "Señal verde", drivers: [], range: {hi: 101, lo: 99}, rvol: 1.8,
+  buy_ratio: 0.58, entries: 0, results: [], state: "armada", last_why: "Sin ruptura: cierre dentro del rango",
+  gate: null, moving: null, plan: null, ...o});
+const params = {range_min: 30, rvol_min: 1.5, trail_atr: 0, min_strength: 0.2, confirm_tf: 5, stop_mode: "or_mid",
+  target_r: 2, target_pct: null, tp1_frac: 0, be_r: null, trail_start_r: null, min_rr: 1, moving_pct: 3,
+  max_day_entries: 3, max_day_risk_pct: 1.5, gate: false, gate_pp: 5, gate_min_n: 20};
+const openings = (coins, o = {}) => ({type: "openings", ts: now, params_source: "preset_v2", params,
+  notice: "No hay recomendación del backtest (falta aperturas.json <b>): se usa el preset V2 sin puerta",
+  day: {date: "2026-10-26", entries: 1, risk_pct: 0.5, max_entries: 3, max_risk_pct: 1.5},
+  windows: [{id: "europa-2026-10-26", name: "Europa", markets: ["frankfurt", "londres", "madrid"], open_utc: now,
+             state: "armada", why: "", coins}], ...o});
+const MOVED = {moving: true, pct: 3.4, hours: 4,
+  why: "El movimiento ya ha ocurrido: +3,40 % en las 4 h previas (≥ 3,0 %): no se entra"};
+"""
+
+
+def test_motor_aperturas_v2_pinta_fuente_aviso_cupo_y_comprobaciones():
+    """Panel «Motor de aperturas»: fuente de los parámetros, aviso escapado, cupo del día y, por moneda, el veredicto de
+    la puerta en texto claro, la bandera de movimiento ya hecho y el plan (stop, R:R) con su porqué."""
+    html = run(OPENINGS_V2 + """H.open(); reset();
+      H.recv(openings({
+        BTC: coin({state: "en_posicion", entries: 1,
+                   gate: {verdict: "claramente_a_favor", n: 30, decided: 25, edge_pp: 26.7, avg_R: 0.4, ok: true, dir: 1,
+                          text: "Claramente a favor: objetivo antes que stop en 60 % de 25 rupturas pasadas → puerta superada"},
+                   moving: {moving: false, pct: 1.2, hours: 4, why: "+1,20 % en las 4 h previas (< 3,0 %)"},
+                   plan: {stopPct: 1.2, tp2R: 2, rr: 2, ok: true, why: "R:R 2,00 desde 100: objetivo 102,4 (+2,40 %), stop 1,20 %"}}),
+        ETH: coin({state: "terminada", last_why: MOVED.why, moving: MOVED}),
+        SOL: coin({state: "terminada", gate: {verdict: "pocos_casos", n: 5, decided: 4, edge_pp: null, avg_R: -0.1, ok: false,
+                                              text: "Pocos casos (4 de 20 como mínimo): la puerta no se cumple"}}),
+        XRP: coin({signal: -1, plan: {stopPct: 1, tp2R: 0.8, rr: 0.8, ok: false,
+                                      why: "R:R 0,80 < 1,00 desde la entrada real 0,5: el movimiento ya ha ocurrido"}})}));
+      renderOpenings(); return H.el("#openings").innerHTML;""")
+    assert "Preset V2" in html and "del preset V2" in html
+    assert "falta aperturas.json &lt;b&gt;" in html and "aperturas.json <b>" not in html
+    assert "26/10" in html and "1 de 3 entradas" in html and "riesgo 0,50 % de 1,50 % del capital" in html
+    for t in ("rango 30 min", "confirmación al cierre de 5 min", "stop en el medio del rango", "objetivo 2,0 R",
+              "R:R ≥ 1,0", "sin stop dinámico", "ya se movió ≥ 3,0 %", "puerta de probabilidades apagada"):
+        assert t in html, t
+    assert "Puerta: claramente a favor → se entra" in html and "puerta superada" in html
+    assert "Sin movimiento previo: +1,2 % en 4 h" in html
+    assert '<span class="pill good">Último plan: stop 1,20 % · R:R 2,00</span>' in html and "objetivo 102,4" in html
+    assert "Movimiento ya hecho: +3,4 % en 4 h" in html and "(≥ 3,0 %): no se entra" in html
+    assert "Puerta: pocos casos → no se entra" in html and "4 de 20 como mínimo" in html
+    assert "Plan rechazado: stop 1,00 % · R:R 0,80" in html and "R:R 0,80 &lt; 1,00" in html
+    for bad in ("undefined", "null", "NaN"):
+        assert bad not in html, bad
+
+
+def test_motor_aperturas_tolera_campos_ausentes_o_nulos():
+    """Sin campos v2, con null o con objetos a medias, el panel y la señal del Mundo no rompen ni pintan «null»."""
+    r = run("""H.open(); reset();
+      H.recv({type: "openings", windows: [], day: null, notice: null, params_source: null, params: null});
+      renderOpenings(); const a = H.el("#openings").innerHTML;
+      H.recv({type: "openings", params_source: "backtest", notice: null, params: {gate: true},
+              day: {date: null, entries: 0, risk_pct: null, max_entries: null, max_risk_pct: null},
+              windows: [null, {name: "Tokio y Seúl", state: "armada", coins: {BTC: null, ETH: {signal: 1},
+                SOL: {state: "midiendo_rango", gate: {}, moving: {moving: false, pct: null}, plan: {ok: false}}}},
+                {name: "Sin monedas", coins: null}]});
+      renderOpenings(); const b = H.el("#openings").innerHTML;
+      const sig = c => coinSignal(c, newsBalance(Date.now()), Date.now());
+      const s = sig("SOL"), e = sig("ETH"), x = sig("BTC");
+      H.recv({type: "openings", windows: "rota"}); renderOpenings();
+      return {a, b, s, e, x, c: H.el("#openings").innerHTML, z: sig("BTC")};""")
+    assert "aún no ha publicado" in r["a"] and "Parámetros" not in r["a"]
+    b = r["b"]
+    assert "Backtest" in b and "elegidos por el backtest" in b
+    assert "0 entradas (sin tope)" in b and "riesgo 0,00 % (sin tope) del capital" in b and "(hoy," in b
+    assert "puerta de probabilidades (≥ 20 casos y ventaja ≥ 5 pp)" in b
+    assert "Puerta: sin veredicto → no se entra" in b and "Movimiento previo sin comprobar" in b
+    assert "Plan rechazado: R:R sin calcular" in b and "Tokio y Seúl" in b
+    for html in (r["a"], b, r["c"]):
+        for bad in ("undefined", "null", "NaN"):
+            assert bad not in html, bad
+    assert r["s"]["mom"] == "wait" and r["s"]["momTxt"] == "Esperar: el plan no da el R:R mínimo"
+    assert r["e"]["mom"] == "wait" and r["e"]["momTxt"] == "Tokio y Seúl: armada"
+    assert "aún no ha publicado" in r["c"] and r["z"]["mom"] in ("ok", "no", "wait")
+
+
+def test_mundo_usa_moving_puerta_y_plan_del_motor():
+    """Vista Mundo: con estado del motor para la moneda, su bandera MOVING, su puerta y su plan deciden el «momento»."""
+    r = run(OPENINGS_V2 + """H.open(); reset();
+      H.recv(openings({
+        BTC: coin({state: "terminada", last_why: MOVED.why, moving: MOVED}),
+        ETH: coin({state: "terminada", signal: -1, last_why: "Puerta de probabilidades: Pocos casos",
+                   gate: {verdict: "pocos_casos", n: 5, decided: 4, ok: false, text: "Pocos casos (4 de 20 como mínimo)"}}),
+        SOL: coin({plan: {stopPct: 1, rr: 0.8, ok: false, why: "R:R 0,80 < 1,00 desde la entrada real 150: el movimiento ya ha ocurrido"}}),
+        XRP: coin({state: "en_posicion", entries: 1, moving: {moving: false, pct: 0.5, hours: 4, why: "+0,50 %"},
+                   gate: {verdict: "a_favor", n: 30, decided: 22, edge_pp: 7.5, avg_R: 0.12, ok: true},
+                   plan: {stopPct: 1.2, tp2R: 2, rr: 2, ok: true, why: "R:R 2,00 desde 0,5"}})}));
+      const sig = c => coinSignal(c, newsBalance(Date.now()), Date.now());
+      const r = Object.fromEntries(["BTC", "ETH", "SOL", "XRP"].map(c => [c, sig(c)]));
+      H.fire("click", {"data-tab": "world"}); S.tab = "world"; renderAll(true);
+      return {r, left: H.el("#wLeft").innerHTML};""")
+    s = r["r"]
+    assert s["BTC"]["mom"] == "no" and s["BTC"]["act"] == "buy"
+    assert s["BTC"]["momTxt"] == "No es momento: el movimiento ya ha ocurrido (+3,4 % en 4 h)"
+    assert "Antes de la apertura: +3,4 % en 4 h (movimiento ya hecho)" in s["BTC"]["why"]
+    assert s["ETH"]["mom"] == "no" and s["ETH"]["act"] == "sell"
+    assert s["ETH"]["momTxt"] == "No es momento: la puerta de probabilidades no se cumple (pocos casos)"
+    assert s["SOL"]["mom"] == "wait" and s["SOL"]["momTxt"].startswith("Esperar: R:R 0,80 < 1,00")
+    assert "Plan del motor: stop 1,00 % · R:R 0,80 (rechazado)" in s["SOL"]["why"]
+    # el motor dice «en_posicion» pero el paper aún no tiene la posición: pendiente, no «en posición»
+    assert s["XRP"]["mom"] == "wait" and s["XRP"]["momTxt"] == "Entrada enviada al paper, pendiente: stop 1,20 % · R:R 2,00"
+    assert "Plan del motor: stop 1,20 % · R:R 2,00" in s["XRP"]["why"]
+    assert ("Puerta de probabilidades: se inclina a favor (superada) · 22 rupturas decididas de 30 · ventaja +7,5 pp"
+            " · R medio +0,12") in s["XRP"]["why"]
+    left = r["left"]
+    assert "No es momento: el movimiento ya ha ocurrido (+3,4 % en 4 h)" in left
+    assert "Esperar: R:R 0,80 &lt; 1,00" in left and "R:R 0,80 < 1,00" not in left
+
+
+def test_mundo_ventana_terminada_por_moving_sigue_mandando():
+    """Caso real del motor: con una sola moneda con señal, MOVING la acaba en la primera vela y la ventana sale
+    «terminada»; la siguiente ventana está «esperando». El Mundo sigue enseñando por qué no es momento durante la
+    sesión (4 h) y no salta a «Se calcula 15 min antes de la apertura». Con otra ventana ya armada para la moneda,
+    manda esa; pasada la sesión, vuelve a la siguiente."""
+    r = run(OPENINGS_V2 + """H.open(); reset();
+      const quiet = (st, why = "") => ({signal: 0, strength: 0, why, drivers: [], range: null, rvol: null, buy_ratio: null,
+        entries: 0, results: [], state: st, last_why: why, gate: null, moving: null, plan: null});
+      const wait = quiet("esperando", "Se calcula 15 min antes de la apertura");
+      const win = (id, name, open_utc, state, coins) => ({id, name, markets: [], open_utc, state, why: "", coins});
+      const ny = win("nuevayork", "Nueva York", now + 5 * 3600e3, "esperando", {BTC: wait, ETH: wait, SOL: wait, XRP: wait});
+      const europa = open => win("europa", "Europa", open, "terminada",
+        {BTC: coin({state: "terminada", last_why: MOVED.why, moving: MOVED}), ETH: quiet("sin_senal"), SOL: quiet("sin_senal"), XRP: quiet("sin_senal")});
+      const sig = c => coinSignal(c, newsBalance(Date.now()), Date.now());
+      H.recv(openings(null, {windows: [europa(now - 10 * 60e3), ny]}));
+      const a = sig("BTC"), e = sig("ETH");
+      H.fire("click", {"data-tab": "world"}); S.tab = "world"; renderAll(true); const left = H.el("#wLeft").innerHTML;
+      const china = win("china", "Shanghái y Hong Kong", now + 15 * 60e3, "armada",
+        {BTC: coin({state: "armada", last_why: "Armada: se mide el rango en la apertura"}), ETH: quiet("sin_senal"), SOL: quiet("sin_senal"), XRP: quiet("sin_senal")});
+      H.recv(openings(null, {windows: [europa(now - 75 * 60e3), china]})); const b = sig("BTC");
+      H.recv(openings(null, {windows: [europa(now - 5 * 3600e3), ny]})); const c = sig("BTC");
+      return {a, e, b, c, left};""")
+    a = r["a"]
+    assert a["mom"] == "no" and a["act"] == "buy"
+    assert a["momTxt"] == "No es momento: el movimiento ya ha ocurrido (+3,4 % en 4 h)"
+    assert "Antes de la apertura: +3,4 % en 4 h (movimiento ya hecho)" in a["why"]
+    assert "No es momento: el movimiento ya ha ocurrido" in r["left"]
+    assert r["e"]["mom"] == "wait" and r["e"]["momTxt"] == "Se calcula 15 min antes de la apertura"
+    assert r["b"]["mom"] == "wait" and r["b"]["momTxt"] == "Armada: se mide el rango en la apertura"
+    assert r["c"]["mom"] == "wait" and r["c"]["momTxt"] == "Se calcula 15 min antes de la apertura"
+
+
+def test_plan_sin_ejecutar_no_sale_en_verde_y_rr_sin_calcular():
+    """El motor guarda el plan antes del tope diario y del envío: si no llegó a operarse, la pastilla es neutra y dice
+    por qué. Un plan rechazado con R:R nulo (el precio ya cruzó el stop) no es «sin objetivo fijo» si hay objetivo."""
+    r = run(OPENINGS_V2 + """H.open(); reset();
+      const tope = "Tope diario de 3 entradas alcanzado (todas las ventanas, día de Madrid)";
+      const cruzado = {stopPct: 0.95, tp2R: null, rr: null, ok: false, why: "El precio (99,1) ya ha cruzado el stop (99,2): la ruptura ha fallado"};
+      H.recv(openings({
+        BTC: coin({state: "terminada", entries: 0, last_why: tope, plan: {stopPct: 1.2, tp2R: 2, rr: 2, ok: true, why: "R:R 2,00 desde 100"}}),
+        ETH: coin({plan: cruzado}),
+        SOL: coin({state: "terminada", entries: 1, last_why: "Salida (stop, -1,3 %): máximo de 0 reentradas",
+                   plan: {stopPct: 1, tp2R: 2, rr: 2, ok: true, why: "R:R 2,00 desde 150"}})}));
+      renderOpenings(); const html = H.el("#openings").innerHTML;
+      const sig = c => coinSignal(c, newsBalance(Date.now()), Date.now());
+      const btc = sig("BTC"), eth = sig("ETH");
+      const sinObj = {...openings({}), params: {...params, target_r: null, target_pct: null}};
+      H.recv({...sinObj, windows: [{name: "Europa", state: "armada", open_utc: now, coins: {XRP: coin({state: "en_posicion", entries: 1,
+              plan: {stopPct: 1, tp2R: null, rr: null, ok: true, why: "Sin objetivo fijo · stop 1,00 %"}})}}]});
+      renderOpenings();
+      return {html, btc, eth, html2: H.el("#openings").innerHTML};""")
+    html = r["html"]
+    assert '<span class="pill muted">Último plan sin ejecutar: stop 1,20 % · R:R 2,00</span>' in html
+    assert "R:R 2,00 desde 100 · Tope diario de 3 entradas alcanzado" in html
+    assert '<span class="pill good">Último plan: stop 1,00 % · R:R 2,00</span>' in html
+    assert "Plan rechazado: stop 0,95 % · R:R sin calcular" in html and "sin objetivo fijo</span>" not in html
+    assert "Plan del motor: stop 1,20 % · R:R 2,00 (sin ejecutar)" in r["btc"]["why"]
+    assert "Plan del motor: stop 0,95 % · R:R sin calcular (rechazado)" in r["eth"]["why"]
+    assert "Último plan: stop 1,00 % · sin objetivo fijo" in r["html2"]
+
+
+def test_motor_aperturas_tolera_hora_rota_y_moving_sin_horas():
+    """Una apertura con hora no numérica no revienta el panel; MOVING sin «hours» no se inventa las 4 h."""
+    r = run(OPENINGS_V2 + """H.open(); reset();
+      H.recv({...openings({BTC: coin({state: "terminada", moving: {moving: true, pct: 3.4, why: "Movimiento ya hecho"}})}),
+              windows: [{name: "Rota", state: "armada", open_utc: "x", coins: {BTC: coin({state: "terminada", moving: {moving: true, pct: 3.4}})}},
+                        {name: "Enorme", state: "armada", open_utc: 1e300, coins: {ETH: coin()}}]});
+      renderOpenings();
+      return {html: H.el("#openings").innerHTML, s: coinSignal("BTC", newsBalance(Date.now()), Date.now())};""")
+    assert "Rota" in r["html"] and "Enorme" in r["html"] and "Invalid" not in r["html"]
+    assert "Movimiento ya hecho: +3,4 %</span>" in r["html"] and " h</span>" not in r["html"]
+    assert r["s"]["momTxt"] == "No es momento: el movimiento ya ha ocurrido (+3,4 %)"
+
+
+# Mensaje «vigilancia» (bot/vigilancia.py, build_status): operaciones VIRTUALES de las estrategias congeladas del
+# laboratorio frente a su backtest fuera de muestra.
+VIGIL = r"""
+const E1 = {id: "btc:ma20|rvol:1,5|todos|ninguno|asia|SOL|todos|pb:15|3|2|sig", codigo: "E1", clase: "prometedora",
+  origen: "congelada", nombre: "Tendencia diaria de BTC: a favor de BTC frente a su media de 20 días",
+  reglas: {sl_pct: 3, r: 2, tp_pct: 6, dur: "sig", dur_texto: "hasta la misma apertura del día siguiente"},
+  vivo: {operaciones: 0, abiertas: 0, R_medio: null, R_total: 0, ganadoras: null, pct_medio: null, R_medio_modelo: null,
+         largos: 0, cortos: 0, por_motivo: {objetivo: 0, stop: 0, tiempo: 0}, ic95: null},
+  backtest: {operaciones: 34, R_medio: 0.2048, ganadoras: 0.5588, periodo: "2025-08-16 a 2026-10-23"}, abiertas: [], ultimas: []};
+const E2 = {id: "ap_mom:15:0,2|rvol:1,5|todos|a_favor|todas|todas|todos|t:30|3|3|sig", codigo: "E2", clase: "prometedora",
+  origen: "congelada", nombre: "Movimiento de los primeros minutos <script>",
+  reglas: {sl_pct: 3, r: 3, tp_pct: 9, dur: "sig", dur_texto: "hasta la misma apertura del día siguiente"},
+  vivo: {operaciones: 6, abiertas: 1, R_medio: 0.512, R_total: 3.07, ganadoras: 0.5, pct_medio: 1.5, R_medio_modelo: 0.5,
+         largos: 4, cortos: 2, por_motivo: {objetivo: 3, stop: 3, tiempo: 0}, ic95: [-1.1, 2.12]},
+  backtest: {operaciones: 278, R_medio: 0.1402, ganadoras: 0.518, periodo: "2025-08-16 a 2026-10-23"},
+  abiertas: [{moneda: "XRP", lado: "largo", apertura: "nuevayork-2026-10-27", ventana: "Nueva York",
+              entrada_t: Date.UTC(2026, 9, 27, 14, 0), entrada: 1.5203, stop: 1.4747, objetivo: 1.6571, R_latente: -0.12}],
+  ultimas: [{moneda: "SOL", lado: "corto", apertura: "europa-2026-10-27", ventana: "Europa", entrada_t: Date.UTC(2026, 9, 27, 8, 30),
+             salida_t: Date.UTC(2026, 9, 27, 12, 0), R: 2.95, pct: 8.85, motivo: "objetivo"}]};
+const vig = (o = {}) => ({type: "vigilancia", ts: now, estado: "ok", nota: null,
+  aviso: "Operaciones VIRTUALES: no se compra ni se vende nada <b>", costes: "Costes del laboratorio.",
+  desde: Date.UTC(2026, 9, 26, 23, 0), desde_dia: "2026-10-27", congelada: "2026-10-26", datos_hasta: Date.UTC(2026, 9, 27, 18, 0),
+  evaluacion: "Cada apertura se evalúa unas 4 h después.", aperturas_evaluadas: 3,
+  aperturas: [{key: "nuevayork-2026-10-27", nombre: "Nueva York", open_ms: Date.UTC(2026, 9, 27, 13, 30), monedas: ["BTC"],
+               entradas: [{estrategia: E2.id, codigo: "E2", moneda: "XRP", lado: "largo", motivo: "abierta", R: null}]},
+              {key: "europa-2026-10-27", nombre: "Europa", open_ms: Date.UTC(2026, 9, 27, 8, 0), monedas: ["BTC"], entradas: []}],
+  proxima: {key: "tokio-seul-2026-10-28", nombre: "Tokio y Seúl", open_ms: Date.UTC(2026, 9, 28, 0, 0), evalua_ms: Date.UTC(2026, 9, 28, 4, 1)},
+  estrategias: [E1, E2], ...o});
+"""
+
+
+def test_vigilancia_en_vivo_frente_al_backtest():
+    """Panel «Vigilancia en vivo»: aviso de operaciones virtuales, en vivo frente al backtest, abiertas ahora y la
+    próxima apertura por evaluar; textos escapados y sin «undefined» ni «NaN»."""
+    html = run(VIGIL + """H.open(); reset(); H.recv(vig()); renderVigil(); return H.el("#vigil").innerHTML;""")
+    assert "Operaciones VIRTUALES: sin dinero" in html and "nada &lt;b&gt;" in html
+    assert '<span class="pill good">Al día</span>' in html
+    assert "cuenta desde el 27/10 (lista congelada el 26/10)" in html and "3 aperturas evaluadas" in html
+    assert "Próxima apertura por evaluar: Tokio y Seúl del 28/10 (abre a las 01:00; se evalúa hacia las 05:01" in html
+    assert "&lt;script&gt;" in html and "<script>" not in html
+    assert ("stop 3,0 % · objetivo 3,0 R (+9,00 %) · hasta la misma apertura del día siguiente · sin break-even ni stop "
+            "dinámico") in html
+    assert "backtest fuera de muestra 2025-08-16 a 2026-10-23" in html
+    assert '<span class="pos">+0,51 R</span>' in html and '<span class="pos">+0,14 R</span>' in html
+    assert ">50 %<" in html and ">52 %<" in html and ">278<" in html and '<span class="pos">+0,20 R</span>' in html
+    # En vivo con los cortos en perpetuo y, al lado, con los costes del backtest (el comparable exacto).
+    assert "cortos en perpetuo" in html and "costes del backtest" in html and "costes de contado" in html
+    assert '<span class="pos">+0,50 R</span>' in html and "Costes de cada columna" in html
+    assert '<span class="pill muted">hipótesis congelada</span>' in html and "la regla que opera el paper" not in html
+    assert "intervalo aproximado del R medio en vivo (95 %): -1,10 a +2,12" in html
+    assert "con 0 operaciones cerradas en vivo aún no se puede comparar con el backtest" in html
+    assert 'XRP <span class="pos">largo</span> desde 27/10 15:00 (Nueva York): entrada 1,5203' in html
+    assert 'ahora <span class="neg">-0,12 R</span>' in html and "corto (perpetuo)" in html
+    assert "Nueva York 27/10: E2 XRP largo (abierta)" in html and "Europa 27/10: ninguna entra" in html
+    for bad in ("undefined", "NaN", "null", "Invalid"):
+        assert bad not in html, bad
+
+
+def test_vigilancia_tolera_campos_ausentes_y_la_simulacion_avisa():
+    r = run(VIGIL + """H.open(); reset();
+      renderVigil(); const before = H.el("#vigil").innerHTML;
+      H.recv({type: "vigilancia"}); renderVigil(); const a = H.el("#vigil").innerHTML;
+      H.recv({type: "vigilancia", estado: "datos_atrasados", nota: "Las velas no llegan", desde: 1e300, datos_hasta: "x",
+              proxima: {open_ms: "x"}, aperturas: "rota", estrategias: [null, {}, {vivo: null, backtest: null, abiertas: "x",
+              ultimas: [null]}, {...E2, vivo: {ic95: [null, 1]}, abiertas: [{moneda: "BTC"}]}]});
+      renderVigil(); const b = H.el("#vigil").innerHTML;
+      S.tab = "market"; renderMarket();
+      return {before, a, b};""")
+    assert "aún no ha publicado nada" in r["before"]
+    assert "Sin estrategias vigiladas" in r["a"] and "sin estado" in r["a"]
+    assert "Velas atrasadas" in r["b"] and "Las velas no llegan" in r["b"] and "BTC – desde –" in r["b"]
+    for html in (r["a"], r["b"]):
+        for bad in ("undefined", "NaN", "null", "Invalid"):
+            assert bad not in html, bad
+    sim = run("""renderVigil(); return H.el("#vigil").innerHTML;""", live=False)
+    assert "La demostración no simula la vigilancia" in sim
+
+
+def test_vigilancia_variante_del_usuario_de_7_dias():
+    """La variante de 7 días va rotulada aparte (la que opera el paper), con la cifra de su réplica si la hay o
+    avisando de que no tiene; las operaciones sin datos tras un apagón largo se cuentan aparte."""
+    html = run(VIGIL + """H.open(); reset();
+      const V7 = {...E2, id: E2.id.replace("|sig", "|7d"), codigo: "E2-7d", clase: "variante", origen: "variante",
+        variante_de: E2.id, en_paper: true, nombre: "Movimiento de los primeros minutos · sin tope de tiempo",
+        reglas: {...E2.reglas, dur: "7d", dur_texto: "sin tope de tiempo (7 días de seguridad)"},
+        vivo: {...E2.vivo, sin_datos: 1},
+        backtest: {operaciones: 202, R_medio: 0.3459, ganadoras: 0.4109, R_medio_cortos_perp: 0.5626,
+                   periodo: "2025-08-16 a 2026-10-23", fuente: "réplica aparte con el laboratorio (no congelada, sin validar)"}};
+      const V1 = {...E1, id: E1.id.replace("|sig", "|7d"), codigo: "E1-7d", clase: "variante", origen: "variante",
+        variante_de: E1.id, en_paper: false, backtest: null};
+      H.recv(vig({estrategias: [E1, V1, E2, V7]})); renderVigil(); return H.el("#vigil").innerHTML;""")
+    assert html.count("variante del usuario · 7 días") == 2 and html.count("la regla que opera el paper") == 1
+    assert "la misma estrategia que E2 sin tope de tiempo (solo los 7 días de seguridad)" in html
+    assert "la misma estrategia que E1 sin tope de tiempo" in html
+    assert "backtest fuera de muestra 2025-08-16 a 2026-10-23 (réplica aparte con el laboratorio (no congelada, sin validar))" in html
+    assert "los cortos en perpetuo dan +0,56 R de media" in html and '<span class="pos">+0,35 R</span>' in html
+    assert "sin cifra del backtest: no está en la lista congelada" in html
+    assert "1 sin datos para resolverlas (apagón largo): no cuentan" in html
+    for bad in ("undefined", "NaN", "null", "Invalid"):
+        assert bad not in html, bad
+
+
+def test_resultados_por_noticia_y_lado():
+    """Resultados: el paper agrupado por la etiqueta de la noticia (o la del nombre de estrategia del motor) y el lado."""
+    html = run("""H.open(); reset();
+      const t = (strategy, side, pnl, R, tags) => ({strategy, side, pnl, R, tags, coin: "BTC", window: "Apertura Europa",
+        entry: 100, exit: 101, reason: "Objetivo", pnl_pct: 1, fees: 0.1, opened: now - 3600e3, closed: now});
+      S.results = {start_equity: 10000, equity: 10030, by_strategy: [], by_window: [], by_coin: [], equity_curve: [], daily: [],
+        trades: [t("impulso-noticia-a-favor", "long", 20, 2, {noticia: "a_favor"}),
+                 t("impulso-noticia-a-favor", "long", -10, -1, {noticia: "a_favor"}),
+                 t("impulso-noticia-en-contra", "short", 30, 3), t("impulso-sin-noticia", "short", -10, -1, {noticia: "neutral"}),
+                 t("seguir-bolsa", "long", 0, 0)]};
+      renderResults(); return H.el("#resByNews").innerHTML;""")
+    rows = html.split("<tr>")[1:]
+    assert len(rows) == 4
+    assert "A favor" in rows[0] and "Largo (compra)" in rows[0] and ">2<" in rows[0] and ">50 %<" in rows[0]
+    assert ">0,50<" in rows[0] and "+10,00" in rows[0]
+    assert "Neutral" in rows[1] and "Corto (venta)" in rows[1] and ">0 %<" in rows[1] and "-1,00" in rows[1]
+    assert "En contra" in rows[2] and "Corto (venta)" in rows[2] and ">100 %<" in rows[2] and "+30,00" in rows[2]
+    assert "Sin etiqueta (otras estrategias)" in rows[3] and "Largo (compra)" in rows[3]
+    empty = run("""H.open(); reset(); S.results = {start_equity: 10000, equity: 10000, trades: []}; renderResults();
+      return H.el("#resByNews").innerHTML;""")
+    assert "Sin datos todavía" in empty
+
+
+def test_resultados_muestran_instrumento_y_funding():
+    """Todas las operaciones: el lado lleva el instrumento (perpetuo o contado) y los costes, el funding cobrado o pagado."""
+    html = run("""H.open(); reset();
+      const t = (side, instrument, funding, commissions) => ({strategy: "impulso-corto-sin-noticia", side, instrument, funding, commissions,
+        pnl: 10, R: 1, coin: "ETH", window: "Apertura Europa", entry: 100, exit: 99, reason: "Objetivo", pnl_pct: 0.1, fees: 1.95,
+        opened: now - 3600e3, closed: now, story: "s1"});
+      S.results = {start_equity: 10000, equity: 10010, by_strategy: [], by_window: [], by_coin: [], equity_curve: [], daily: [],
+        trades: [t("short", "perp", 0.15, 2.1), t("long", "spot", 0, 2.0), t("long", null, null, null)]};
+      renderResults(); return H.el("#resRows").innerHTML;""")
+    assert 'VENTA</span> <span class="note">perpetuo</span>' in html and 'COMPRA</span> <span class="note">contado</span>' in html
+    assert "funding +0,15" in html and "funding cobrado 0,15 USDC (paper)" in html and "Comisiones 2,10" in html
+    assert html.count("funding") == 2   # solo la operación con funding
+    for bad in ("undefined", "NaN", "null"):
+        assert bad not in html, bad
+
+
+# Motor de aperturas en modo impulso (bot/apertura.py, build_status con strategy «impulso»): fases nuevas, paso de la
+# entrada, lado e instrumento, niveles y plan con % bruto, costes, funding y neto. Sacado de un estado real del motor.
+IMPULSO = r"""
+const IMP = {estrategia: "impulso", measure_min: 15, min_move_pct: 0.2, entry: "t:30", pb_frac: 0.5, entry_end_min: 120, brk_tf: 1,
+  rvol_min: 1.5, vol_filter: "todos", btc_filter: "a_favor", news_mode: "no_contra", windows: ["tokio-seul", "china", "europa", "saopaulo", "nuevayork"],
+  coins: ["BTC", "ETH", "SOL", "XRP"], sl_pct: 3, target_r: 3, target_pct: null, max_hold_h: 168, min_net_pct: 3, avg_hold_h: 65,
+  long_instrument: "spot", short_instrument: "perp", min_strength: 0.2, risk_pct: null, max_day_entries: 4, max_day_risk_pct: 2,
+  session_max_min: 120, lab: "ap_mom:15:0,2|rvol:1,5|todos|a_favor|todas|todas|todos|t:30|3|3|sig"};
+const nada = (state, why) => ({signal: 0, strength: 0, why, last_why: why, drivers: [], news: {dir: 0, strength: 0, why: "", label: null},
+  range: null, rvol: null, buy_ratio: null, entries: 0, results: [], state, step: null, instrument: null, gate: null, moving: null,
+  plan: null, tags: null, levels: null, context: null});
+const tags = (lado, instrumento, mom) => ({lado, instrumento, noticia: "neutral", noticia_fuerza: 0, apertura_anterior: "sin_dato",
+  apertura_anterior_pct: null, btc: lado === "largo" ? "a_favor" : "en_contra", volatilidad_pct: null, impulso_pct: mom, medida_min: 15, rvol: 3});
+const BTC = {signal: 1, strength: 0, why: "En posición (paper): compra al contado a 100,31", last_why: "En posición (paper): compra al contado a 100,31",
+  drivers: [], news: {dir: 0, strength: 0, why: "sin noticias", label: "neutral"}, range: {hi: 100.301, lo: 99.999}, rvol: 3, buy_ratio: null,
+  entries: 1, results: [], state: "en_posicion", step: null, instrument: "spot", gate: null, moving: null,
+  plan: {stopPct: 3, tp2R: 3, rr: 3, ok: true, why: "Horquilla pura desde 100,31 (contado)", instrument: "spot", gross_pct: 9, cost_pct: 0.24,
+         funding_pct: 0, net_pct: 8.76, entry: 100.31, stop: 97.3007, target: 109.3379},
+  tags: tags("largo", "spot", 0.3), levels: {apertura: 100, impulso_pct: 0.3, maximo: 100.301, minimo: 99.999, extremo: 100.301, retroceso: null,
+  ruptura: null, hora_entrada: now - 60e3, rvol: 3, entrada: 100.31, stop: 97.3007, objetivo: 109.3379}, context: {atr_pct: null, btc_dir: 1}};
+const ETH = {...BTC, signal: -1, why: "En posición (paper): venta en perpetuo a 99,5000", last_why: "En posición (paper): venta en perpetuo a 99,5000",
+  instrument: "perp", tags: tags("corto", "perp", -0.5),
+  plan: {stopPct: 3, tp2R: 3, rr: 3, ok: true, why: "Horquilla pura desde 99,5000 (perpetuo) <b>", instrument: "perp", gross_pct: 9, cost_pct: 0.24,
+         funding_pct: 0.1625, net_pct: 8.597, entry: 99.5, stop: 102.485, target: 90.545},
+  levels: {apertura: 100, impulso_pct: -0.5, maximo: 100.001, minimo: 99.499, extremo: 99.499, retroceso: null, ruptura: null,
+           hora_entrada: now - 60e3, rvol: 3, entrada: 99.5, stop: 102.485, objetivo: 90.545}};
+const SOL = {...nada("esperando_entrada", "Impulso de +0,30 % en 15 min (compra al contado): entro a +30 min (09:30 Madrid)"), signal: 1,
+  step: "hora", instrument: "spot", range: {hi: 150.4, lo: 149.9}, tags: tags("largo", "spot", 0.3),
+  levels: {apertura: 150, impulso_pct: 0.3, maximo: 150.4, minimo: 149.9, extremo: 150.4, retroceso: null, ruptura: null,
+           hora_entrada: now + 14 * 60e3, rvol: null, entrada: null, stop: null, objetivo: null}};
+const XRP = {...nada("midiendo_impulso", "Midiendo el impulso: +0,16 % en 8 de 15 min"), range: {hi: 1.52, lo: 1.5}};
+const imp = (o = {}) => ({type: "openings", ts: now, strategy: "impulso", params: IMP, params_source: "preset_impulso", notice: null,
+  states: ["esperando_apertura", "midiendo_impulso", "esperando_entrada", "en_posicion", "terminada"],
+  day: {date: "2026-10-27", entries: 2, risk_pct: 1, max_entries: 4, max_risk_pct: 2},
+  windows: [{id: "europa-x", name: "Europa", markets: [], open_utc: now - 30 * 60e3, state: "en_posicion", why: "Se sigue el impulso…",
+             coins: {BTC, ETH, SOL, XRP}},
+            {id: "nuevayork-x", name: "Nueva York", markets: [], open_utc: now + 5 * 3600e3, state: "esperando_apertura", why: "Se sigue el impulso…",
+             coins: {BTC: nada("esperando_apertura", "A las 15:30 Madrid se mide el impulso de los 15 primeros min")}},
+            {id: "china-x", name: "Shanghái y Hong Kong", markets: [], open_utc: now - 9 * 3600e3, state: "terminada",
+             why: "La sesión de esta apertura pasó con el bot parado: no se siguió", coins: {BTC: nada("terminada", "La sesión pasó con el bot parado")}}],
+  ...o});
+"""
+
+
+def test_motor_aperturas_modo_impulso():
+    """Panel del motor en modo impulso: parámetros en claro, fases nuevas, paso de la entrada, lado e instrumento,
+    niveles y plan con % bruto, costes, funding y neto; la pausa de la evolución se avisa; escapado y sin null."""
+    r = run(IMPULSO + """H.open(); reset();
+      H.recv(imp({estrategia_cargada: {firma: "ab12cd34", ts: now - 3600e3, pausada: true, fuente: "manual", registro: "v9",
+                                       motivo: "Pausado por la evolución: R contraído −0,42 <b>"}}));
+      renderOpenings();
+      const sig = coinSignal("SOL", newsBalance(Date.now()), Date.now());
+      return {html: H.el("#openings").innerHTML, sub: H.el("#openSub").textContent, sig};""")
+    html = r["html"]
+    assert r["sub"].startswith("Modo impulso (paper)")
+    for t in ("Modo impulso", "Preset impulso", "del preset IMPULSO", "impulso de los 15 primeros min (≥ ±0,20 %)",
+              "entrada a +30 min", "volumen relativo ≥ 1,5", "solo a favor de la tendencia de BTC", "todas las aperturas",
+              "stop 3,00 % y objetivo 3,0 R (+9,00 %)", "sin tope de tiempo (7 días de seguridad)", "≥ 3,0 % neto de costes",
+              "largos al contado, cortos en perpetuo", "reproduce la prometedora del laboratorio", "sin break-even ni stop dinámico",
+              "2 de 4 entradas"):
+        assert t in html, t
+    assert "Pausado por la evolución (solo paper)" in html and "&lt;b&gt;" in html and "−0,42 <b>" not in html
+    assert "Versión cargada" in html and "ab12cd34" in html and "aplicada desde la pestaña Evolución" in html
+    for t in ("En posición", "Esperando la entrada", "Midiendo el impulso", "Esperando la apertura", "Terminada",
+              "entra a la hora fijada", "La sesión de esta apertura pasó con el bot parado"):
+        assert t in html, t
+    assert '<span class="pos">▲ Largo</span><br><span class="note">contado</span>' in html
+    assert '<span class="neg">▼ Corto</span><br><span class="note">perpetuo</span>' in html
+    assert ">+0,30 %</b>" in html and ">-0,50 %</b>" in html and "en 15 min" in html and "Sin noticia clara" in html
+    assert "BTC a favor" in html and "BTC en contra" in html and "apertura anterior sin dato" in html
+    assert "entrada 100,31 · stop 97,30 · objetivo 109,34" in html and "hora de entrada" in html and "×3,00" in html
+    assert "En posición (paper): neto 8,76 % (mínimo 3,0 %)" in html and "bruto +9,00 % · costes −0,24 % · sin funding (contado)" in html
+    assert "funding −0,16 %" in html and "neto 8,60 %" in html and "Funding esperado en 65 h" in html
+    assert "Sin plan todavía" in html and "(perpetuo) &lt;b&gt;" in html
+    for bad in ("undefined", "NaN", "null", "Invalid"):
+        assert bad not in html, bad
+    assert r["sig"]["mom"] == "wait" and r["sig"]["momTxt"].startswith("Impulso de +0,30 %")
+
+
+def test_motor_impulso_tolera_campos_ausentes():
+    r = run(IMPULSO + """H.open(); reset();
+      H.recv({type: "openings", strategy: "impulso", params: {entry: "pb", rvol_min: null, windows: ["china", "raro"], coins: ["BTC"]},
+              params_source: "preset_impulso+entorno", estrategia_cargada: {firma: null, ts: "x", pausada: false},
+              windows: [{name: "Rota", open_utc: "x", state: "rara", coins: {BTC: {state: "esperando_entrada", step: "raro", levels: {hora_entrada: 1e300},
+                plan: {ok: false, why: "Regla del usuario: quedan 2,76 % netos < 3 %"}, tags: {lado: "corto"}}, ETH: null}}]});
+      renderOpenings(); return H.el("#openings").innerHTML;""")
+    assert "Preset + entorno" in r and "entrada en la reanudación tras retroceder parte del impulso" in r
+    assert "sin filtro de volumen" in r and "Shanghái y Hong Kong, raro" in r and "BTC" in r
+    assert "Plan rechazado: neto sin calcular" in r and "quedan 2,76 % netos &lt; 3 %" in r and "▼ Corto" in r
+    assert "Versión cargada" not in r and "Pausado" not in r
+    for bad in ("undefined", "NaN", "null", "Invalid"):
+        assert bad not in r, bad
+
+
+# Mensaje «evolucion» (bot/evolucion.py, Evolucion._mensaje): campeón, aspirantes, propuestas, historial e informe.
+EVO = r"""
+const D = 86400e3;
+const curva = (rs, t0) => { let a = 0; return rs.map((r, i) => ({semana: "2026-W" + (40 + i), lunes: t0 + i * 7 * D, operaciones: 3, R: r, R_acum: (a += r)})); };
+const EF = {measure_min: 15, min_move_pct: 0.2, entry: "t:30", rvol_min: 1.5, vol_filter: "todos", btc_filter: "a_favor", news_mode: "no_contra",
+  windows: ["tokio-seul", "china", "europa", "saopaulo", "nuevayork"], coins: ["BTC", "ETH", "SOL", "XRP"], sl_pct: 3, target_r: 3, max_hold_h: 168, min_net_pct: 3};
+const evo = (o = {}) => ({type: "evolucion", ts: now, estado: "ok", nota: null, modo: "proponer",
+  aviso: "Solo paper: nada de esto opera con dinero real <b>", reglas: {texto: "Stop ≥ 1,5 %, objetivo ≥ 2R y ≥ 3 % neto"},
+  criterios: {texto: "Un aspirante sustituye al campeón con ≥ 40 operaciones nuevas"},
+  campeon: {nombre: "Impulso de apertura", codigo: "E2-7d", lab_id: null, fuente: "preset", pausada: false, desde: now - 30 * D, firma: "ab12cd34ef",
+    confirmado: false, pendiente_reinicio: true, motor: {texto: "Pendiente: el motor aún no ha confirmado esta versión; carga estrategia_activa.json solo en ≤ 1 min"},
+    params: {}, efectivos: EF, reglas: {ok: true, fallos: []},
+    vivo: {operaciones: 22, R_medio: 0.18, R_total: 3.96, ganadoras: 0.41, R_contraido: 0.09, n_efectivo: 21.3, ic95: [-0.3, 0.66], dias: 15, muestra: "poca muestra: orientativo"},
+    en_curso: 3, sin_resolver: 0, curva: curva([1, -0.5, 2], now - 21 * D), gemelo: {id: "x|7d", codigo: "E2-7d", filtro: null, texto: null},
+    virtual: {operaciones: 25, R_medio: 0.2, R_contraido: 0.1, ganadoras: 0.4, ic95: null, muestra: "poca muestra: orientativo"}, virtual_en_curso: 2,
+    curva_virtual: curva([0.8, -0.2, 1.5], now - 21 * D), brecha_paper_virtual: {texto: "Brecha paper–virtual: −0,02 R"}, degradado: false,
+    degradacion: {evaluada: false, operaciones: 22, R_medio: 0.18, R_contraido: 0.09, ic95: null, p_menor: null, evidencia_clara: false, datos_desde: null}},
+  aspirantes: [
+    {id: "btc:ma20|x|7d", codigo: "E1-7d", nombre: "Tendencia diaria de BTC <i>", clase: "variante", origen: "variante", desde: now - 20 * D,
+     backtest: {operaciones: 34, R_medio: 0.2048, ganadoras: 0.5588}, dur: "7d", variante_de: "btc:ma20|x|sig", compatible: true, por_que_no: null,
+     params: {}, reglas_ok: true, vivo: {operaciones: 12, R_medio: 0.35, R_contraido: 0.13, ganadoras: 0.42, ic95: null, muestra: "poca muestra: orientativo"},
+     en_curso: 1, sin_resolver: 0, curva: curva([0.5, 1, -0.3], now - 21 * D),
+     frente: {referencia: "virtual", texto: "operaciones virtuales del gemelo del campeón", desde: now - 20 * D, operaciones: 12, R_medio: 0.35,
+              R_contraido: 0.13, ref_operaciones: 25, ref_R_medio: 0.2, paper_operaciones: 22, paper_R_medio: 0.18, dif_R: 0.15, p: 0.31,
+              ic95: [-0.4, 0.7], pruebas: 1, p_max_corregido: 0.05, bloqueo_desde: null, cumple: false,
+              faltan: ["lleva 12 operaciones nuevas completas comparables (hacen falta 40)"], confirmacion: null, clave: "promo|x|y"}},
+    {id: "btc:ma20|x|sig", codigo: "E1", nombre: "E1 hasta la apertura siguiente", clase: "prometedora", origen: "congelada", compatible: false,
+     por_que_no: "su salida no es la del motor (E1-7d)", reglas_ok: false,
+     vivo: {operaciones: 0, R_medio: null, R_contraido: 0, ganadoras: null, ic95: null, muestra: "sin datos"}, curva: [],
+     frente: {operaciones: 0, ref_operaciones: 25, dif_R: null, p: null, pruebas: null, p_max_corregido: null, cumple: false,
+              faltan: ["el motor no sabe operarla"], confirmacion: {estado: "esperando", texto: "Falta confirmarlo con 10 operaciones"}}}],
+  pruebas: 1,
+  propuestas: [{id: "p1", ts: now - D, tipo: "estrategia_promovida", sujeto: "E1-7d", titulo: "Sustituir el campeón por E1-7d",
+    texto: "E1-7d lleva 41 operaciones <script>", cambio: {},
+    evidencia: {operaciones: 41, R_medio: 0.35, ref_R_medio: 0.2, dif_R: 0.15, p: 0.012, pruebas: 1, p_max_corregido: 0.05, ic95: [0.02, 0.3]},
+    actualizada: now - D, bloqueada: null, automatica: false}],
+  recientes: [{id: "p0", ts: now - 9 * D, tipo: "parametro_cambiado", titulo: "Dejar de operar XRP", estado: "descartada", resuelta_ts: now - 8 * D,
+               por: "usuario (web)", nota: "No me convence"}],
+  bloqueos: [{clave: "ajuste|moneda|XRP|f", ts: now - 8 * D, motivo: "descartada", por: "usuario (web)", propuesta: "p0"}],
+  cambios: [
+    {id: "v3", ts: now - 2 * D, tipo: "fuente_silenciada", sujeto: "ruido.example", antes: {estado: "activa", peso: 1}, despues: {estado: "silenciada", peso: 0},
+     motivo: "Ruido 93 % <script>alert(1)</script>", origen: "fuentes_vivas", revierte: null, etiqueta: "Medio silenciado", revertida_por: null, reversible: true,
+     evidencia: {casos: 212, independientes: 41, ruido: 0.93, regla: "ruido", fuente_id: "medio:ruido.example", deshacer: {accion: "restaurar", id: "medio:ruido.example"}}},
+    {id: "v2", ts: now - 5 * D, tipo: "peso_cambiado", sujeto: "agencia.example", antes: {peso: 1}, despues: {peso: 1.18}, motivo: "Acierta más que la base",
+     evidencia: {acierto: 0.61, casos: 143, cambio_id: 7}, origen: "aprendizaje", revierte: null, etiqueta: "Peso cambiado", revertida_por: "v4", reversible: false},
+    {id: "v6", ts: now - 3 * D, tipo: "veredicto_medio", sujeto: "agencia.example", antes: {veredicto: "neutro"}, despues: {veredicto: "acierta", peso: 1.18},
+     motivo: "Acierta (veredicto: neutro → acierta)", evidencia: {cambio_id: 8}, origen: "aprendizaje", revierte: null, etiqueta: "Veredicto de un medio",
+     revertida_por: null, reversible: false},
+    {id: "v5", ts: now - 4 * D, tipo: "propuesta_descartada", sujeto: "ventana china", antes: {estado: "pendiente"}, despues: {estado: "descartada"},
+     motivo: "Propuesta descartada por ti", evidencia: {propuesta: "p0"}, origen: "web", revierte: null, revertida_por: null, reversible: false},
+    {id: "v1", ts: now - 7 * D, tipo: "informe_semanal", sujeto: "2026-W43", antes: null,
+     despues: {titulo: "Informe de la semana del 19 al 25 de octubre", resumen: "Campeón: Impulso."}, motivo: "Informe semanal", evidencia: {},
+     origen: "evolucion", revierte: null, etiqueta: "Informe semanal", revertida_por: null, reversible: false},
+    {id: "v0", ts: now - 60 * D, tipo: "estrategia_promovida", sujeto: "E9", antes: {nombre: "A", codigo: "E8"}, despues: {nombre: "B", codigo: "E9"},
+     motivo: "Promoción antigua", evidencia: {}, origen: "evolucion", revierte: null, etiqueta: "Estrategia promovida", revertida_por: null, reversible: true},
+    {id: "v7", ts: now - 6 * D, tipo: "estrategia_degradada", sujeto: "Sin marca", antes: {pausada: false}, despues: {pausada: true},
+     motivo: "Entrada de un bot antiguo sin «reversible»", evidencia: {}, origen: "evolucion", revierte: null, revertida_por: null}],
+  informe: {id: "v1", ts: now - 7 * D, semana: "2026-W43", titulo: "Informe de la semana del 19 al 25 de octubre", resumen: "Campeón: Impulso."},
+  ultima_evaluacion: now - 7 * D, proxima_evaluacion: now + 3 * D, ultimo_cambio: null, automatico_desde: null, ultima_orden: null, ...o});
+const EVO_IDS = ["#evoCtl", "#evoHead", "#evoProps", "#evoChamp", "#evoAsp", "#evoFilters", "#evoTimeline", "#evoMediaHead", "#evoMediaF",
+  "#evoMedia", "#evoMedio", "#evoBest", "#evoWorst", "#evoCand", "#evoReport"];
+const evoHtml = () => Object.fromEntries(EVO_IDS.map(id => [id, H.el(id).innerHTML]));
+"""
+
+
+def _sin_null(*htmls):
+    for html in htmls:
+        for bad in ("undefined", "NaN", "null", "Invalid", "[object"):
+            assert bad not in html, bad
+
+
+def test_evolucion_pinta_campeon_aspirantes_propuestas_e_historial():
+    """Pestaña Evolución con el mensaje «evolucion»: modo, reglas, propuesta con sus cifras y botones, campeón con su
+    gemelo y su curva semanal, aspirantes frente al gemelo, línea de tiempo con motivo, cifras y Revertir, e informe."""
+    r = run(EVO + """H.open(); reset(); H.recv(evo());
+      H.fire("click", {"data-tab": "evo"}); renderAll(true);
+      const a = evoHtml(), badge = [H.el("#evoBadge").hidden, String(H.el("#evoBadge").textContent)];
+      H.fire("click", {"data-evo-dias": "0"}); renderAll(true); const todo = H.el("#evoTimeline").innerHTML;
+      const tg = H.target({"data-evo-f": "tipo"}); tg.value = "fuente_silenciada"; H.fire("change", {}, {target: tg}); renderAll(true);
+      return {a, badge, todo, tipo: H.el("#evoTimeline").innerHTML, hash: HASH_OF.evo};""")
+    a = r["a"]
+    assert r["badge"] == [False, "1"] and r["hash"] == "evolucion"
+    assert 'data-evo-modo="proponer" aria-pressed="true"' in a["#evoCtl"] and 'data-evo-eval="1"' in a["#evoCtl"]
+    head = a["#evoHead"]
+    assert "Modo <b>proponer</b>" in head and "1 propuesta pendiente" in head and "dinero real &lt;b&gt;" in head
+    assert "Tus reglas, intocables:" in head and "Cuándo se cambia algo" in head
+    props = a["#evoProps"]
+    assert "Sustituir el campeón por E1-7d" in props and "41 operaciones &lt;script&gt;" in props and "<script>" not in props
+    assert 'data-evo-aplicar="p1"' in props and 'data-evo-descartar="p1"' in props
+    assert "operaciones 41" in props and "p 0,0120" in props and "IC 95 % +0,02 a +0,30" in props
+    assert "Resueltas hace poco" in props and "Descartada" in props and "No me convence" in props and "Bloqueadas por tu decisión" in props
+    ch = a["#evoChamp"]
+    assert "Impulso de apertura" in ch and "Pendiente de carga" in ch and "preset del motor" in ch and "versión ab12cd34ef" in ch
+    assert "reinicio" not in ch and "no hace falta reiniciar" in ch
+    assert "impulso de los 15 primeros min (≥ ±0,20 %)" in ch and "sin tope de tiempo (7 días de seguridad)" in ch
+    assert "22 operaciones completas · R medio +0,18 R · contraído hacia 0: +0,09 R · 41 % ganadoras · IC 95 % -0,30 a +0,66" in ch
+    assert "3 en curso aún no cuentan" in ch and "Gemelo virtual E2-7d:</b> 25 operaciones completas" in ch
+    assert "Brecha paper–virtual" in ch and "no se evalúa hasta que el motor confirme esta versión" in ch
+    assert "<svg" in ch and "stroke-dasharray" in ch and "Campeón (paper)" in ch
+    asp = a["#evoAsp"]
+    assert "E1-7d" in asp and "Tendencia diaria de BTC &lt;i&gt;" in asp
+    assert "backtest del laboratorio: 34 op. fuera de muestra, R medio +0,20 R, 56 % ganadoras" in asp
+    assert "El motor puede operarla" in asp and "12 frente a 25 op. · diferencia +0,15 R · p 0,3100" in asp
+    assert "hace falta p &lt; 0,0500 (Holm, 1 aspirante comparable)" in asp and "campeón en paper: +0,18 R en 22 op." in asp
+    assert "hacen falta 40" in asp and "No comparable" in asp and "su salida no es la del motor" in asp
+    assert "Falta confirmarlo" in asp and "<svg" in asp
+    tl = a["#evoTimeline"]
+    assert "Medio silenciado" in tl and "ruido.example" in tl and "&lt;script&gt;alert(1)" in tl and "<script>" not in tl
+    assert "activa · peso 1,00 → silenciada · peso 0,00" in tl and "ruido 93 %" in tl and "casos 212" in tl and "regla «ruido»" in tl
+    assert "origen: ciclo de vida de las fuentes" in tl and 'data-evo-revertir="v3"' in tl
+    assert 'data-evo-revertir="v2"' not in tl and "revertido" in tl and "peso 1,00 → peso 1,18" in tl
+    assert 'data-evo-revertir="v1"' not in tl and "Campeón: Impulso." in tl and "E9" not in tl   # 60 días: fuera de los 30
+    # Solo se ofrece Revertir donde el bot dice que se puede: ni un veredicto, ni una propuesta descartada, ni sin marca
+    assert "Veredicto de un medio" in tl and "neutro → acierta · peso 1,18" in tl and 'data-evo-revertir="v6"' not in tl
+    assert "Propuesta descartada" in tl and 'data-evo-revertir="v5"' not in tl and 'data-evo-revertir="v7"' not in tl
+    assert "Promoción antigua" in r["todo"] and "E8 · A → E9 · B" in r["todo"] and 'data-evo-revertir="v0"' in r["todo"]
+    assert "ruido.example" in r["tipo"] and "agencia.example" not in r["tipo"]
+    assert 'data-evo-f="tipo"' in a["#evoFilters"] and "Todos los orígenes" in a["#evoFilters"] and "aprendizaje de medios" in a["#evoFilters"]
+    assert "Informe de la semana del 19 al 25 de octubre" in a["#evoReport"] and "Campeón: Impulso." in a["#evoReport"]
+    _sin_null(*a.values(), r["todo"], r["tipo"])
+
+
+def test_evolucion_ordenes_por_websocket():
+    """Aplicar, descartar, revertir, modo y evaluar van por el WebSocket con los nombres de bot/evolucion.py; con
+    confirm cancelado no se envía nada; el resultado (ultima_orden) sale en un aviso y sin conexión se avisa."""
+    r = run(EVO + """H.open(); reset(); H.recv(evo());
+      H.fire("click", {"data-evo-aplicar": "p1"}); H.fire("click", {"data-evo-descartar": "p1"}); H.fire("click", {"data-evo-revertir": "v3"});
+      H.fire("click", {"data-evo-modo": "automatico"}); H.fire("click", {"data-evo-modo": "proponer"}); H.fire("click", {"data-evo-eval": "1"});
+      const sent = H.sent().slice(), t0 = H.el("#toast").textContent;
+      H.confirmAnswer = false; H.fire("click", {"data-evo-aplicar": "p1"}); H.fire("click", {"data-evo-revertir": "v3"});
+      H.fire("click", {"data-evo-modo": "automatico"}); const n2 = H.sent().length; H.confirmAnswer = true;
+      H.recv(evo({ultima_orden: {accion: "aplicar", id: "p1", ok: false, why: "Ya no está respaldada <b>", ts: now + 5}}));
+      const t1 = H.el("#toast").textContent;
+      H.timeouts.filter(x => x.ms === 10000).forEach(x => x.f()); const t2 = H.el("#toast").textContent;
+      H.timeouts.length = 0; H.fire("click", {"data-evo-eval": "1"}); H.timeouts.filter(x => x.ms === 10000).forEach(x => x.f());
+      const t3 = H.el("#toast").textContent;
+      H.recv(evo({ultima_orden: {accion: "evaluar", id: null, ok: true, why: null, ts: now + 9}})); const t4 = H.el("#toast").textContent;
+      H.ws().close(); H.fire("click", {"data-evo-aplicar": "p1"});
+      return {sent, t0, n2, t1, t2, t3, t4, t5: H.el("#toast").textContent, total: H.sockets[0].sent.length};""")
+    assert r["sent"] == [{"type": "evolucion", "accion": "aplicar", "id": "p1"},
+                         {"type": "evolucion", "accion": "descartar", "id": "p1", "motivo": ""},
+                         {"type": "evolucion", "accion": "revertir", "id": "v3"},
+                         {"type": "evolucion", "accion": "modo", "modo": "automatico"},
+                         {"type": "evolucion", "accion": "evaluar"}]
+    assert "Evaluación pedida" in r["t0"] and r["n2"] == 5
+    assert r["t1"] == "Evolución: no se pudo «aplicar»: Ya no está respaldada <b>."
+    assert r["t2"] == r["t1"]   # respondió: no se avisa de que no respondiera
+    assert "La evolución no ha respondido" in r["t3"]
+    assert r["t4"] == "Evolución: «evaluar ahora» hecho (solo paper)."
+    assert "Sin conexión con el bot" in r["t5"] and r["total"] == 6
+
+
+# Mensajes «aprendizaje» (bot/aprendizaje.py) y «fuentes_vivas» (bot/fuentes_vivas.py) para el ranking de medios.
+MEDIOS = r"""
+const M = (medio, o = {}) => ({medio, nombre: medio, nivel: "T2", region: "global", idioma: "es", casos: 60, independientes: 22, dias: 11,
+  acierto: 0.5, ic90: [0.42, 0.58], bruto: 0.62, base: 0.6, acierto_sin_ajuste: 0.52, ret_1h: 0.05, ret_4h: 0.08, accionable: 0.5,
+  ventanas: 0.5, ventanas_casos: 6, primera: 0.2, adelanto_min: 2.5, ruido: 0.2, fuera_de_tema: 0.3, archivo: 0.1, piezas: 90, ops: 0, R: 0,
+  peso: 1, peso_manual: null, veredicto: "neutro", compatible: "si", directo: true, clave_tipo: "dominio", alias: [], candidato: false, nota: "Neutro.", ...o});
+const apr = (o = {}) => ({type: "aprendizaje", ts: now, estado: "ok", nota: "Nota <b>", aviso: "Aviso de honestidad", params: {min_casos: 20, min_dias: 10},
+  horizontes: [15, 60, 240, 1440], totales: {medios: 4, medios_con_datos: 2, historias: 50},
+  global: {clave: "todas", casos: 50, independientes: 21, dias: 11, acierto: 0.52, ic90: [0.45, 0.59], bruto: 0.7, base: 0.66},
+  medios_mejores: [M("agencia.example", {nombre: "Agencia <b>", acierto: 0.61, ic90: [0.54, 0.68], independientes: 27, peso: 1.18, veredicto: "acierta",
+                                         nota: "Acierta más que la base <b>"})],
+  medios_peores: [M("canal.example", {acierto: 0.41, ic90: [0.34, 0.48], peso: 0.82, veredicto: "falla"})],
+  medios_ruido: [M("ruido.example", {ruido: 0.93, veredicto: "ruido"})],
+  medios_nuevos: [M("Boletín", {clave_tipo: "nombre", directo: false, veredicto: "pocos_datos", independientes: 5, dias: 3})],
+  medios_candidatos: [M("semanal.example", {directo: false, candidato: true, nota: "Solo por agregadores"})], ...o});
+const fvMsg = (o = {}) => ({type: "fuentes_vivas", ts: now, auto: false, descubrir: true, feeds: {activa: 10, prueba: 1, silenciada: 2, retirada: 0},
+  medios: {activa: 5, prueba: 0, silenciada: 1, retirada: 0}, candidatos: {}, ruido_medio: 0.3, sugerencias: 2,
+  revision: {ultima: now - 3600e3, s: 1.2, medidas: 30, cambios: 1, anadidas: 0, nota: null}, cambios: [], aviso: "Solo cambia qué noticias cuentan", ...o});
+const LISTA = [
+  {id: "medio:ruido.example", tipo: "medio", nombre: "ruido.example", estado: "silenciada", peso: 0, manual: false, acciones: ["restaurar", "retirar"], sugerencia: null},
+  {id: "medio:canal.example", tipo: "medio", nombre: "canal.example", estado: "activa", peso: 1, manual: true, manual_hasta: now + 20 * 86400e3,
+   acciones: ["silenciar", "retirar"], sugerencia: {estado: "silenciada", motivo: "Acierta poco"}},
+  {id: "medio:viejo.example", tipo: "medio", nombre: "viejo.example", estado: "retirada", peso: 0, manual: false, acciones: ["restaurar"]},
+  {id: "jp-gn1", tipo: "feed", nombre: "Google News JP", estado: "activa", peso: 1, acciones: ["silenciar", "retirar"]}];
+"""
+
+
+def test_evolucion_ranking_de_medios_y_botones_de_fuentes():
+    """Ranking de medios: acierto ajustado con su intervalo, muestra, aperturas, adelanto, ruido, peso, veredicto y el
+    estado de fuentes_vivas; los botones envían {type:"fuente"} y avisan de la confirmación, del rechazo y sin conexión."""
+    r = run(MEDIOS + """H.open(); reset(); H.recv(apr(), fvMsg()); S.fvList = LISTA; S.tab = "evo"; evoBump(); renderAll(true);
+      const head = H.el("#evoMediaHead").innerHTML, html = H.el("#evoMedia").innerHTML, chips = H.el("#evoMediaF").innerHTML, cand = H.el("#evoCand").innerHTML;
+      H.fire("click", {"data-fv-acc": "restaurar", "data-fv-id": "medio:ruido.example"}); const t1 = H.el("#toast").textContent;
+      H.recv(fvMsg({cambios: [{ts: Date.now(), id: "medio:ruido.example", nombre: "ruido.example", accion: "restaurar", texto: "Restaurada",
+                               antes: "silenciada", despues: "activa", motivo: "Decidido a mano desde la web"}]}));
+      const t2 = H.el("#toast").textContent;
+      H.timeouts.filter(x => x.ms === 10000).forEach(x => x.f()); const t3 = H.el("#toast").textContent; H.timeouts.length = 0;
+      H.fire("click", {"data-fv-acc": "silenciar", "data-fv-id": "medio:canal.example"});
+      H.timeouts.filter(x => x.ms === 10000).forEach(x => x.f()); const t4 = H.el("#toast").textContent;
+      H.confirmAnswer = false; H.fire("click", {"data-fv-acc": "retirar", "data-fv-id": "medio:canal.example"}); const n = H.sent().length;
+      H.confirmAnswer = true; H.fire("click", {"data-fv-acc": "borrar", "data-fv-id": "medio:canal.example"}); const n2 = H.sent().length;
+      H.fire("click", {"data-evo-mf": "ruido"}); renderAll(true); const ruido = H.el("#evoMedia").innerHTML;
+      H.fire("click", {"data-evo-mf": "apagados"}); renderAll(true); const apagados = H.el("#evoMedia").innerHTML;
+      H.ws().close(); H.fire("click", {"data-fv-acc": "silenciar", "data-fv-id": "medio:agencia.example"});
+      return {head, html, chips, cand, t1, t2, t3, t4, n, n2, ruido, apagados, t5: H.el("#toast").textContent, sent: H.sockets[0].sent};""")
+    head, html = r["head"], r["html"]
+    assert "Aprendizaje: Al día" in head and "Nota &lt;b&gt;" in head
+    assert "acierto bruto 70 % frente a 66 % de la base de mercado → <b>ajustado 52 %</b> (IC 90 % 45 % a 59 %)" in head
+    assert "21 casos independientes y 11 días" in head and "4 medios vistos · 2 con muestra suficiente" in head
+    assert "solo sugiere: los cambios los haces tú" in head and "medios 5 activa, 0 en prueba, 1 silenciada, 0 retirada" in head
+    assert "2 sugerencias" in head and "Solo cambia qué noticias cuentan" in head
+    assert "Agencia &lt;b&gt;" in html and "Acierta más que la base &lt;b&gt;" in html and "<b>" not in html
+    assert html.index("agencia.example") < html.index("canal.example")   # por peso
+    assert '<span class="estchip activa">Activa</span>' in html and '<span class="estchip silenciada">Silenciada</span>' in html
+    assert '<span class="estchip retirada">Retirada</span>' in html and "viejo.example" in html   # solo en fuentes_vivas
+    assert 'data-fv-acc="restaurar" data-fv-id="medio:ruido.example"' in html and 'data-fv-acc="silenciar" data-fv-id="medio:agencia.example"' in html
+    assert "jp-gn1" not in html and "a mano hasta el" in html and "sugerido: silenciada" in html
+    assert "×1,18" in html and "61 %" in html and "bruto 62 % · base 60 %" in html and "27/20 bloques" in html and "11/10 días · 60 noticias" in html
+    assert "+2,5 min" in html and "primera 20 %" in html and "93 %" in html and "fuera de tema 30 %" in html
+    assert "Acierta" in html and "Falla" in html and "Ruido" in html and "Pocos datos" in html and "sin dominio" in html
+    assert 'data-fv-id="medio:Boletín"' not in html and 'class="icbar"' in html
+    assert "Todos · 6" in r["chips"] and "Ruido · 1" in r["chips"] and "Silenciados o retirados · 2" in r["chips"]
+    assert "semanal.example" in r["cand"] and "Solo llegan por agregadores</b> y no son ruido ni fallan" in r["cand"]
+    assert r["t1"] == "Orden enviada al bot. Pendiente de que la confirme."
+    assert r["t2"].startswith("Hecho: Restaurada «ruido.example»") and r["t3"] == r["t2"]
+    assert "El bot no ha confirmado el cambio de la fuente" in r["t4"]
+    assert r["n"] == 2 and r["n2"] == 2
+    assert r["sent"] == [{"type": "fuente", "accion": "restaurar", "id": "medio:ruido.example", "motivo": "Decidido a mano desde la web"},
+                         {"type": "fuente", "accion": "silenciar", "id": "medio:canal.example", "motivo": "Decidido a mano desde la web"}]
+    assert "ruido.example" in r["ruido"] and "agencia.example" not in r["ruido"]
+    assert "viejo.example" in r["apagados"] and "ruido.example" in r["apagados"] and "agencia.example" not in r["apagados"]
+    assert "Sin conexión con el bot" in r["t5"]
+    _sin_null(head, html, r["chips"], r["cand"], r["ruido"], r["apagados"])
+
+
+def test_evolucion_orden_web_y_volver_al_automatico():
+    """«orden_web» (server.order_done): el rechazo de una fuente sale en el acto con su motivo (no el aviso genérico a
+    los 10 s) y una orden aceptada que no cambia nada dice «Hecho»; lo viejo o de otra fuente no cuenta. Un peso fijado
+    a mano tiene «Volver al automático» ({type:"peso_medio", peso:null}) y su resultado también llega por orden_web."""
+    r = run(EVO + MEDIOS + """H.open(); reset();
+      H.recv(evo(), apr({medios_mejores: [M("agencia.example", {peso: 1.3, peso_manual: 1.3, veredicto: "acierta"})]}), fvMsg());
+      S.fvList = LISTA; S.tab = "evo"; evoBump(); renderAll(true);
+      const html = H.el("#evoMedia").innerHTML, asked = []; confirm = m => (asked.push(m), true);
+      H.fire("click", {"data-evo-aplicar": "p1"}); H.timeouts.length = 0;   // solo interesa el texto de su confirmación
+      H.fire("click", {"data-fv-acc": "retirar", "data-fv-id": "medio:canal.example"});
+      H.recv({type: "orden_web", ts: Date.now(), area: "fuentes", accion: "retirar", id: "medio:canal.example", ok: false, why: "No se puede: está retirada"});
+      const t1 = H.el("#toast").textContent, p1 = S.fvPend;
+      H.timeouts.filter(x => x.ms === 10000).forEach(x => x.f()); const t2 = H.el("#toast").textContent; H.timeouts.length = 0;
+      H.fire("click", {"data-fv-acc": "silenciar", "data-fv-id": "medio:agencia.example"});
+      H.recv({type: "orden_web", ts: Date.now() - 600000, area: "fuentes", accion: "silenciar", id: "medio:agencia.example", ok: true, why: null});
+      H.recv({type: "orden_web", ts: Date.now(), area: "fuentes", accion: "silenciar", id: "medio:otra.example", ok: true, why: null});
+      const sigue = !!S.fvPend;
+      H.recv({type: "orden_web", ts: Date.now(), area: "fuentes", accion: "silenciar", id: "medio:agencia.example", ok: true, why: null});
+      const t3 = H.el("#toast").textContent, p3 = S.fvPend;
+      H.fire("click", {"data-apr-auto": "agencia.example"}); const t4 = H.el("#toast").textContent;
+      H.recv({type: "orden_web", ts: Date.now(), area: "aprendizaje", accion: "peso", id: "agencia.example", ok: true, why: null});
+      const t5 = H.el("#toast").textContent;
+      H.fire("click", {"data-apr-auto": "agencia.example"});
+      H.recv({type: "orden_web", ts: Date.now(), area: "aprendizaje", accion: "peso", id: "agencia.example", ok: false, why: "Falta el medio <b>"});
+      const t6 = H.el("#toast").textContent;
+      H.timeouts.filter(x => x.ms === 10000).forEach(x => x.f()); const t7 = H.el("#toast").textContent;
+      return {html, asked, t1, p1, t2, sigue, t3, p3, t4, t5, t6, t7, sent: H.sent()};""")
+    html = r["html"]
+    assert 'data-apr-auto="agencia.example"' in html and "Volver al automático" in html and "fijado a mano" in html
+    assert html.count("data-apr-auto=") == 1   # solo los fijados a mano
+    assert "carga solo en ≤ 1 min" in r["asked"][0] and "reinici" not in r["asked"][0].replace("no hace falta reiniciar", "")
+    assert r["t1"] == "No se pudo cambiar la fuente «canal.example»: No se puede: está retirada." and r["p1"] is None
+    assert r["t2"] == r["t1"]   # respondió: no sale el aviso genérico
+    assert r["sigue"] is True and r["t3"].startswith("Hecho: Silenciar «agencia.example»") and r["p3"] is None
+    assert "peso automático" in r["asked"][-1] and r["t4"] == "Orden enviada al bot. Pendiente de que la confirme."
+    assert r["t5"].startswith("Hecho: «agencia.example» vuelve al peso automático") and "solo paper" in r["t5"]
+    assert r["t6"] == "No se pudo cambiar el peso de «agencia.example»: Falta el medio <b>." and r["t7"] == r["t6"]
+    assert r["sent"][-2:] == [{"type": "peso_medio", "medio": "agencia.example", "peso": None,
+                               "motivo": "Vuelve al automático desde la web"}] * 2
+    assert r["sent"][1] == {"type": "fuente", "accion": "retirar", "id": "medio:canal.example",
+                            "motivo": "Decidido a mano desde la web"}
+
+
+def test_evolucion_lee_las_rutas_de_la_api():
+    """Al abrir la pestaña en directo se leen /api/evolucion/historial, /informes, /api/aprendizaje(/noticias),
+    /api/fuentes_vivas(/lista, /candidatos) y el detalle de un medio; lo que llega se pinta escapado."""
+    r = run(EVO + MEDIOS + """H.open(); reset(); H.recv(evo(), fvMsg());
+      const REPLY = [
+        ["/api/evolucion/historial", {cambios: [{id: "v-old", ts: now - 20 * 86400e3, tipo: "fuente_añadida", sujeto: "nuevo.example", antes: null,
+          despues: {estado: "prueba", peso: 0.5}, motivo: "Descubierto <b>", evidencia: {casos: 14, primeras: 4}, origen: "fuentes_vivas",
+          revierte: null, etiqueta: "Medio añadido", revertida_por: null}], tipos: {fuente_nueva: "Tipo nuevo"}}],
+        ["/api/evolucion/informes", {informes: [{id: "v1", ts: now - 7 * 86400e3, semana: "2026-W43", titulo: "Informe completo",
+          resumen: "Resumen", secciones: [{titulo: "Qué ha funcionado", lineas: ["Con noticia a favor <b>: +0,62 R", 3]}], texto: "x"}]}],
+        ["/api/evolucion", evo({ts: now - 1000, modo: "automatico"})],
+        ["/api/aprendizaje/noticias?cuales=mejores", [{story: "s1", titular: "Titular <b>", url: "https://agencia.example/a?b=1&c=2", nombre: "Agencia",
+          coin: "BTC", t0: now - 86400e3, dir: 1, r240: 1.5, explicacion: "Prevista alcista: acertó", operaciones: [{operacion: "o1", postmortem: "Salió por objetivo"}]}]],
+        ["/api/aprendizaje/noticias?cuales=peores", [{story: "s2", titular: "Peor", url: "javascript:alert(1)", outlet: "canal.example", coin: "ETH",
+          t0: now - 86400e3, dir: -1, r240: 2.1, explicacion: "Falló", operaciones: []}]],
+        ["/api/aprendizaje/medio", {medio: "agencia.example", nombre: "Agencia", horizontes: {
+          "15": {casos: 40, independientes: 12, p_aj: 0.55, ic90_aj: [0.45, 0.65], bruto: 0.6, base: 0.55, ret: 0.04},
+          "60": {casos: 60, independientes: 22, p_aj: 0.6, ic90_aj: [0.52, 0.68], bruto: 0.7, base: 0.6, ret: 0.12}},
+          ventanas: {casos: 10, independientes: 6, p_aj: 0.58, ic90_aj: [0.4, 0.7], bruto: 0.6, base: 0.5, ret: 0.3}}],
+        ["/api/aprendizaje", {...apr(), medios: [M("lista.example", {peso: 1.3, veredicto: "acierta"})], postmortems: [], cambios: []}],
+        ["/api/fuentes_vivas/lista", LISTA],
+        ["/api/fuentes_vivas/candidatos", [{medio: "nuevo2.example", nombre: "Nuevo 2 <b>", region: "europa", lang: "es", estado: "verificado",
+          estado_texto: "verificado, pendiente de alta", nota: "RSS verificado", rss: "https://nuevo2.example/rss", cifras: {casos: 12, acierto: 0.58},
+          acciones: ["anadir"]}, {medio: "malo.example", estado: "bloqueado", estado_texto: "bloqueado", acciones: []}]]];
+      H.fetchReply = url => { const x = REPLY.find(([p]) => url.startsWith(p)); return x ? {ok: true, json: async () => x[1]} : {ok: false}; };
+      S.tab = "evo"; await loadEvo(); renderAll(true);
+      const a = evoHtml(), modo = S.evo.modo;
+      H.fire("click", {"data-evo-medio": "agencia.example"}); for (let i = 0; i < 20; i++) await Promise.resolve(); renderAll(true);
+      const medio = H.el("#evoMedio").innerHTML, abierto = H.el("#evoMedio").hidden;
+      H.fire("click", {"data-evo-medio": ""}); renderAll(true);
+      H.fire("click", {"data-fv-acc": "anadir", "data-fv-id": "nuevo2.example"});
+      return {a, modo, medio, abierto, cerrado: H.el("#evoMedio").hidden, fetches: H.fetches.slice(), sent: H.sent()};""")
+    a, f = r["a"], r["fetches"]
+    for p in ("/api/evolucion", "/api/evolucion/historial?limite=500&desde=", "/api/evolucion/informes?limite=1", "/api/aprendizaje",
+              "/api/aprendizaje/noticias?cuales=mejores&horizonte=240&dias=30&limit=6", "/api/aprendizaje/noticias?cuales=peores",
+              "/api/fuentes_vivas/lista?tipo=medio&limite=500", "/api/fuentes_vivas/candidatos?limite=40",
+              "/api/aprendizaje/medio?outlet=agencia.example"):
+        assert any(x.startswith(p) for x in f), p
+    assert r["modo"] == "proponer"   # el bus (más nuevo) manda sobre la API
+    tl = a["#evoTimeline"]
+    assert "nuevo.example" in tl and "Descubierto &lt;b&gt;" in tl and "– → en prueba · peso 0,50" in tl and "Tipo nuevo" in a["#evoFilters"]
+    assert "Informe completo" in a["#evoReport"] and "Qué ha funcionado" in a["#evoReport"] and "Con noticia a favor &lt;b&gt;: +0,62 R" in a["#evoReport"]
+    best, worst = a["#evoBest"], a["#evoWorst"]
+    assert '<a href="https://agencia.example/a?b=1&amp;c=2" target="_blank" rel="noopener noreferrer">Titular &lt;b&gt;</a>' in best
+    assert "▲ prevista alcista" in best and "+1,50 %" in best and "Prevista alcista: acertó" in best and "Salió por objetivo" in best
+    assert "javascript:" not in worst and "<b>Peor</b>" in worst and "▼ prevista bajista" in worst and "+2,10 %" in worst
+    assert "lista.example" in a["#evoMedia"] and "×1,30" in a["#evoMedia"] and 'data-fv-id="medio:lista.example"' in a["#evoMedia"]
+    cand = a["#evoCand"]
+    assert "Nuevo 2 &lt;b&gt;" in cand and 'data-fv-acc="anadir" data-fv-id="nuevo2.example"' in cand and "verificado, pendiente de alta" in cand
+    assert "malo.example" in cand and 'data-fv-id="malo.example"' not in cand and "acierto 58 %" in cand
+    assert r["abierto"] is False and r["cerrado"] is True
+    m = r["medio"]
+    assert "+15 min" in m and "+1 h" in m and "+24 h" in m and "Sesión de apertura (4 h)" in m and "60 %" in m and "(52 % a 68 %)" in m
+    assert "+0,12 %" in m and "cien titulares de la misma hora" in m
+    assert r["sent"] == [{"type": "fuente", "accion": "anadir", "id": "nuevo2.example", "motivo": "Decidido a mano desde la web"}]
+    _sin_null(*a.values(), m)
+
+
+def test_evolucion_tolera_campos_ausentes_o_rotos():
+    r = run(EVO + MEDIOS + """H.open(); reset(); S.tab = "evo";
+      renderAll(true); const vacio = evoHtml();
+      H.recv({type: "evolucion"}, {type: "aprendizaje"}, {type: "fuentes_vivas"}); renderAll(true); const casi = evoHtml();
+      H.recv({type: "evolucion", ts: now + 1, estado: "rara", modo: 7, reglas: null, criterios: "x", campeon: {vivo: null, curva: "x", gemelo: 7,
+                efectivos: {windows: "x", sl_pct: "3"}, degradacion: {evaluada: true, ic95: [null, 1]}, reglas: {ok: false, fallos: [null, "rompe"]}},
+              aspirantes: [null, {frente: null, vivo: "x", curva: [{lunes: "x", R_acum: 1}]}, {frente: {faltan: "x", confirmacion: {estado: "rara"}}}],
+              propuestas: [null, {id: 5, evidencia: [1, 2], bloqueada: {}}], recientes: "x", bloqueos: [null, {}],
+              cambios: [null, {ts: "x", tipo: null, antes: [1, {}], despues: {a: {b: 1}}, evidencia: "x"}, {id: "z", tipo: "informe_semanal", despues: null}],
+              informe: {}, ultima_orden: {ts: "x"}, proxima_evaluacion: 1e300},
+             {type: "aprendizaje", estado: "error", global: {ic90: "x"}, medios_mejores: [null, {medio: null}, {medio: "a.b", ic90: [null, 1], acierto: "x"}]},
+             {type: "fuentes_vivas", feeds: null, medios: "x", cambios: "x", revision: null});
+      S.fvList = [null, {id: 5}, {id: "medio:a.b", tipo: "medio", estado: "rara", acciones: "x"}];
+      S.fvCand = [null, {rss: "javascript:x", acciones: ["anadir"]}]; S.evoNews = {mejores: [null, {dir: "x", t0: "x", operaciones: "x"}], peores: "x"};
+      S.evoInf = {secciones: [null, {lineas: "x"}]}; evoBump(); renderAll(true);
+      return {vacio, casi, roto: evoHtml()};""")
+    assert "aún no ha publicado su estado" in r["vacio"]["#evoHead"] and "Aún no hay medios medidos" in r["vacio"]["#evoMedia"]
+    assert "Sin datos del campeón" in r["casi"]["#evoChamp"] and "sin estado" in r["casi"]["#evoHead"]
+    roto = r["roto"]
+    assert "rara" in roto["#evoHead"] and "a.b" in roto["#evoMedia"] and "javascript:" not in roto["#evoCand"]
+    _sin_null(*r["vacio"].values(), *r["casi"].values(), *roto.values())
+
+
+def test_evolucion_en_la_demostracion_es_un_ejemplo_marcado():
+    """Sin bot, la pestaña enseña un estado de EJEMPLO rotulado en cada panel; los botones no envían nada."""
+    r = run("""H.fire("click", {"data-tab": "evo"}); renderAll(true);
+      const a = Object.fromEntries(["#evoHead", "#evoProps", "#evoChamp", "#evoAsp", "#evoTimeline", "#evoMediaHead", "#evoMedia", "#evoBest",
+        "#evoWorst", "#evoCand", "#evoReport"].map(id => [id, H.el(id).innerHTML]));
+      const note = H.el("#evoDemoNote").hidden, demo = H.el("#v-evo").classList.contains("demo"), badge = H.el("#evoBadge").hidden;
+      H.fire("click", {"data-evo-aplicar": "p-demo-1"}); const t1 = H.el("#toast").textContent;
+      H.fire("click", {"data-fv-acc": "silenciar", "data-fv-id": "medio:agencia-ejemplo.com"}); const t2 = H.el("#toast").textContent;
+      H.fire("click", {"data-evo-medio": "agencia-ejemplo.com"}); renderAll(true);
+      return {a, note, demo, badge, t1, t2, medio: H.el("#evoMedio").innerHTML, sockets: H.sockets.length};""", live=False)
+    a = r["a"]
+    assert r["note"] is False and r["demo"] is True and r["badge"] is True and r["sockets"] == 0
+    assert "Ejemplo inventado" in a["#evoHead"] and "Solo paper" in a["#evoHead"]
+    assert "Quitar la apertura de São Paulo" in a["#evoProps"] and "<svg" in a["#evoChamp"] and "E1-7d" in a["#evoAsp"]
+    assert "ejemplo" in a["#evoTimeline"] and "agencia-ejemplo.com" in a["#evoMedia"] and "Ejemplo:" in a["#evoBest"]
+    tl = a["#evoTimeline"]   # Revertir solo donde el bot lo ofrecería: ni el informe, ni el modo, ni lo ya revertido
+    assert 'data-evo-revertir="v-demo-8"' in tl and 'data-evo-revertir="v-demo-9"' not in tl
+    assert 'data-evo-revertir="v-demo-1"' not in tl and 'data-evo-revertir="v-demo-4"' not in tl
+    assert "analisis-ejemplo.com" in a["#evoCand"] and "(ejemplo)" in a["#evoReport"]
+    assert "Ejemplo: en la demostración no se envía nada" in r["t1"] and "Ejemplo: en la demostración no se envía nada" in r["t2"]
+    assert "+15 min" in r["medio"]
+    _sin_null(*a.values(), r["medio"])
+
+
+def test_resumen_del_laboratorio_ligero_y_el_ejemplo_lo_usa():
+    """scripts/incrustar_backtest.py deja de laboratorio.json solo lo ligero (sin operaciones ni vecinos) y el ejemplo de
+    Evolución pone con él los nombres y cifras fuera de muestra reales, rotuladas como backtest del laboratorio."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("incrustar_backtest", HTML.parents[1] / "scripts" / "incrustar_backtest.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    prom = {"id": "a|sig", "name": "Prometedora <b>", "family": "f", "class": "prometedora", "rules": {"sl_pct": 3},
+            "is": {"trades": 57, "mean_R": 0.09, "win_rate": 0.45, "t": 1.2}, "oos": {"trades": 34, "mean_R": 0.2048, "win_rate": 0.5588},
+            "trades_oos": [{"R": 1}] * 500, "neighbors": [{"id": "x"}] * 50}
+    lab = {"generated": 1, "period": {"from": "2023-11-01"}, "frozen": {"date": "2026-10-26", "strategies": 2000},
+           "summary": {"tested": 2000, "promising": 2, "robust": 0, "expected_by_chance": 9, "otro": 1},
+           "promising": [prom, {**prom, "id": "b|sig", "name": "Segunda"}], "robust": [], "all": [prom] * 100}
+    s = mod.lab_summary(lab)
+    assert s["summary"] == {"tested": 2000, "promising": 2, "robust": 0, "expected_by_chance": 9} and s["frozen"] == "2026-10-26"
+    assert s["promising"][0] == {"id": "a|sig", "name": "Prometedora <b>", "family": "f", "class": "prometedora", "rules": {"sl_pct": 3},
+                                 "is": {"trades": 57, "mean_R": 0.09, "win_rate": 0.45}, "oos": {"trades": 34, "mean_R": 0.2048, "win_rate": 0.5588}}
+    assert len(json.dumps(s)) < 3000 and "trades_oos" not in json.dumps(s)
+    page = HTML.read_text(encoding="utf-8")
+    if 'id="labData"' in page:   # el que ya está incrustado en la web se lee y es ligero
+        blob = page.split('<script type="application/json" id="labData">', 1)[1].split("</script>", 1)[0]
+        assert len(blob) < 20_000 and isinstance(json.loads(blob)["promising"], list)
+    r = run(f"""S.lab = {json.dumps(s)}; demoEvo(); S.tab = "evo"; renderAll(true);
+      return {{head: H.el("#evoHead").innerHTML, asp: H.el("#evoAsp").innerHTML}};""", live=False)
+    assert "El laboratorio real probó 2000 estrategias y dejó 2 prometedoras y 0 robustas" in r["head"]
+    assert "Prometedora &lt;b&gt;" in r["asp"] and "backtest del laboratorio: 34 op. fuera de muestra, R medio +0,20 R, 56 % ganadoras" in r["asp"]
+    _sin_null(r["head"], r["asp"])
