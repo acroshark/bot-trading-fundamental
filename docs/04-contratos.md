@@ -66,7 +66,10 @@ def closes_before_open(a, b, day) -> bool;  def ordered_by_close(day) -> list[Ma
 #   6 h; los símbolos que no lista liquidan cada 8 h). Sin respuesta de Binance no va funding_h y se supone 8 h
 #   (market.funding_8h y paper.funding_8h escalan a % por 8 h). Es la tasa de Binance, no la de OKX X-Perps EU: aproximación.
 
-# Módulos que miden y aprenden (todos solo paper; los arranca __main__ y un fallo en uno no para el resto)
+# Módulos que miden y aprenden (todos solo paper; los arranca __main__ y un fallo en uno no para el resto: si uno no se
+# puede construir, el bot sigue sin él (optional, también la vigilancia: sin ella, las velas salen solo de la caché), y
+# cada bucle del bot corre supervisado: si se cae, se registra y se relanza con espera creciente, de 5 s a 5 min
+# (__main__.supervise; hallazgos n.º 27 y 46). La conexión principal a bot.db espera hasta 30 s a un bloqueo)
 # bot/vigilancia.py     Vigilancia(bus, store, session)                          → estado «vigilancia» (2.8)
 # bot/aprendizaje.py    Aprendizaje(bus, store, local_ai, bars=CacheBars(live))  → estado «aprendizaje» (2.10)
 #   source_weight(medio) -> float (1 = neutro, 0 a 1,5) y adjusted_credibility(cred, medio) -> int: síncronas y sin base

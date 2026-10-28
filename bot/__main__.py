@@ -5,13 +5,15 @@ vigilancia (prueba en avance de las estrategias congeladas), aprendizaje (medida
 post-mortems), fuentes vivas (estado de cada fuente y descubrimiento), evolución (historial, campeón y aspirantes,
 propuestas e informe semanal), reacción (la cripto en cada apertura de bolsa: «cripto_aperturas»), reflejo (¿la cripto
 refleja las noticias macro y geopolíticas?), noticias fiables (los grupos que aciertan ≥ 60 % de forma constante) y la
-entrada por noticia fiable confirmada por el precio. Si uno no arranca, el bot sigue sin él."""
+entrada por noticia fiable confirmada por el precio. Si uno no arranca, el bot sigue sin él (optional), y si uno se
+cae mientras corre, se relanza con espera creciente sin parar al resto (supervise; hallazgos n.º 27 y 46)."""
 import asyncio
 import logging
 import os
 import ssl
 import sys
 import tempfile
+import time
 from logging.handlers import RotatingFileHandler
 
 import aiohttp
@@ -66,6 +68,31 @@ def optional(name: str, make):
     except Exception:
         log.exception("%s no arrancó: el bot sigue sin este módulo", name)
         return None
+
+
+SUPERVISE_MIN_S, SUPERVISE_MAX_S = 5, 300   # espera antes de relanzar un bucle caído (crece al repetirse)
+SUPERVISE_OK_S = 600                        # si llevaba esto en marcha, la espera vuelve a la mínima
+
+
+async def supervise(name: str, factory, min_s: float = SUPERVISE_MIN_S, max_s: float = SUPERVISE_MAX_S) -> None:
+    """Ejecuta factory() (crea la corrutina de un bucle) y, si sale con un error, lo registra y la relanza con espera
+    creciente: un fallo suelto en un módulo (p. ej. «database is locked») ya no tumba el proceso entero (hallazgo
+    n.º 46; antes asyncio.gather paraba el bot con la primera excepción). Si termina sin error, no se relanza."""
+    wait = min_s
+    while True:
+        t0 = time.monotonic()
+        try:
+            await factory()
+            log.info("%s terminó", name)
+            return
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            if time.monotonic() - t0 >= SUPERVISE_OK_S:
+                wait = min_s
+            log.exception("%s se cayó: se relanza en %.0f s (el resto del bot sigue)", name, wait)
+        await asyncio.sleep(wait)
+        wait = min(max_s, wait * 2)
 
 
 def observe_bus(bus: Bus, fn) -> None:
@@ -147,16 +174,22 @@ async def main() -> None:
         openings = OpeningEngine(bus, session, signal_getter(bus), broker.submit, broker.portfolio, activa_path=activa)
         log.info("Motor de aperturas en modo %s (parámetros: %s)", getattr(openings, "strategy", "ruptura"),
                  getattr(openings, "source", "?"))
-        # Vigilancia: prueba en avance (sin operar) de las estrategias congeladas del laboratorio.
-        vigil = Vigilancia(bus, store, session)
+        # Vigilancia: prueba en avance (sin operar) de las estrategias congeladas del laboratorio. Si no arranca, el resto
+        # sigue con las velas de la caché (hallazgo n.º 27).
+        vigil = optional("La vigilancia", lambda: Vigilancia(bus, store, session))
+
+        def live_bars(c: str):
+            """Velas de 1 min que la vigilancia tiene en memoria (None sin vigilancia: solo la caché)."""
+            return vigil.bars.get(c) if vigil is not None else None
+
         # Aprendizaje: mide cada noticia y cada medio con las velas de 1 min (las de la vigilancia en memoria y la caché).
         learn = optional("El aprendizaje", lambda: Aprendizaje(
-            bus, store, local_ai=local, bars=CacheBars(live=lambda c: vigil.bars.get(c))))
+            bus, store, local_ai=local, bars=CacheBars(live=live_bars)))
         if learn is not None:
             observe_bus(bus, learn.observe)
         # Reflejo: una noticia macro o geopolítica solo cuenta si la cripto la confirma (el mayor de 0,5 % y 2σ de 60 min,
         # en 60 min). Recibe las captadas y las triadas por el gancho del bus; velas de la vigilancia y la caché.
-        refl = optional("El reflejo", lambda: Reflejo(bus, bars=CacheBars(live=lambda c: vigil.bars.get(c)).get))
+        refl = optional("El reflejo", lambda: Reflejo(bus, bars=CacheBars(live=live_bars).get))
         if refl is not None:
             observe_bus(bus, refl.observe)
         # Noticias fiables: los grupos (medio, feed, tipo×sentido, medio×sentido) que aciertan ≥ 60 % de forma constante,
@@ -168,13 +201,13 @@ async def main() -> None:
         entrada = None
         if ENTRADA_NOTICIAS:
             entrada = optional("La entrada por noticia fiable", lambda: EntradaNoticias(
-                bus, store, broker.submit, broker.portfolio, bars=CacheBars(live=lambda c: vigil.bars.get(c)).get,
+                bus, store, broker.submit, broker.portfolio, bars=CacheBars(live=live_bars).get,
                 get_motor=lambda: getattr(openings, "p", None)))
         if entrada is not None:
             observe_bus(bus, entrada.observe)
         # Reacción: la cripto en cada apertura de bolsa (cripto_aperturas); la historia, en un hilo y una vez al día.
         react = optional("La reacción de la cripto en las aperturas", lambda: Reaccion(
-            bus, bars=CacheBars(live=lambda c: vigil.bars.get(c)).get))
+            bus, bars=CacheBars(live=live_bars).get))
         # Fuentes vivas: estado de cada fuente (lo respetan feeds y la mesa) y descubrimiento. Antes de feeds.run().
         vivas = optional("Fuentes vivas", lambda: FuentesVivas(bus, store, session))
         if vivas is not None:
@@ -225,13 +258,20 @@ async def main() -> None:
                     bus.publish({"type": "sources", "sources": view})
                 await asyncio.sleep(3)
 
-        extra = [m.run() for m in (learn, vivas, evo, refl, react, fiab, entrada)
-                 if m is not None]   # cada run() atrapa sus fallos
+        # Cada bucle, supervisado: si uno se cae se relanza y el resto sigue (n.º 46). Cada run() atrapa ya sus fallos
+        # habituales; supervise es la red para lo que se escape.
+        tareas = [(f"La fuente {st.src.name}", lambda st=st: run_source(st, session, desk)) for st in states]
+        tareas += [("El mercado", market.run), ("La agenda", lambda: agenda.run(bus, session)), ("La IA local", local.run),
+                   ("El resumen de fuentes", report_sources), ("La tendencia", trend.run), ("Los feeds", feeds.run),
+                   ("El backtest", backtester.run), ("Las predicciones", predictor.run), ("El paper", broker.run),
+                   ("La fase 2", phase2.run), ("El motor de aperturas", openings.run),
+                   ("La limpieza de la base", lambda: maintenance(store))]
+        tareas += [(nombre, mod.run) for nombre, mod in (
+            ("La vigilancia", vigil), ("El aprendizaje", learn), ("Las fuentes vivas", vivas), ("La evolución", evo),
+            ("El reflejo", refl), ("La reacción", react), ("Las noticias fiables", fiab),
+            ("La entrada por noticia", entrada)) if mod is not None]
         try:
-            await asyncio.gather(*(run_source(st, session, desk) for st in states),
-                                 market.run(), agenda.run(bus, session), local.run(), report_sources(),
-                                 trend.run(), feeds.run(), backtester.run(), predictor.run(), broker.run(), phase2.run(),
-                                 openings.run(), vigil.run(), maintenance(store), *extra)
+            await asyncio.gather(*(supervise(nombre, fab) for nombre, fab in tareas))
         except Exception:
             log.exception("El bot se detuvo por un error no controlado")   # que la causa quede en bot.log
             raise
@@ -243,7 +283,8 @@ async def main() -> None:
                 except Exception:
                     log.exception("Fuentes vivas no pudo guardar lo pendiente al cerrar")
             try:   # las velas nuevas de la vigilancia, a la caché
-                await vigil.close()
+                if vigil is not None:
+                    await vigil.close()
             except Exception:
                 log.exception("La vigilancia no pudo guardar sus velas al cerrar")
             await phase2.close()

@@ -29,7 +29,9 @@ class Store:
     def __init__(self, path: Path):
         path.parent.mkdir(parents=True, exist_ok=True)
         self.path = path
-        self.db = sqlite3.connect(path, check_same_thread=False)
+        # timeout 30 s (antes 5): con varias conexiones que escriben (el hilo de las claves vistas, fuentes vivas), un
+        # «database is locked» suelto ya no salta a los 5 s (hallazgo n.º 46)
+        self.db = sqlite3.connect(path, check_same_thread=False, timeout=30)
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA synchronous=NORMAL")   # seguro con WAL y mucho más rápido con miles de feeds
         self.db.executescript(

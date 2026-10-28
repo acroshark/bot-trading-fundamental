@@ -760,6 +760,67 @@ def test_arranque_temporales_en_m_gancho_del_bus_y_modulos_opcionales(tmp_path, 
     store.close()
 
 
+async def test_supervise_relanza_un_bucle_caido_sin_parar_al_resto(caplog):
+    """Hallazgo n.º 46: un fallo suelto en un bucle ya no tumba el proceso: se registra y se relanza con espera
+    creciente; si termina sin error, no se relanza; y la cancelación (apagado) se respeta."""
+    import asyncio
+    from bot import __main__ as main
+    caplog.set_level("INFO")
+    calls, waits = [], []
+
+    async def cae_dos_veces():
+        calls.append(1)
+        if len(calls) < 3:
+            raise RuntimeError("database is locked")
+
+    real_sleep = asyncio.sleep
+
+    async def fake_sleep(s):
+        waits.append(s)
+        await real_sleep(0)
+
+    main.asyncio.sleep = fake_sleep
+    try:
+        await main.supervise("Prueba", cae_dos_veces, min_s=5, max_s=300)
+    finally:
+        main.asyncio.sleep = real_sleep
+    assert len(calls) == 3 and waits == [5, 10] and "Prueba se cayó" in caplog.text and "Prueba terminó" in caplog.text
+    # el resto sigue: otra tarea a la vez no se entera de los fallos
+    otra = []
+
+    async def bien():
+        otra.append(1)
+
+    async def siempre_falla():
+        raise ValueError("x")
+
+    t = asyncio.ensure_future(main.supervise("Mala", siempre_falla, min_s=0.01, max_s=0.01))
+    await asyncio.gather(main.supervise("Buena", bien), real_sleep(0.05))
+    assert otra == [1] and not t.done()
+    t.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await t
+
+
+def test_store_espera_30_s_si_la_base_esta_ocupada(tmp_path):
+    """Hallazgo n.º 46: la conexión principal espera hasta 30 s a un bloqueo de otra conexión (antes, 5 s)."""
+    import sqlite3
+    store = Store(tmp_path / "t.db")
+    other = sqlite3.connect(tmp_path / "t.db", timeout=0)
+    other.execute("BEGIN IMMEDIATE")
+    t0 = time.monotonic()
+    with pytest.raises(sqlite3.OperationalError):
+        other2 = sqlite3.connect(tmp_path / "t.db", timeout=0.2)
+        other2.execute("BEGIN IMMEDIATE")
+    assert time.monotonic() - t0 < 5
+    other.rollback()
+    store.db.execute("BEGIN IMMEDIATE")
+    store.db.rollback()
+    assert store.db.execute("PRAGMA busy_timeout").fetchone()[0] == 30000
+    other.close()
+    store.close()
+
+
 def ms_utc(*a) -> int:
     from datetime import datetime, timezone
     return int(datetime(*a, tzinfo=timezone.utc).timestamp() * 1000)
