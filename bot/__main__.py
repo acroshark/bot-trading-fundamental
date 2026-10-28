@@ -64,6 +64,59 @@ def data_tmp() -> None:
     tempfile.tempdir = str(config.TMP_DIR)
 
 
+_JOB = None   # el Job Object de Windows: se queda abierto mientras viva el proceso
+
+
+def atar_hijos(k32=None) -> bool:
+    """Windows: mete el proceso en un Job Object con KILL_ON_JOB_CLOSE. Los lectores de feeds (ProcessPoolExecutor) y
+    llama-server lo heredan, así que si el bot muere de golpe Windows los cierra con él y no quedan huérfanos ocupando
+    VRAM o esperando su cola (hallazgo n.º 49). En Linux, o con BOT_JOB_OBJECT=0, no hace nada. Si Windows no deja
+    (el proceso ya está en un trabajo que no admite otro), se registra y el bot sigue como antes."""
+    global _JOB
+    if os.environ.get("BOT_JOB_OBJECT", "1") == "0" or (k32 is None and os.name != "nt"):
+        return False
+    import ctypes
+    from ctypes import wintypes
+
+    class Basic(ctypes.Structure):   # JOBOBJECT_BASIC_LIMIT_INFORMATION
+        _fields_ = [("PerProcessUserTimeLimit", ctypes.c_int64), ("PerJobUserTimeLimit", ctypes.c_int64),
+                    ("LimitFlags", ctypes.c_uint32), ("MinimumWorkingSetSize", ctypes.c_size_t),   # DWORD = 32 bits
+                    ("MaximumWorkingSetSize", ctypes.c_size_t), ("ActiveProcessLimit", ctypes.c_uint32),
+                    ("Affinity", ctypes.c_size_t), ("PriorityClass", ctypes.c_uint32), ("SchedulingClass", ctypes.c_uint32)]
+
+    class Extended(ctypes.Structure):   # JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+        _fields_ = [("BasicLimitInformation", Basic), ("IoInfo", ctypes.c_uint64 * 6),
+                    ("ProcessMemoryLimit", ctypes.c_size_t), ("JobMemoryLimit", ctypes.c_size_t),
+                    ("PeakProcessMemoryUsed", ctypes.c_size_t), ("PeakJobMemoryUsed", ctypes.c_size_t)]
+
+    err = getattr(ctypes, "get_last_error", lambda: 0)   # solo existe en Windows
+    try:
+        if k32 is None:
+            k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            k32.CreateJobObjectW.restype = wintypes.HANDLE   # sin esto, un HANDLE de 64 bits se cortaría a 32
+            k32.CreateJobObjectW.argtypes = (ctypes.c_void_p, wintypes.LPCWSTR)
+            k32.SetInformationJobObject.argtypes = (wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD)
+            k32.SetInformationJobObject.restype = wintypes.BOOL
+            k32.GetCurrentProcess.restype = wintypes.HANDLE
+            k32.AssignProcessToJobObject.argtypes = (wintypes.HANDLE, wintypes.HANDLE)
+            k32.AssignProcessToJobObject.restype = wintypes.BOOL
+        job = k32.CreateJobObjectW(None, None)
+        if not job:
+            raise OSError(f"CreateJobObject: error {err()}")
+        info = Extended()
+        info.BasicLimitInformation.LimitFlags = 0x2000   # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        if not k32.SetInformationJobObject(job, 9, ctypes.byref(info), ctypes.sizeof(info)):   # 9: ExtendedLimit
+            raise OSError(f"SetInformationJobObject: error {err()}")
+        if not k32.AssignProcessToJobObject(job, k32.GetCurrentProcess()):
+            raise OSError(f"AssignProcessToJobObject: error {err()}")
+    except Exception as e:
+        log.warning("No se pudo atar los procesos hijos al bot (%s): si el bot muere de golpe, pueden quedar abiertos", e)
+        return False
+    _JOB = job
+    log.info("Procesos hijos atados al bot: si se cierra, Windows los cierra con él")
+    return True
+
+
 def optional(name: str, make):
     """Construye un módulo que no es imprescindible: si falla, queda registrado y el bot sigue sin él."""
     try:
@@ -169,6 +222,7 @@ async def maintenance(store: Store) -> None:
 
 async def main() -> None:
     setup_logging()
+    atar_hijos()
     data_tmp()
     store = Store(config.DB_PATH)
     bus = Bus(store)

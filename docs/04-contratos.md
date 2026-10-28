@@ -72,7 +72,9 @@ def closes_before_open(a, b, day) -> bool;  def ordered_by_close(day) -> list[Ma
 # Módulos que miden y aprenden (todos solo paper; los arranca __main__ y un fallo en uno no para el resto: si uno no se
 # puede construir, el bot sigue sin él (optional, también la vigilancia: sin ella, las velas salen solo de la caché), y
 # cada bucle del bot corre supervisado: si se cae, se registra y se relanza con espera creciente, de 5 s a 5 min
-# (__main__.supervise; hallazgos n.º 27 y 46). La conexión principal a bot.db espera hasta 30 s a un bloqueo)
+# (__main__.supervise; hallazgos n.º 27 y 46). La conexión principal a bot.db espera hasta 30 s a un bloqueo. En Windows,
+# al arrancar, el proceso entra en un Job Object con KILL_ON_JOB_CLOSE (__main__.atar_hijos; n.º 49): si muere, Windows
+# cierra con él los lectores de feeds y llama-server. BOT_JOB_OBJECT=0 lo desactiva)
 # bot/vigilancia.py     Vigilancia(bus, store, session)                          → estado «vigilancia» (2.8)
 # bot/aprendizaje.py    Aprendizaje(bus, store, local_ai, bars=CacheBars(live))  → estado «aprendizaje» (2.10)
 #   source_weight(medio) -> float (1 = neutro, 0 a 1,5) y adjusted_credibility(cred, medio) -> int: síncronas y sin base

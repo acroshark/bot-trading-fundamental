@@ -989,3 +989,40 @@ def test_hueco_al_arrancar(tmp_path, monkeypatch):
     store.add_event({"type": "event", "kind": "filtered", "story": "b", "ts": t - 4 * 60_000, "id": "b"})
     assert Bus(store).hueco is None                                   # 4 min: un reinicio normal
     store.close()
+
+
+def test_job_object_ata_los_hijos(monkeypatch, caplog):
+    """Hallazgo n.º 49: en Windows el bot entra en un Job Object con KILL_ON_JOB_CLOSE (sus lectores y llama-server
+    mueren con él). Aquí con un kernel32 de mentira: en Linux, sin él, no hace nada; si Windows no deja, el bot sigue."""
+    import ctypes
+    import bot.__main__ as m
+
+    class K32:
+        def __init__(self, ok=True):
+            self.ok, self.calls = ok, []
+
+        def CreateJobObjectW(self, attrs, name):
+            self.calls.append(("create", attrs, name))
+            return 123
+
+        def SetInformationJobObject(self, job, clase, ref, size):
+            info = ref._obj
+            self.calls.append(("set", job, clase, info.BasicLimitInformation.LimitFlags, size, ctypes.sizeof(info)))
+            return self.ok
+
+        def GetCurrentProcess(self):
+            return -1
+
+        def AssignProcessToJobObject(self, job, proc):
+            self.calls.append(("assign", job, proc))
+            return True
+
+    monkeypatch.setattr(m, "_JOB", None)
+    assert m.atar_hijos() is False and m._JOB is None                      # Linux: nada
+    k = K32()
+    assert m.atar_hijos(k) is True and m._JOB == 123
+    assert k.calls == [("create", None, None), ("set", 123, 9, 0x2000, 144, 144), ("assign", 123, -1)]
+    monkeypatch.setattr(m, "_JOB", None)
+    assert m.atar_hijos(K32(ok=False)) is False and m._JOB is None and "pueden quedar abiertos" in caplog.text
+    monkeypatch.setenv("BOT_JOB_OBJECT", "0")
+    assert m.atar_hijos(K32()) is False
