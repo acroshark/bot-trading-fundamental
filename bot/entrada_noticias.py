@@ -205,7 +205,8 @@ class EntradaNoticias:
         self.cands: dict[tuple, dict] = {}                        # (story, moneda) → candidata esperando al precio
         self.done: OrderedDict[tuple, str] = OrderedDict()        # (story, moneda) → estado final
         self.sent: set[tuple] = set()                             # (story, moneda) con «esperando» ya publicado
-        self.own: dict = {"date": None, "entries": {}}            # entradas enviadas hoy (el paper aún puede no verlas)
+        self.own: dict = {"date": None, "entries": {}}            # entradas enviadas hoy (el paper aún puede no verlas):
+                                                                  # story → (riesgo %, hora del envío)
         self.counts: dict[str, int] = {e: 0 for e in ESTADOS}
         self._restored = False
         self._err_at: dict[str, float] = {}
@@ -459,7 +460,12 @@ class EntradaNoticias:
         if n_open >= config.MAX_POSITIONS:
             return veto(f"ya hay {n_open} operaciones abiertas o en curso (máximo {config.MAX_POSITIONS})")
         risk = float(config.RISK_PER_TRADE_PCT)
-        entradas = {**self._own_today(now), **apertura.paper_day_entries(pf, now)}
+        pf_ent = apertura.paper_day_entries(pf, now)
+        own = self._own_today(now)
+        for s_, (_r, at_) in list(own.items()):   # enviada y, pasado el plazo, sin rastro en el paper: no cuenta
+            if s_ not in pf_ent and now - at_ > apertura.SUBMIT_GRACE_MS:
+                del own[s_]
+        entradas = {**{s_: r_ for s_, (r_, _at) in own.items()}, **pf_ent}
         try:
             motor = self.get_motor() if self.get_motor is not None else None
         except Exception:
@@ -513,7 +519,7 @@ class EntradaNoticias:
             ok = False
         if not ok:
             return veto("vetada por el control de riesgo del paper")
-        self._own_today(now)[story_p] = risk
+        self._own_today(now)[story_p] = (risk, now)   # cuenta ya, aunque el paper aún no la enseñe
         self._event(story, coin, d, "confirmada",
                     f"{why_t} · {verb.lower()} {apertura.INST_TEXT[inst]} a {apertura._px(entry)}, stop "
                     f"{apertura._px(plan['stop_px'])} y objetivo {apertura._px(plan['target_px'])} (+"

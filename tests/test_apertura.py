@@ -1660,3 +1660,23 @@ async def test_motor_cuenta_las_entradas_de_la_noticia_en_el_tope_del_dia():
     assert not sent and "Tope diario de 1 entradas" in _rimp(eng, "BTC").end_why
     day = eng.view()["day"]
     assert day["entries"] == 1 and day["risk_pct"] == pytest.approx(0.5)   # la de ayer no cuenta
+
+
+def test_veto_de_las_fiables_falla_en_cerrado_sin_senal():
+    """Revisión del 28-10: con «6 diarias» y grupos fiables que operan, si la señal no se pudo leer (o sin el medio de
+    las noticias) el veto no sabe si hay una noticia fiable en contra: no se entra. Sin grupos que operan, nada cambia."""
+    from bot import fiables
+    p = ap.impulse_params(ap.SEIS)[0]
+    tags = ap.impulse_tags(1, 0.3, {}, {"dir": 0, "sin_dato": True}, p)
+    assert tags["noticia_fiable"] == "sin_dato"
+    assert ap.impulse_tags(1, 0.3, {}, {"dir": 0}, p)["noticia_fiable"] == "ninguna"
+    fiables.usar(None)
+    assert ap.impulse_filters(1, tags, {}, p) is None
+    fiables.usar({"grupos": [{"clave": "medio:x.com", "estado": "fiable", "opera": True}]})
+    try:
+        assert "no se pudieron leer" in ap.impulse_filters(1, tags, {}, p)
+        assert ap.impulse_filters(1, {**tags, "noticia_fiable": "ninguna"}, {}, p) is None
+        e2 = ap.impulse_params(ap.IMPULSO)[0]
+        assert ap.impulse_filters(1, {**tags, "btc": "a_favor"}, {}, e2) is None   # E2 no usa ese veto
+    finally:
+        fiables.usar(None)

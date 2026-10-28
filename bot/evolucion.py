@@ -2000,7 +2000,15 @@ class Evolucion:
     async def _auto(self, ahora: int) -> None:
         """Modo automático: aplica la promoción (con ENFRIAR_D días desde el último cambio o reversión) y la pausa (si
         sigue propuesta PAUSA_ESPERA_D días después: en la evaluación semanal siguiente). Nunca lo que el usuario
-        descartó o revirtió."""
+        descartó o revirtió. Tampoco si la estrategia activa la eligió el usuario (fuente «usuario»,
+        scripts/activar_estrategia.py): se mide tal cual y las propuestas quedan para que las aplique él."""
+        try:
+            activa = await asyncio.to_thread(self.activa)
+        except Exception:
+            activa = None
+        if isinstance(activa, dict) and activa.get("fuente") == "usuario":
+            log.info("Evolución (automático): la estrategia activa la eligió el usuario; no se cambia sola")
+            return
         ultimo = self._estado("ultimo_cambio")
         for tipo in ("estrategia_promovida", "estrategia_degradada"):
             for p in self._propuestas("pendiente", 1000):

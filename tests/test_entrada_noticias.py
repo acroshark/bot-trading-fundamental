@@ -326,3 +326,22 @@ def test_confirmar_puro():
     assert en.confirmar(b, TA, -1, 0.5, TA + 70 * MIN)["estado"] == "caducada"
     assert en.confirmar(None, TA, 1, 0.5, TA + 5 * MIN)["estado"] == "esperando"
     assert en.confirmar(None, TA, 1, 0.5, TA + 64 * MIN)["estado"] == "caducada"
+
+
+async def test_envio_que_el_paper_no_abrio_deja_de_contar_en_el_tope(tmp_path):
+    """Revisión del 28-10: una entrada enviada que el paper no llega a abrir (rechazada o bloqueada al ejecutarse) deja de
+    contar para los topes del día pasado el plazo del motor (SUBMIT_GRACE_MS), como en el motor."""
+    now = [TA + 9 * MIN + 30_000]
+    m, bus, store, sent = mod(tmp_path, now)
+    noticia(bus)
+    assert await m.step() == 1   # enviada, pero la cartera de prueba (pf fijo) nunca la enseña
+    own = m._own_today(now[0])
+    assert list(own) == ["nf-n1-btc"] and own["nf-n1-btc"][0] == 0.5
+    pf = {"positions": [], "pending": [], "scheduled": [], "closed": [], "equity": 111.37}
+    now[0] += ap.SUBMIT_GRACE_MS + 1000
+    m.get_portfolio = lambda: pf
+    noticia(bus, sid="n2", coins=("ETH",), title="Ethereum: noticia", ts=now[0] - 9 * MIN - 30_000)
+    m.bars = bars_fn(now, {"ETH": velas(desde=now[0] - 9 * MIN - 25 * H, hasta=now[0] + H)})
+    await m.step()
+    assert "nf-n1-btc" not in m._own_today(now[0])
+    store.close()

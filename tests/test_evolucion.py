@@ -534,6 +534,24 @@ async def test_modo_automatico_aplica_con_enfriamiento(env):
     assert e["evidencia"]["por"] == "automático" and e["evidencia"]["modo"] == "automatico"
 
 
+async def test_automatico_no_cambia_la_estrategia_que_eligio_el_usuario(env):
+    """Revisión del 28-10: en modo automático, una promoción (o una pausa) no se aplica sola si la estrategia activa la
+    eligió el usuario («6 diarias» con scripts/activar_estrategia.py): se mide tal cual; la propuesta queda pendiente."""
+    store, bus, path = env
+    escenario_promocion(store, bus)
+    ev = evo(env, modo="automatico")
+    ev._set_estado("ultimo_cambio", AHORA - 3 * DAY)
+    await promover(ev)
+    assert len((await ev.api_propuestas("pendiente"))["propuestas"]) == 1 and not path.exists()
+    usuario = _script().construir("seis", AHORA, "v-usuario-seis", None, None)
+    E.escribir_activa(path, usuario)
+    ev._set_estado("ultimo_cambio", AHORA - 20 * DAY)
+    await ev._auto(AHORA + H)
+    act = E.leer_estrategia_activa(path)
+    assert act["fuente"] == "usuario" and act["preset"] == "seis" and not E.leer(store, tipo="estrategia_promovida")
+    assert len((await ev.api_propuestas("pendiente"))["propuestas"]) == 1
+
+
 async def test_automatico_no_rehace_lo_que_reviertes(env):
     store, bus, path = env
     escenario_promocion(store, bus, n=150)
@@ -1163,6 +1181,10 @@ async def test_activar_seis_por_decision_del_usuario_y_volver(env, monkeypatch):
     assert E.es_preset(back) and E.params_motor(back) is None
     rev = E.leer(store, tipo="estrategia_cambiada")[0]
     assert rev["revierte"] == e["id"]
+    # Ya en el preset (tras revertir, sin la clave «preset»): «--preset impulso» no reescribe ni apunta nada
+    n0 = len(E.leer(store, tipo="estrategia_cambiada"))
+    assert m.main(["--preset", "impulso", *datos], ahora=ahora + 2500) == 0
+    assert len(E.leer(store, tipo="estrategia_cambiada")) == n0
     # Y con el script, a E2 (el preset de siempre), apuntado también
     assert m.main(["--preset", "seis", *datos], ahora=ahora + 3000) == 0
     assert m.main(["--preset", "impulso", *datos], ahora=ahora + 4000) == 0

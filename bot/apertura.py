@@ -1214,7 +1214,7 @@ def signal_getter(bus, clock=now_ms, params: dict | None = None, cache_s: float 
     de fuentes silenciadas no cuentan. Cada una lleva también su último «reflejo» (bot/reflejo.py): una macro sin
     reflejo confirmado no cuenta."""
     p = _params(params)
-    memo = {"at": -1e18, "plans": [], "news": [], "err_at": -1e18}
+    memo = {"at": -1e18, "plans": [], "news": [], "err_at": -1e18, "sin_medio": False}
 
     def load(now: int) -> None:
         if time.monotonic() - memo["at"] < cache_s:
@@ -1226,9 +1226,11 @@ def signal_getter(bus, clock=now_ms, params: dict | None = None, cache_s: float 
                 if e.get("kind") == "reflejo" and e.get("story")}   # el último de cada historia
         news = [{**e, "reflejo": refl[e["story"]]} if e.get("story") in refl else e
                 for e in evs if e.get("kind") == "triaged"]
+        memo["sin_medio"] = False
         try:   # sin pesos (fallo de la base o del aprendizaje) la señal sigue como antes
             news = weigh_news(news, story_sources(bus.store, [e.get("story") for e in news]))
         except Exception:
+            memo["sin_medio"] = True   # sin medio ni feed: el veto de las fiables no puede mirar sus grupos
             if time.monotonic() - memo["err_at"] > 600:
                 memo["err_at"] = time.monotonic()
                 log.exception("Aperturas: no pude leer el medio y el estado de las noticias; van sin ese peso")
@@ -1238,8 +1240,11 @@ def signal_getter(bus, clock=now_ms, params: dict | None = None, cache_s: float 
     def get_signal(coin: str, window: dict) -> dict:
         now = clock()
         load(now)
-        return signal_from(coin, window["markets"], window["open_ms"], memo["plans"], memo["news"],
-                           bus.state.get("predictions"), now, p)
+        out = signal_from(coin, window["markets"], window["open_ms"], memo["plans"], memo["news"],
+                          bus.state.get("predictions"), now, p)
+        if memo["sin_medio"]:
+            out["sin_dato"] = True
+        return out
 
     return get_signal
 
@@ -1689,7 +1694,9 @@ def impulse_tags(d: int, mom: float, ctx: dict | None, sig: dict | None, params:
     return {"lado": "largo" if d > 0 else "corto", "instrumento": impulse_instrument(d, p),
             "noticia": news_label(d, sig, p["min_strength"]),
             "noticia_fuerza": round(_f((sig or {}).get("strength"), 0.0), 3),
-            "noticia_fiable": "en_contra" if contra else "a_favor" if favor else "ninguna",
+            # sin_dato: la señal no se pudo leer (o sin el medio de las noticias): el veto no puede saber si hay alguna
+            "noticia_fiable": ("en_contra" if contra else "a_favor" if favor
+                               else "sin_dato" if (sig or {}).get("sin_dato") else "ninguna"),
             "noticia_fiable_grupo": top.get("nombre"),
             "apertura_anterior": "sin_dato" if not pr else "a_favor" if pr * d > 0 else "en_contra",
             "apertura_anterior_pct": round(pr, 3) if pr is not None else None,
@@ -1723,7 +1730,19 @@ def impulse_filters(d: int, tags: dict, ctx: dict | None, params: dict | None = 
     if nm == "fiables" and tags.get("noticia_fiable") == "en_contra":
         return (f"una noticia de un grupo fiable va en contra ({tags.get('noticia_fiable_grupo') or 'sin nombre'}, en las "
                 f"{_n(p['news_hours'], 0)} h previas): no se opera")
+    if nm == "fiables" and tags.get("noticia_fiable") == "sin_dato" and _hay_fiables():
+        # el veto falla en cerrado: con grupos que operan y sin poder leer las noticias, no se entra a ciegas
+        return "sin las noticias para el veto de las fiables (no se pudieron leer): no se opera"
     return None
+
+
+def _hay_fiables() -> bool:
+    """¿Hay grupos de noticias fiables que pasan la puerta para operar? (perezoso: fiables importa el aprendizaje)"""
+    try:
+        from . import fiables
+        return fiables.hay_fiables()
+    except Exception:
+        return False
 
 
 def impulse_strategy(d: int, tags: dict | None) -> str:
@@ -2167,7 +2186,7 @@ class OpeningEngine:
                 return s
         except Exception as e:
             log.warning("Aperturas: señal de %s en %s no disponible: %s", coin, w["name"], e)
-        return {"dir": 0, "strength": 0.0, "drivers": [], "why": "Señal no disponible"}
+        return {"dir": 0, "strength": 0.0, "drivers": [], "why": "Señal no disponible", "sin_dato": True}
 
     async def _arm(self, w: dict, at_open: bool, now: int) -> None:
         """15 min antes (y otra vez en la apertura): señal de cada moneda; se arman las que la tienen. Una moneda que se
