@@ -687,7 +687,7 @@ cola hasta que ya no se puedan confirmar a tiempo):
 | `GET /api/aprendizaje/medio?id=dominio` | Todo lo medido de un medio (404 sin datos) |
 | `GET /api/aprendizaje/noticias?cuales=mejores\|peores&horizonte=15\|60\|240\|1440&dias=30&limit=20&solo_senal=1` | Noticias con titular, medio, rendimientos, `explicacion` y `operaciones` [{operacion, postmortem}] |
 | `GET /api/aprendizaje/estadisticas?por=nivel\|region\|idioma\|tipo\|ventana\|fase\|rol\|moneda` | Acierto por esa dimensión |
-| `GET /api/aprendizaje/postmortems?limit=&origen=paper\|vigilancia` | Post-mortems: `resumen` (sin IA), `texto` (IA local o null), `estado` (`pendiente\|hecho\|error`) y `hechos` |
+| `GET /api/aprendizaje/postmortems?limit=&origen=paper\|vigilancia` | Post-mortems: `resumen` (sin IA), `texto` (IA local o null), `estado` (`pendiente\|hecho\|error`) y `hechos`. La IA local los escribe en baja prioridad, pero con la cola de triaje llena uno cada 10 min pasa por delante (hueco reservado, hallazgos n.º 15 y 4) |
 | `GET /api/aprendizaje/cambios?limit=&medio=` | Cambios de peso de medios (`id, ts, outlet, antes, despues, tipo, motivo, cuerpo`) |
 | `GET /api/evolucion` | Último `evolucion` (2.11) más `informe_semanal`: el último informe entero (`secciones` [{titulo, lineas}], `texto`, `cifras`) |
 | `GET /api/evolucion/historial?tipo=a,b&sujeto=&origen=&desde=&hasta=&limite=` | `{cambios, tipos}`: la línea de tiempo de `evolution_log`, de la más reciente a la más antigua |

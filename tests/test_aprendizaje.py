@@ -899,8 +899,14 @@ async def test_generador_local_baja_prioridad():
     msgs = [{"role": "user", "content": "hechos"}]
     off = FakeAI(ready=False)
     assert await A.local_generator(off)(msgs) is None and off.acq == 0   # no la enciende para esto
-    busy = FakeAI(queued=3)
-    assert await A.local_generator(busy)(msgs) is None and busy.acq == 0   # primero el triaje
+    # Con la cola de triaje llena (n.º 15 y 4): un post-mortem cada 10 min como mucho pasa por delante (hueco reservado)
+    busy, reloj = FakeAI(queued=120), [1000.0]
+    gen = A.local_generator(busy, clock=lambda: reloj[0])
+    assert await gen(msgs) == "Explicación corta." and busy.acq == 1
+    reloj[0] += A.PM_RESERVA_S - 1
+    assert await gen(msgs) is None and busy.acq == 1   # ya tuvo su hueco: primero el triaje
+    reloj[0] += 2
+    assert await gen(msgs) == "Explicación corta." and busy.acq == 2
     ai = FakeAI()
     assert await A.local_generator(ai)(msgs) == "Explicación corta."
     url, body = ai.s.posts[0]

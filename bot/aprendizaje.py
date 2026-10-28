@@ -24,8 +24,8 @@ Tablas propias en bot.db (las crea este módulo):
   catálogo lo conoce (alias), como hacen feeds y la mesa.
 - aportaciones: parte de cada operación paper cerrada que se debe a cada noticia y medio de su señal.
 - postmortems: explicación corta de cada operación cerrada (paper y vigilancia) con sus hechos. La escribe la IA local
-  en baja prioridad (solo si ya está encendida y sin triajes en cola); sin ella queda pendiente. Es explicación, nunca
-  decisión.
+  en baja prioridad (solo si ya está encendida; con triajes en cola, uno cada 10 min como mucho: su hueco reservado);
+  sin ella queda pendiente. Es explicación, nunca decisión.
 - medios_peso y medios_peso_hist: peso en uso de cada medio y CADA cambio de peso con su motivo y sus cifras (tipo
   auto, manual, automatico o revertir), más los cambios de veredicto que van o vienen de «acierta», «falla» o «ruido»
   (tipo veredicto, tras repetirse en veredicto_rondas cálculos; no cambian el peso y no se revierten); un cambio se
@@ -96,6 +96,7 @@ SCAN_S = 300               # operaciones cerradas nuevas
 PM_GAP_S = 60              # un post-mortem por minuto como mucho (baja prioridad)
 PM_IDLE_S = 120            # sin IA local disponible se vuelve a mirar tras esto
 PM_TRIES = 3
+PM_RESERVA_S = 600         # con triajes en cola, un post-mortem cada 10 min como mucho: hueco reservado (n.º 15 y 4)
 INGEST_MAX = 20_000        # eventos por lote; en el primer arranque se rellenan varios lotes por ronda
 INGEST_ROUNDS = 5
 MEASURE_MAX = 4_000        # filas medidas por moneda y ronda
@@ -1478,14 +1479,24 @@ def pm_messages(hechos: dict) -> list[dict]:
     return [{"role": "system", "content": PM_SYSTEM}, {"role": "user", "content": hechos.get("texto") or ""}]
 
 
-def local_generator(ai, max_tokens: int = 320, timeout_s: float = 120):
-    """generate(messages) con la IA local en BAJA prioridad: solo si ya está encendida (no la enciende para esto) y no
-    hay triajes esperando; si no, None y el post-mortem sigue pendiente."""
+def local_generator(ai, max_tokens: int = 320, timeout_s: float = 120, reserva_s: float = PM_RESERVA_S,
+                    clock=time.monotonic):
+    """generate(messages) con la IA local en BAJA prioridad: solo si ya está encendida (no la enciende para esto). Sin
+    triajes esperando, cuando quiera; con la cola llena (en este PC casi siempre: hallazgos n.º 15 y 4), uno cada
+    reserva_s como mucho, que es su hueco reservado (unos 6 s de cada 10 min: los post-mortems son pocos, ~6 al día). Si
+    no le toca, None y el post-mortem sigue pendiente."""
+    turno = {"t": float("-inf")}   # último post-mortem que pasó por delante de la cola
+
     async def generate(messages: list[dict]) -> str | None:
-        if ai is None or not getattr(ai, "ready", False) or not ai.q.empty():
+        if ai is None or not getattr(ai, "ready", False):
             return None
-        if not await ai.acquire() or not ai.q.empty():   # llegó triaje mientras tanto: primero lo suyo
+        reserva = not ai.q.empty()
+        if reserva and clock() - turno["t"] < reserva_s:
+            return None   # con triajes esperando, ya tuvo su hueco hace poco
+        if not await ai.acquire():
             return None
+        if reserva:
+            turno["t"] = clock()
         ai.last_use = time.monotonic()
         body = {"model": config.LOCAL_AI_ALIAS, "temperature": 0.2, "max_tokens": max_tokens,
                 "chat_template_kwargs": {"enable_thinking": False}, "messages": messages}
