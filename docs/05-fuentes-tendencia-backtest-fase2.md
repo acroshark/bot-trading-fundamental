@@ -80,9 +80,11 @@ Estado a 26-10-2026, ampliado el 27-10-2026 con el laboratorio de 2.000 estrateg
 | No funciona | 465 |
 | Pocos datos | 74 |
 
-## 6. Motor de aperturas (tu operativa)
+## 6. Motor de aperturas v2 «ruptura» (histórico)
 
-La regla es la señal → confirmación en los primeros minutos de la apertura → entrada → stop dinámico → reentradas mientras haya volumen.
+> **Histórico (v1 y v2).** Así era el motor antes de tus reglas del 26-10-2026. El que opera ahora es el de la sección 14 (y, desde el 28-10-2026, el preset «6 diarias» de la sección 20): horquilla pura de stop ≥ 1,5 % y ≥ 2R, objetivo ≥ 3 % neto, **sin stop dinámico, break-even ni reentradas**. Las cifras de abajo se quedan como referencia.
+
+La regla de la v2 era la señal → confirmación en los primeros minutos de la apertura → entrada → stop dinámico → reentradas mientras haya volumen.
 
 **Datos:**
 - Velas de 1 minuto de Binance de 24 meses (del 01-10-2024 al 23-10-2026): 2.614 aperturas reales × 4 monedas.
@@ -154,7 +156,9 @@ Cada 5 minutos, la probabilidad de subida de cada bolsa que va a abrir y de cada
 
 Precios reales de OKX EU, comisiones y deslizamiento.
 
-**Salidas configurables por operación:**
+> **Con tus reglas** (`config.USER_RULES`, encendidas por defecto) el paper solo acepta la horquilla pura: stop ≥ 1,5 %, ≥ 2R, objetivo ≥ 3 % neto de costes (sección 21) y **sin break-even, stop dinámico ni salida parcial** (los anula aunque la orden los pida; rechaza la que no cumpla el stop, los 2R o el neto). Además, ≤ 6 entradas y ≤ 3 % de riesgo por día de Madrid, compartidos por el motor y la entrada por noticia (sección 20). La lista de salidas de abajo es lo que el paper sabe hacer con `BOT_USER_RULES=0` (solo las pruebas de la v1).
+
+**Salidas configurables por operación** (sin tus reglas):
 - stop inicial;
 - break-even que cubre costes, cuando se pide;
 - stop dinámico;
@@ -266,7 +270,7 @@ El motor en vivo (`bot/apertura.py`, modo «impulso», por defecto) opera la reg
 **Otros detalles:**
 - **Límites diarios:** 4 entradas y 2 % de riesgo. Las 4 monedas se mueven juntas y suelen disparar en la misma apertura.
 - **Comisión del perpetuo:** en el paper, por defecto la misma que la del contado (0,10 % por lado), la prudente; la real de OKX X-Perps EU es 0,05 % taker (confirmada, ver la sección 21), que es la del laboratorio. El funding sale de Binance escalado a 8 h con su periodo real (`funding_h`); el de X-Perps es público y ronda el doble (sección 21).
-- **Noticias:** no dan la dirección. Filtran (`no_contra`: no se entra si van claramente en contra) y etiquetan cada operación (a favor, en contra, sin noticia) para medir si aportan.
+- **Noticias:** no dan la dirección. Filtran (`no_contra`: no se entra si van claramente en contra) y etiquetan cada operación (a favor, en contra, neutral) para medir si aportan.
 - **Variables de entorno:** `BOT_APERTURAS_ESTRATEGIA=ruptura` vuelve a la v2, y `BOT_IMPULSO_PARAMS` (JSON) cambia parámetros sobre el preset. Si la evolución ha aplicado una estrategia (`estrategia_activa.json`), manda esa.
 
 ## 15. El sistema que aprende (27-10-2026)
