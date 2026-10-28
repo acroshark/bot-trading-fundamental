@@ -8,6 +8,11 @@ de BTC, en todas las aperturas y monedas. Largos al contado y cortos como perpet
 la apertura anterior respaldan y miden (news_mode y etiquetas). Salida: horquilla pura de 3 % y 3R sin tope de tiempo
 (7 días de seguridad), sin break-even, stop dinámico ni parciales, y solo si el objetivo deja ≥ 3 % neto de costes.
 Preset IMPULSO: la prometedora más sólida del laboratorio, que NO es una ventaja demostrada (se mide en paper).
+Preset SEIS («6 diarias», 28-10-2026, lo pidió el usuario): el impulso de los 15 primeros min sin filtros, stop 1,5 % y
+3R, como mucho 24 h, hasta 6 entradas al día y el veto de una noticia FIABLE en contra (news_mode «fiables»,
+bot/fiables.py). Pierde en el backtest de 3 años: se mide en paper y solo se activa con scripts/activar_estrategia.py.
+Los topes diarios de entradas y de riesgo cuentan TODAS las entradas del paper del día (paper_day_entries): son
+compartidos con la entrada por noticia confirmada (bot/entrada_noticias.py).
 
 Modo «ruptura» (v2, sin cambios): la ruptura del rango de apertura solo a favor de la señal de las noticias.
 Reglas (las mismas en vivo y en bot/backtest_aperturas.py, que llama a estas funciones):
@@ -516,6 +521,34 @@ def day_limits(entries: int, risk_pct: float, new_risk: float, params: dict | No
         return (f"Presupuesto de riesgo del día agotado: {_n(risk_pct)} % comprometido + {_n(new_risk)} % > "
                 f"{_n(budget)} %")
     return None
+
+
+def madrid_day_start(now: int) -> int:
+    """Medianoche de Madrid del día de now (ms)."""
+    today = datetime.fromtimestamp(now / 1000, MAD).date()
+    return int(datetime.combine(today, dtime(0), tzinfo=MAD).timestamp() * 1000)
+
+
+def paper_day_entries(pf: dict | None, now: int) -> dict[str, float]:
+    """Entradas del paper en el día de Madrid de now, de TODOS los orígenes (motor de aperturas, entrada por noticia y
+    fase 2), con su riesgo en stop en % del capital: posiciones abiertas y operaciones cerradas abiertas hoy (con su
+    riesgo real) y órdenes pendientes de aprobar o programadas (aún sin abrir: el riesgo por operación de config). La
+    usan el motor (OpeningEngine._day_ledger) y la entrada por noticia (bot/entrada_noticias.py): los dos cuentan lo mismo
+    para el tope diario de entradas y el de riesgo, que así son compartidos."""
+    pf = pf or {}
+    start = madrid_day_start(now)
+    eq = _f(pf.get("equity")) or _f(pf.get("start_equity")) or config.PAPER_EQUITY
+    out: dict[str, float] = {}
+    for x in (pf.get("positions") or []) + (pf.get("closed") or []):
+        s = str(x.get("story") or "") if isinstance(x, dict) else ""
+        if s and _f(x.get("opened"), 0) >= start:
+            r = _f(x.get("riskUsd"))
+            out[s] = round(r / eq * 100, 4) if r else out.get(s, config.RISK_PER_TRADE_PCT)
+    for x in (pf.get("pending") or []) + (pf.get("scheduled") or []):
+        s = str(x.get("story") or "") if isinstance(x, dict) else ""
+        if s:
+            out.setdefault(s, config.RISK_PER_TRADE_PCT)
+    return out
 
 
 # ---------------------------------------------------------------- una moneda en una apertura (sin red)
@@ -1027,6 +1060,38 @@ def _news(coin: str, markets: list[str], news, now: int, p: dict) -> tuple[float
     return math.tanh(2 * total), k, top
 
 
+def _fiables(coin: str, news, now: int, p: dict) -> list[dict]:
+    """Noticias de las news_hours horas previas (6 h, como senal_h del aprendizaje) de un grupo FIABLE
+    (fiables.fiable_para con su medio, feed, tipo y sentido) que se aplican a esta moneda (fiables.monedas_de: la nombran
+    o son macro confirmadas por la cripto). Las usa el veto de news_mode «fiables». Sin grupos fiables, ninguna."""
+    from . import fiables   # perezoso: fiables importa el aprendizaje
+    if not fiables.hay_fiables():
+        return []
+    out = []
+    for n in news or []:
+        if not isinstance(n, dict) or n.get("archivada") or n.get("kind") == "lowprio":
+            continue
+        if n.get("srcState") in ("silenciada", "retirada") or _f(n.get("srcWeight"), 1.0) <= 0:
+            continue
+        ts = _f(n.get("ts"))
+        if ts is None or not 0 <= (now - ts) / H <= p["news_hours"]:
+            continue
+        tr = _triage(n)
+        d = reflejo.direccion(tr)
+        imp = _f(tr.get("importancia"))
+        if not d or (imp is not None and imp < config.TRIAGE_MIN):
+            continue
+        coins, _why = fiables.monedas_de(n.get("title"), tr, n.get("clase"), n.get("reflejo"))
+        if coin not in coins:
+            continue
+        g = fiables.fiable_para(n.get("medio"), n.get("srcId"), tr.get("tipo"), d)
+        if g:
+            out.append({"story": n.get("story"), "dir": d, "ts": int(ts), "grupo": g.get("clave"),
+                        "nombre": g.get("nombre"), "acierto": g.get("acierto"),
+                        "titular": _cut(tr.get("resumen") or n.get("title") or "", 120)})
+    return out
+
+
 def _pred(coin: str, markets: list[str], open_ms: int, predictions) -> tuple[float, str] | None:
     """Predicción de la ventana cripto de la moneda. Las de los índices (kind «bolsa») ya no cuentan (28-10-2026): al
     usuario no le importa el índice, sino la cripto; hasta entonces pesaban el 40 %."""
@@ -1080,17 +1145,21 @@ def signal_from(coin: str, markets: list[str], open_ms: int, plans=None, news=No
     else:
         why = (f"Sin señal clara en {coin}: fuerza {_n(strength)} < {_n(p['min_strength'])}"
                + (f" ({lead})" if lead else " (sin plan, noticias ni predicciones para esta apertura)"))
-    return {"dir": d, "strength": round(strength, 3), "score": round(score, 3), "drivers": drivers, "why": why}
+    out = {"dir": d, "strength": round(strength, 3), "score": round(score, 3), "drivers": drivers, "why": why}
+    fl = _fiables(coin, news, now, p)
+    if fl:   # noticias de grupos fiables (veto de news_mode «fiables»); sin ellas el campo no sale
+        out["fiables"] = fl
+    return out
 
 
 SRC_KINDS = ("captured", "corroborated", "srcstate")   # eventos que dicen el medio y el estado de la fuente
 
 
 def story_sources(store, stories) -> dict[str, dict]:
-    """Medio («outlet»), estado y peso de la fuente de cada historia: de su captada y de las subidas de estado
-    (confirmación por una fuente mejor o «srcstate»; la última manda), y la clase del prefiltro («clase» de la captada:
-    cripto, macro o contexto; no sale si la captada no la trae). Una consulta por el índice de story; con un store sin
-    base (pruebas) o sin datos, {}."""
+    """Medio («outlet»), feed («srcId»), estado y peso de la fuente de cada historia: de su captada y de las subidas de
+    estado (confirmación por una fuente mejor o «srcstate»; la última manda), y la clase del prefiltro («clase» de la
+    captada: cripto, macro o contexto; no sale si la captada no la trae). Una consulta por el índice de story; con un
+    store sin base (pruebas) o sin datos, {}."""
     db = getattr(store, "db", None)
     ids = list(dict.fromkeys(s for s in stories if s))
     out: dict[str, dict] = {}
@@ -1110,6 +1179,8 @@ def story_sources(store, stories) -> dict[str, dict]:
             d = out.setdefault(story, {})
             if kind == "captured" and "outlet" not in d:
                 d["outlet"] = aprendizaje.outlet_from_patch({"outlet": outlet, "via": via, "url": url, "srcId": src_id})
+                if src_id:
+                    d["srcId"] = src_id   # el feed (para los grupos fiables de fuente)
                 if clase is not None:
                     d["clase"] = clase
             if estado is not None:
@@ -1120,15 +1191,15 @@ def story_sources(store, stories) -> dict[str, dict]:
 
 
 def weigh_news(news: list[dict], sources: dict[str, dict]) -> list[dict]:
-    """Copia de las triadas con el estado y el peso de su fuente, la clase del prefiltro y la credibilidad ajustada
-    por el peso aprendido de su medio (aprendizaje.adjusted_credibility; con pocos datos el peso es 1 y no cambia
-    nada)."""
+    """Copia de las triadas con el estado y el peso de su fuente, la clase del prefiltro, el feed (srcId) y la
+    credibilidad ajustada por el peso aprendido de su medio (aprendizaje.adjusted_credibility; con pocos datos el peso
+    es 1 y no cambia nada)."""
     from . import aprendizaje
     out = []
     for e in news:
         src = sources.get(e.get("story")) or {}
         cred = _triage(e).get("credibilidad")
-        extra = {k: src[k] for k in ("srcState", "srcWeight", "clase") if k in src}
+        extra = {k: src[k] for k in ("srcState", "srcWeight", "clase", "srcId") if k in src}
         adj = aprendizaje.adjusted_credibility(cred, src.get("outlet"))
         if adj is not None:
             extra["credibilidad_ajustada"] = adj
@@ -1221,7 +1292,7 @@ ATR_H_N, ATR_LOOK_H = 14, 720        # ATR de 14 h en percentil de las 720 h pre
 LAB_BREAK_BPS, LAB_BREAK_FRAC = 2.0, 0.05   # margen de la ruptura del laboratorio (sobre la apertura y el rango)
 VOL_FILTERS = ("todos", "no_baja", "alta", "baja")
 BTC_FILTERS = ("ninguno", "no_contra", "a_favor")
-NEWS_MODES = ("no_contra", "a_favor", "etiqueta")
+NEWS_MODES = ("no_contra", "a_favor", "etiqueta", "fiables")   # fiables: veto de una noticia FIABLE en contra
 IMP_STATES = ("esperando_apertura", "midiendo_impulso", "esperando_entrada", "en_posicion", "terminada")
 PRIOR_TRIES_IMP = 6                  # intentos de bajar las sesiones anteriores (rvol) antes de darlas por perdidas
 INST_TEXT = {"spot": "al contado", "perp": "en perpetuo"}
@@ -1260,6 +1331,56 @@ IMPULSO = {
     "session_max_min": 120,     # fin de la fase de entrada (la posición sigue en el paper)
     "lab": LAB_REF,             # estrategia del laboratorio que reproduce (None si se cambia alguna regla)
 }
+# Preset SEIS («6 diarias», 28-10-2026, decisión del usuario: quiere ≥ 6 operaciones al día en la cartera de prueba).
+# Es el impulso de los 15 primeros min SIN filtros (cualquier movimiento ≠ 0, sin volumen relativo, volatilidad ni BTC),
+# entrada al medir (+15 min), stop 1,5 % y objetivo 3R (+4,5 %, ≥ 3 % neto), como mucho 24 h, y como único filtro el
+# veto de una noticia FIABLE en contra (bot/fiables.py; solo los grupos que pasan su puerta para operar: sin ellos no
+# veta nada, y el 28-10-2026 no pasa ninguno). Hasta 6 entradas y 3 % de
+# riesgo por día de Madrid (0,5 % × 6), compartidos con la entrada por noticia (bot/entrada_noticias.py).
+# HONESTO: NO es una ventaja. En el backtest de 3 años (docs/05, sección 19) las variantes que llegan a ~6 diarias
+# pierden fuera de muestra (−0,12 a −0,17 R, ≈ −0,4 %/día con 0,5 % de riesgo; la réplica con el motor, −0,12 R): con el
+# sentido al azar y 3R el objetivo se cobra en un 13-17 % de las operaciones y hace falta acertar ≈ 60 % de las veces
+# hacia dónde estará el precio 24 h después de ENTRAR (bruto) para no perder. Ese 60 % no es el de bot/fiables.py (a 4 h
+# desde el triaje y ajustado al mercado): un grupo «fiable» no deja la operación en tablas, y acertar el sentido no es
+# cobrar la horquilla (del 25 al 26-10-2026 ninguna noticia se movió ≥ 3 % a favor en 24 h). Se mide en paper
+# porque lo pidió el usuario; el preset IMPULSO (E2) sigue siendo el de por defecto y solo cambia con
+# scripts/activar_estrategia.py. No reproduce ninguna estrategia del laboratorio (lab None: el umbral 0 no está en su
+# rejilla, ni el tope de 6 diarias ni el veto de noticias).
+SEIS = {
+    **IMPULSO,
+    "measure_min": 15,
+    "min_move_pct": 0.0,        # cualquier movimiento ≠ 0 (0 = sin umbral; un impulso de 0 exacto no se opera)
+    "entry": "t:15",            # al terminar de medir
+    "rvol_min": None,           # sin filtro de volumen relativo
+    "vol_filter": "todos",
+    "btc_filter": "ninguno",
+    "news_mode": "fiables",
+    "windows": list(LAB_WINDOWS),
+    "coins": list(config.COINS),
+    "sl_pct": 1.5,
+    "target_r": 3.0,            # +4,5 % (≥ 3 % neto de costes)
+    "max_hold_h": 24,           # como mucho 24 h
+    "min_net_pct": 3.0,
+    "avg_hold_h": 13,           # duración media para el funding esperado (≈ 13 h en la réplica de 3 años)
+    "long_instrument": "spot",
+    "short_instrument": "perp",
+    "risk_pct": None,           # config.RISK_PER_TRADE_PCT (0,5 %), que no se toca
+    "max_day_entries": 6,
+    "max_day_risk_pct": 3.0,
+    "lab": None,
+}
+PRESETS = {
+    "impulso": {"params": IMPULSO, "nombre": "E2 · impulso",
+                "descripcion": "Impulso de los primeros 15 min (≥ 0,2 %) con volumen relativo ≥ 1,5 y BTC a favor, "
+                               "entrada a +30 min, stop 3 % y objetivo 3R, sin tope (7 días de seguridad)"},
+    "seis": {"params": SEIS, "nombre": "6 diarias",
+             "descripcion": "Impulso de los primeros 15 min sin filtros, stop 1,5 % y objetivo 3R, como mucho 24 h; "
+                            "veto de noticias fiables en contra"},
+}
+# Parámetros de operativa que identifican un preset (preset_of): con todos iguales, es ese preset
+PRESET_KEYS = ("measure_min", "min_move_pct", "entry", "pb_frac", "entry_end_min", "brk_tf", "rvol_min", "vol_filter",
+               "btc_filter", "news_mode", "windows", "coins", "sl_pct", "target_r", "max_hold_h", "min_net_pct",
+               "long_instrument", "short_instrument", "risk_pct", "max_day_entries", "max_day_risk_pct")
 LAB_KEYS = ("measure_min", "min_move_pct", "entry", "rvol_min", "vol_filter", "btc_filter", "windows", "coins",
             "sl_pct", "target_r")   # con todas como en el preset, se reproduce LAB_REF
 IMP_STATUS_KEYS = ("estrategia", "measure_min", "min_move_pct", "entry", "pb_frac", "entry_end_min", "brk_tf", "rvol_min",
@@ -1305,15 +1426,20 @@ def impulse_params(over: dict | None = None) -> tuple[dict, list[str]]:
         notes.append(f"{k} = {p[k]!r} no vale ({why}): se usa {IMPULSO[k]!r}")
         p[k] = IMPULSO[k]
 
-    for k, cast in (("measure_min", int), ("entry_end_min", int), ("brk_tf", int), ("min_move_pct", float),
-                    ("pb_frac", float), ("sl_pct", float), ("target_r", float), ("max_hold_h", float),
-                    ("avg_hold_h", float)):
+    for k, cast in (("measure_min", int), ("entry_end_min", int), ("brk_tf", int), ("pb_frac", float),
+                    ("sl_pct", float), ("target_r", float), ("max_hold_h", float), ("avg_hold_h", float)):
         try:
             p[k] = cast(p[k])
             if p[k] <= 0:
                 raise ValueError
         except (TypeError, ValueError):
             back(k, "tiene que ser un número positivo")
+    try:   # 0 = cualquier movimiento ≠ 0 (preset SEIS)
+        p["min_move_pct"] = float(p["min_move_pct"])
+        if not p["min_move_pct"] >= 0:
+            raise ValueError
+    except (TypeError, ValueError):
+        back("min_move_pct", "tiene que ser un número ≥ 0 (0 = cualquier movimiento)")
     for k, low in (("rvol_min", 0), ("min_net_pct", 0), ("risk_pct", None), ("max_day_risk_pct", None),
                    ("max_day_entries", 1)):   # None = sin filtro, sin tope o el valor de config; low None = > 0
         if p[k] is None:
@@ -1394,6 +1520,46 @@ def impulse_setup(params: dict | None = None) -> tuple[dict, str, str | None]:
                 notes.append("Cambios de BOT_IMPULSO_PARAMS: " + ", ".join(sorted(map(str, env))))
     p, bad = impulse_params(over)
     return p, source, "; ".join(notes + bad) or None
+
+
+def _pnorm(v):
+    """Valor normalizado para comparar parámetros (como evolucion._norm: 24 = 24,0 y listas sin orden)."""
+    if v is None or isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)):
+        return round(float(v), 6)
+    if isinstance(v, (list, tuple, set)):
+        return sorted(str(x).strip().lower() for x in v)
+    return str(v).strip().lower()
+
+
+def preset_of(params: dict | None) -> str | None:
+    """Preset del modo impulso («impulso» o «seis», de PRESETS) al que corresponden unos parámetros completos, o None
+    si alguno de los de operativa (PRESET_KEYS) es distinto (cambios de la evolución o de BOT_IMPULSO_PARAMS)."""
+    p = params or {}
+    if p.get("estrategia", "impulso") != "impulso":
+        return None
+    for name, info in PRESETS.items():
+        ref = impulse_params(info["params"])[0]
+        if all(_pnorm(p.get(k)) == _pnorm(ref.get(k)) for k in PRESET_KEYS):
+            return name
+    return None
+
+
+def preset_info(params: dict | None, activa: dict | None = None) -> dict:
+    """{preset, nombre, descripcion} para el estado «openings»: los del preset, o el nombre de la estrategia de la
+    evolución (estrategia_activa.json) si no es ninguno."""
+    name = preset_of(params)
+    if name:
+        return {"preset": name, "nombre": PRESETS[name]["nombre"], "descripcion": PRESETS[name]["descripcion"]}
+    a = activa or {}
+    return {"preset": None, "nombre": a.get("nombre"), "descripcion": a.get("descripcion")}
+
+
+def hold_text(params: dict | None = None) -> str:
+    """Tope de tiempo de una entrada: «sin tope (7 días de seguridad)» o «como mucho 24 h»."""
+    h = _ip(params)["max_hold_h"]
+    return f"sin tope ({_n(h / 24, 0)} días de seguridad)" if h >= 168 - 1e-9 else f"como mucho {_n(h, 0)} h"
 
 
 def _easter(y: int) -> date:
@@ -1517,9 +1683,14 @@ def impulse_tags(d: int, mom: float, ctx: dict | None, sig: dict | None, params:
     hora, como la familia «Apertura anterior» del laboratorio), tendencia de BTC, volatilidad e impulso."""
     p, ctx = _ip(params), ctx or {}
     pr, btc, vol = ctx.get("prev_react"), ctx.get("btc_dir") or 0, ctx.get("atr_pct")
+    fl = [x for x in (sig or {}).get("fiables") or [] if isinstance(x, dict)]   # noticias de grupos fiables (_fiables)
+    contra, favor = [x for x in fl if x.get("dir") == -d], [x for x in fl if x.get("dir") == d]
+    top = (contra or favor or [{}])[0]
     return {"lado": "largo" if d > 0 else "corto", "instrumento": impulse_instrument(d, p),
             "noticia": news_label(d, sig, p["min_strength"]),
             "noticia_fuerza": round(_f((sig or {}).get("strength"), 0.0), 3),
+            "noticia_fiable": "en_contra" if contra else "a_favor" if favor else "ninguna",
+            "noticia_fiable_grupo": top.get("nombre"),
             "apertura_anterior": "sin_dato" if not pr else "a_favor" if pr * d > 0 else "en_contra",
             "apertura_anterior_pct": round(pr, 3) if pr is not None else None,
             "btc": "neutral" if not btc else "a_favor" if btc == d else "en_contra",
@@ -1549,6 +1720,9 @@ def impulse_filters(d: int, tags: dict, ctx: dict | None, params: dict | None = 
         return f"las noticias van claramente en contra (fuerza {_n(tags.get('noticia_fuerza') or 0.0)}): no se opera"
     if nm == "a_favor" and nl != "a_favor":
         return "las noticias no van a favor (se exige noticia a favor): no se opera"
+    if nm == "fiables" and tags.get("noticia_fiable") == "en_contra":
+        return (f"una noticia de un grupo fiable va en contra ({tags.get('noticia_fiable_grupo') or 'sin nombre'}, en las "
+                f"{_n(p['news_hours'], 0)} h previas): no se opera")
     return None
 
 
@@ -1727,10 +1901,12 @@ class ImpulseRun:
     def _measured(self, b: list, live_ok: bool) -> dict | None:
         p, x = self.p, self.p["min_move_pct"]
         self.mom = mom = (b[C] / self.po - 1) * 100
-        d = self.dir = 1 if mom >= x else -1 if mom <= -x else 0
+        # con x = 0 vale cualquier movimiento, pero no el 0 exacto (sin sentido que seguir)
+        d = self.dir = 1 if mom >= x and mom > 0 else -1 if mom <= -x and mom < 0 else 0
         head = f"Impulso de {_sg(mom)} % en {self.N} min"
         if not d:
-            return self.end(f"{head}: no llega a ±{_n(x)} %, no se opera")
+            return self.end(f"{head}: " + (f"no llega a ±{_n(x)} %, no se opera" if x > 0
+                                            else "sin movimiento, no hay sentido que seguir"))
         self.tags = impulse_tags(d, mom, self.ctx, self.news, p)
         why = impulse_filters(d, self.tags, self.ctx, p)
         if why:
@@ -1854,6 +2030,7 @@ class OpeningEngine:
         self.get_signal, self.submit, self.get_portfolio = get_signal, submit, get_portfolio
         self.clock = clock
         self.notice: str | None = None   # aviso para la web sobre los parámetros en uso
+        self.preset = {"preset": None, "nombre": None, "descripcion": None}   # preset_info (modo impulso)
         self.strategy = pick_strategy(params)
         self.impulso = self.strategy == "impulso"
         # Estrategia de la evolución: solo en modo impulso y sin params explícitos
@@ -1887,7 +2064,7 @@ class OpeningEngine:
                 self.p["stop_mode"] = "or_far"   # el modo v1 usa salidas de la v1 (break-even y dinámico)
         self.history = history or load_history
         self.status: dict | None = None
-        self.day: dict = {"date": None, "entries": {}}   # entradas del día de Madrid: {story: riesgo en %}
+        self.day: dict = {"date": None, "entries": {}, "own": {}, "pf": {}}   # entradas del día de Madrid (_day_ledger)
         self._lag_ms = LIVE_LAG_MS + ((self.p.get("confirm_tf") or 1) - 1) * MIN   # una vela de antigüedad como mucho
         self._key = None
         self._pub_at = 0.0
@@ -1918,8 +2095,8 @@ class OpeningEngine:
             params = {k: v for k, v in over.items() if k != "estrategia"} if over else None
             self.paused = bool(self.activa and self.activa.get("pausada"))
         self.p, self.source, notice = impulse_setup(params)
-        if self.activa is not None and params is not None:
-            self.source = "evolucion"
+        if self.activa is not None and params is not None:   # del archivo: puesta por el usuario o por la evolución
+            self.source = "usuario" if self.activa.get("fuente") == "usuario" else "evolucion"
         if self.paused:
             why = _cut((self.activa or {}).get("motivo") or "sin motivo", 200)
             notes.append(f"Campeón pausado por la evolución (solo paper): no se abren entradas nuevas ({why})")
@@ -1933,8 +2110,9 @@ class OpeningEngine:
         except Exception:
             log.exception("Aperturas: no pude calcular la firma de la estrategia")
             self.firma = None
+        self.preset = preset_info(self.p, self.activa)   # {preset: «impulso» | «seis» | None, nombre, descripcion}
         self.loaded = {"firma": self.firma, "ts": now, "pausada": self.paused, "fuente": self.source,
-                       "registro": (self.activa or {}).get("registro")}
+                       "registro": (self.activa or {}).get("registro"), "preset": self.preset["preset"]}
 
     def _session_busy(self, now: int) -> bool:
         """¿Hay alguna apertura armándose o en su sesión de entrada? Entonces no se cambian los parámetros."""
@@ -2008,13 +2186,16 @@ class OpeningEngine:
                     {"a_favor": "solo a favor de la tendencia de BTC",
                      "no_contra": "nunca contra la tendencia de BTC"}.get(p["btc_filter"], ""),
                     {"no_contra": "no si las noticias van claramente en contra",
-                     "a_favor": "solo con noticias a favor"}.get(p["news_mode"], "noticias solo como etiqueta")]
-            w["why"] = (f"Se sigue el impulso de los {p['measure_min']} primeros min si pasa de ±{_n(p['min_move_pct'])} %"
+                     "a_favor": "solo con noticias a favor",
+                     "fiables": "no si una noticia de un grupo fiable va en contra"}.get(p["news_mode"],
+                                                                                        "noticias solo como etiqueta")]
+            move = (f"si pasa de ±{_n(p['min_move_pct'])} %" if p["min_move_pct"] > 0
+                    else "en su sentido (cualquier movimiento)")
+            w["why"] = (f"Se sigue el impulso de los {p['measure_min']} primeros min {move}"
                         f" · {impulse_entry_type(p)} · {' · '.join(x for x in conf if x)} · largos "
                         f"{INST_TEXT[p['long_instrument']]} y cortos {INST_TEXT[p['short_instrument']]} · stop "
                         f"{_n(p['sl_pct'])} % y "
-                        f"objetivo {_n(p['target_r'], 1)} R (+{_n(p['sl_pct'] * p['target_r'])} %), sin tope "
-                        f"({_n(p['max_hold_h'] / 24, 0)} días de seguridad)")
+                        f"objetivo {_n(p['target_r'], 1)} R (+{_n(p['sl_pct'] * p['target_r'])} %), {hold_text(p)}")
             w["armed"], w["at_open"] = True, w["at_open"] or at_open
             return
         for coin in config.COINS:
@@ -2218,23 +2399,29 @@ class OpeningEngine:
         return px
 
     def _day_ledger(self, pf: dict | None, now: int) -> dict:
-        """Entradas del motor en el día de Madrid (todas las ventanas) con su riesgo en stop en % del capital. Se rehace
-        con la cartera del paper (tras un reinicio y con el riesgo real de cada posición)."""
-        today = datetime.fromtimestamp(now / 1000, MAD).date()
-        if self.day.get("date") != today.isoformat():
-            self.day = {"date": today.isoformat(), "entries": {}}
-        start = int(datetime.combine(today, dtime(0), tzinfo=MAD).timestamp() * 1000)
-        pf = pf or {}
-        eq = _f(pf.get("equity")) or _f(pf.get("start_equity")) or config.PAPER_EQUITY
-        for x in (pf.get("positions") or []) + (pf.get("closed") or []):
-            s = str((x or {}).get("story") or "") if isinstance(x, dict) else ""
-            if s.startswith("a-") and _f(x.get("opened"), 0) >= start:
-                r = _f(x.get("riskUsd"))
-                if r:
-                    self.day["entries"][s] = round(r / eq * 100, 4)
-                else:
-                    self.day["entries"].setdefault(s, config.RISK_PER_TRADE_PCT)
+        """Entradas del día de Madrid (todas las ventanas) con su riesgo en stop en % del capital: TODAS las del paper
+        (paper_day_entries: también las de la entrada por noticia y la fase 2, así el tope diario y el riesgo del día son
+        compartidos; desde el 28-10-2026, antes solo las del motor) más las que el motor acaba de enviar y el paper aún
+        no enseña («own»). Con pf se rehace con la cartera (tras un reinicio y con el riesgo real de cada posición); sin
+        ella, con la última vista."""
+        today = datetime.fromtimestamp(now / 1000, MAD).date().isoformat()
+        if self.day.get("date") != today:
+            self.day = {"date": today, "entries": {}, "own": {}, "pf": {}}
+        if pf is not None:
+            self.day["pf"] = paper_day_entries(pf, now)
+        self.day["entries"] = {**self.day.get("own", {}), **self.day.get("pf", {})}
         return self.day
+
+    def _own_entry(self, story: str, risk: float, now: int) -> None:
+        """Entrada que el motor acaba de enviar: cuenta para los límites del día aunque el paper aún no la enseñe."""
+        day = self._day_ledger(None, now)
+        day.setdefault("own", {})[story] = risk
+        day["entries"][story] = day.get("pf", {}).get(story, risk)
+
+    def _drop_entry(self, story: str) -> None:
+        """Una orden del motor que el paper nunca llegó a abrir no cuenta como entrada del día."""
+        for k in ("own", "pf", "entries"):
+            self.day.get(k, {}).pop(story, None)
 
     async def _gate_ok(self, w: dict, coin: str) -> bool:
         """Puerta de probabilidades de la moneda en esta ventana, una vez por dirección y antes de la primera entrada.
@@ -2327,7 +2514,7 @@ class OpeningEngine:
             ok = False
         if ok:
             w["stories"][story] = {"coin": coin, "at": now, "pending": False, "open": False}
-            self._day_ledger(None, now)["entries"][story] = t["risk"]   # cuenta para los límites del día
+            self._own_entry(story, t["risk"], now)   # cuenta para los límites del día
             log.info("Aperturas: %s %s en %s (%s)", verb, coin, w["name"], story)
         else:
             run.on_rejected(now, "vetada por el control de riesgo del paper")
@@ -2356,23 +2543,30 @@ class OpeningEngine:
 
     def _ticket_imp(self, w: dict, coin: str, act: dict, plan: dict, now: int) -> dict:
         """Ticket del modo impulso: inmediato, horquilla pura (tp1R = tp2R, sin parcial, break-even ni dinámico),
-        7 días de seguridad desde la entrada, instrumento (contado o perpetuo), estrategia y etiquetas."""
+        tope de tiempo desde la entrada (7 días de seguridad o, con «6 diarias», 24 h), instrumento (contado o
+        perpetuo), estrategia y etiquetas (con origen «motor_aperturas», el preset y la versión)."""
         p, d, tags = self.p, act["dir"], act["tags"]
         end = now + int(p["max_hold_h"] * H)
-        days = _n(p["max_hold_h"] / 24, 0)
+        until = datetime.fromtimestamp(end / 1000, MAD).strftime('%d-%m %H:%M')
+        if p["max_hold_h"] >= 168 - 1e-9:
+            days = _n(p["max_hold_h"] / 24, 0)
+            valid, label = f"sin tope: como mucho {days} días (hasta el {until} Madrid)", f"{days} días de seguridad"
+        else:
+            hrs = _n(p["max_hold_h"], 0)
+            valid, label = f"como mucho {hrs} h (hasta el {until} Madrid)", f"tope de {hrs} h"
         sig = w["signals"].get(coin) or {}
         return {"coin": coin, "side": "long" if d > 0 else "short", "mode": MODE_IMP, "risk": self._risk_imp(),
                 "stopPct": plan["stopPct"], "trailPct": None, "timing": "now", "win": f"Apertura {w['name']}",
                 "winAt": None, "entryType": impulse_entry_type(p), "tp1R": plan["tp2R"], "tp2R": plan["tp2R"],
-                "tp1Frac": 0.0, "beR": None, "trailStartR": None,
-                "valid": f"sin tope: como mucho {days} días (hasta el "
-                         f"{datetime.fromtimestamp(end / 1000, MAD).strftime('%d-%m %H:%M')} Madrid)",
+                "tp1Frac": 0.0, "beR": None, "trailStartR": None, "valid": valid,
                 "inval": _cut(f"Stop {_px(plan['stop_px'])} (−{_n(plan['stopPct'])} %) u objetivo "
                               f"{_px(plan['target_px'])} (+{_n(plan['gross_pct'])} %)", 160),
-                "why": _cut(act["why"], 300), "llm": None, "winEnd": end, "holdLabel": f"{days} días de seguridad",
+                "why": _cut(act["why"], 300), "llm": None, "winEnd": end, "holdLabel": label,
                 "maxAgeMs": MAX_FILL_DELAY_MS, "instrument": plan["instrument"], "market": w["lead"], "src": SRC,
-                "signal": {"dir": sig.get("dir"), "strength": sig.get("strength")},
-                "strategy": impulse_strategy(d, tags), "tags": {**tags, "estrategia_firma": self.firma}}
+                "signal": {"dir": sig.get("dir"), "strength": sig.get("strength")}, "origen": "motor_aperturas",
+                "strategy": impulse_strategy(d, tags),
+                "tags": {**tags, "estrategia_firma": self.firma, "origen": "motor_aperturas",
+                         "preset": preset_of(p)}}
 
     async def _enter_imp(self, w: dict, coin: str, act: dict, now: int) -> None:
         """Entrada del modo impulso: cartera, una posición por moneda, horquilla desde el precio real con el filtro del
@@ -2433,11 +2627,12 @@ class OpeningEngine:
             ok = False
         if ok:
             w["stories"][story] = {"coin": coin, "at": now, "pending": False, "open": False}
-            self._day_ledger(None, now)["entries"][story] = t["risk"]
+            self._own_entry(story, t["risk"], now)
             run.entry_px, run.stop_px, run.target_px = entry, plan["stop_px"], plan["target_px"]
             run.last_why = (f"En posición (paper): {verb.lower()} {INST_TEXT[inst]} a {_px(entry)}, stop "
-                            f"{_px(plan['stop_px'])} y objetivo {_px(plan['target_px'])}; sin tope de tiempo "
-                            f"({t['holdLabel']})")
+                            f"{_px(plan['stop_px'])} y objetivo {_px(plan['target_px'])}; "
+                            + (f"sin tope de tiempo ({t['holdLabel']})" if self.p["max_hold_h"] >= 168 - 1e-9
+                               else f"como mucho {_n(self.p['max_hold_h'], 0)} h"))
             log.info("Aperturas: %s %s en %s (%s, %s)", verb, coin, w["name"], story, t["strategy"])
         else:
             run.on_rejected(now, "vetada por el control de riesgo del paper")
@@ -2480,7 +2675,7 @@ class OpeningEngine:
                 run.on_exit(now, 0.0, "cerrada (sin detalle en la cartera)")
             else:   # nunca llegó a abrirse: rechazada, caducada o bloqueada al ejecutarse
                 x["done"] = True
-                self.day["entries"].pop(s, None)   # no cuenta como entrada del día
+                self._drop_entry(s)   # no cuenta como entrada del día
                 run.on_rejected(now, "el paper no llegó a ejecutarla (rechazada, caducada o bloqueada)"
                                 if x["pending"] else "el paper no llegó a ejecutarla (bloqueada o rechazada)")
 
@@ -2632,7 +2827,8 @@ class OpeningEngine:
                      "coins": {c: self._coin_imp(w, c, now) for c in self.p["coins"]}}
                     for w in sorted(self.windows.values(), key=lambda x: x["open_ms"])]
             return {"type": "openings", "ts": now, "strategy": "impulso", "windows": wins,
-                    "params": {k: self.p[k] for k in IMP_STATUS_KEYS}, "params_source": self.source,
+                    "params": {**{k: self.p[k] for k in IMP_STATUS_KEYS}, **self.preset},
+                    "params_source": self.source,
                     "notice": self.notice, "states": list(IMP_STATES), "paused": self.paused,
                     "estrategia_cargada": self.loaded,
                     "day": {"date": day["date"], "entries": len(day["entries"]),

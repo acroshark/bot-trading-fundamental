@@ -1423,7 +1423,7 @@ def test_senal_con_peso_del_medio_y_sin_fuentes_silenciadas(tmp_path, monkeypatc
                   extra=[{"kind": "srcstate", "patch": {"srcState": "prueba", "srcWeight": 0.5}}])
     _publish_news(bus, "n-malo", now - 60_000, 90, url="https://malo.com/x")
     src = ap.story_sources(store, ["n-sil", "n-sube", "n-malo", "n-nada"])
-    assert src["n-sil"] == {"outlet": "neutro.org", "srcState": "silenciada", "srcWeight": 0.0}
+    assert src["n-sil"] == {"outlet": "neutro.org", "srcId": "f", "srcState": "silenciada", "srcWeight": 0.0}
     assert src["n-sube"]["srcState"] == "prueba" and src["n-sube"]["srcWeight"] == 0.5 and "n-nada" not in src
     get = ap.signal_getter(bus, clock=lambda: now, cache_s=0)
     s = get("BTC", {"markets": ["londres"], "open_ms": T0})
@@ -1499,7 +1499,8 @@ async def test_motor_opera_la_estrategia_que_aplica_la_evolucion(tmp_path, live_
     st = eng.view()
     assert st["params_source"] == "evolucion" and st["paused"] is False
     assert st["estrategia_cargada"] == {"firma": eng.firma, "ts": T0 + 30 * MIN + 3000, "pausada": False,
-                                        "fuente": "evolucion", "registro": "v-prueba"}
+                                        "fuente": "evolucion", "registro": "v-prueba", "preset": None}
+    assert st["params"]["preset"] is None   # ajustada: ya no es ningún preset
     # Lo que ve la evolución: el motor confirma la versión del archivo
     assert evolucion._confirmacion_motor(activa, evolucion.firma_estrategia(activa), st["estrategia_cargada"])["confirmado"]
 
@@ -1549,3 +1550,113 @@ async def test_motor_recarga_la_estrategia_entre_aperturas(tmp_path, live_impuls
     eng._check_activa(now[0])
     assert eng.source == "preset_impulso" and eng.firma == first
     await eng.step()            # el paso normal no falla con la recarga
+
+
+# ---------------------------------------------------------------- preset «6 diarias» y veto de noticias fiables (28-10-2026)
+
+FIABLE = {"clave": "medio:bueno.com", "tipo": "medio", "nombre": "bueno.com", "sentido": None, "n": 40, "dias": 4,
+          "acierto": 0.7, "ic90_bajo": 0.58, "estado": "fiable", "n_historias": 40, "opera": True}
+
+
+@pytest.fixture
+def con_fiable():
+    from bot import fiables
+    fiables.usar({"grupos": [FIABLE]})
+    yield fiables
+    fiables.usar(None)
+
+
+def _seis(**over):
+    return {**{k: v for k, v in ap.SEIS.items() if k not in ("estrategia", "windows", "coins")}, **over}
+
+
+def test_preset_seis_sin_filtros_y_dentro_de_las_reglas(monkeypatch):
+    from bot import config, evolucion
+    monkeypatch.setattr(config, "USER_RULES", True)
+    p, notes = ap.impulse_params(ap.SEIS)
+    assert not notes and p["lab"] is None and p["estrategia"] == "impulso"
+    assert (p["measure_min"], p["min_move_pct"], p["entry"], p["rvol_min"]) == (15, 0.0, "t:15", None)
+    assert (p["vol_filter"], p["btc_filter"], p["news_mode"]) == ("todos", "ninguno", "fiables")
+    assert (p["sl_pct"], p["target_r"], p["max_hold_h"], p["min_net_pct"]) == (1.5, 3.0, 24.0, 3.0)
+    assert (p["max_day_entries"], p["max_day_risk_pct"], p["risk_pct"]) == (6, 3.0, None)
+    assert p["windows"] == list(ap.LAB_WINDOWS) and p["coins"] == list(config.COINS) and p["session_max_min"] == 120
+    assert ap.preset_of(p) == "seis" and ap.preset_of(ap.impulse_params({})[0]) == "impulso"
+    assert ap.preset_of(ap.impulse_params({**ap.SEIS, "sl_pct": 2.0})[0]) is None
+    assert ap.preset_info(p)["nombre"] == "6 diarias" and "veto de noticias fiables" in ap.PRESETS["seis"]["descripcion"]
+    assert ap.hold_text(p) == "como mucho 24 h" and ap.hold_text({}) == "sin tope (7 días de seguridad)"
+    ok, fallos = evolucion.cumple_reglas({k: v for k, v in ap.SEIS.items() if k not in ("estrategia", "lab")})
+    assert ok, fallos
+    bad, notes = ap.impulse_params({**ap.SEIS, "min_move_pct": -0.1})
+    assert bad["min_move_pct"] == 0.2 and "min_move_pct" in notes[0]
+    assert ap.impulse_plan(1, 100.0, p)["ok"] and ap.impulse_plan(1, 100.0, p)["net_pct"] == pytest.approx(4.26)
+
+
+def test_seis_entra_al_medir_con_cualquier_movimiento():
+    p = ap.impulse_params(ap.SEIS)[0]
+    run = ap.ImpulseRun("BTC", T0, p, ctx={"atr_pct": None, "btc_dir": 1, "prev_react": None}, prior=None)
+    [act] = feed_all(run, imp_bars(T0, d=-1, move=0.05))
+    assert act["dir"] == -1 and act["t"] == T0 + 15 * MIN and act["rvol"] is None and act["tags"]["instrumento"] == "perp"
+    assert act["tags"]["noticia_fiable"] == "ninguna" and act["tags"]["btc"] == "en_contra"   # BTC no filtra
+    quieto = ap.ImpulseRun("BTC", T0, p, ctx={}, prior=None)
+    feed_all(quieto, flat(T0, 30))
+    assert quieto.done and "sin movimiento" in quieto.end_why
+
+
+def test_veto_de_una_noticia_fiable_en_contra(con_fiable):
+    p = ap.impulse_params(ap.SEIS)[0]
+    now = T0 + 15 * MIN
+    bajista = {**news_ev(now - 30 * MIN, -60, activos=["BTC"], tipo="exchange"), "medio": "bueno.com",
+               "clase": "cripto", "title": "Bitcoin: hackeo en un exchange"}
+    s = ap.signal_from("BTC", ["londres"], T0, [], [bajista], None, now, p)
+    [f] = s["fiables"]
+    assert f["dir"] == -1 and f["grupo"] == "medio:bueno.com" and f["nombre"] == "bueno.com"
+    assert "fiables" not in ap.signal_from("ETH", ["londres"], T0, [], [bajista], None, now, p)   # habla de BTC
+    tags = ap.impulse_tags(1, 0.3, {}, s, p)
+    assert tags["noticia_fiable"] == "en_contra" and tags["noticia_fiable_grupo"] == "bueno.com"
+    why = ap.impulse_filters(1, tags, {}, p)
+    assert "grupo fiable va en contra (bueno.com" in why
+    assert ap.impulse_filters(-1, ap.impulse_tags(-1, -0.3, {}, s, p), {}, p) is None   # a favor: no veta
+    e2 = ap.impulse_params({"btc_filter": "ninguno", "rvol_min": None})[0]   # E2 (no_contra): este veto no es suyo
+    assert ap.impulse_filters(1, ap.impulse_tags(1, 0.3, {}, s, e2), {}, e2) is None
+    run = ap.ImpulseRun("BTC", T0, p, ctx={}, news=s, prior=None)
+    feed_all(run, imp_bars(T0, d=1, move=0.3))
+    assert run.done and not run.entries and "grupo fiable va en contra" in run.end_why
+    con_fiable.usar(None)   # sin grupos fiables no veta nada
+    s2 = ap.signal_from("BTC", ["londres"], T0, [], [bajista], None, now, p)
+    assert "fiables" not in s2 and ap.impulse_tags(1, 0.3, {}, s2, p)["noticia_fiable"] == "ninguna"
+
+
+async def test_motor_seis_estado_y_ticket_de_24_h(monkeypatch):
+    from bot import config
+    monkeypatch.setattr(config, "USER_RULES", True)
+    full = ap.OpeningEngine(FakeBus(), None, lambda c, w: {"dir": 0}, lambda *a: True, lambda: {}, clock=lambda: T0,
+                            params=dict(ap.SEIS))
+    st = full.view()
+    assert st["params"]["preset"] == "seis" and st["params"]["nombre"] == "6 diarias" and st["day"]["max_entries"] == 6
+    assert "veto de noticias fiables" in st["params"]["descripcion"] and st["estrategia_cargada"]["preset"] == "seis"
+    e2 = ap.OpeningEngine(FakeBus(), None, lambda c, w: {"dir": 0}, lambda *a: True, lambda: {}, clock=lambda: T0,
+                          params={"estrategia": "impulso"})
+    assert e2.view()["params"]["preset"] == "impulso" and e2.view()["params"]["nombre"] == "E2 · impulso"
+    now = [T0 + 15 * MIN + 3000]
+    eng, sent, _ = imp_engine(now, {"BTC": (1, 0.3)}, _seis())
+    await eng.step()
+    [(t, story, _hl, strat, _win)] = sent
+    assert story == "a-europa-2026-10-26-btc-1" and strat == "impulso-largo-sin-noticia" and t["stopPct"] == 1.5
+    assert t["winEnd"] == now[0] + 24 * ap.H and t["holdLabel"] == "tope de 24 h" and t["valid"].startswith("como mucho 24 h")
+    assert t["tags"]["origen"] == "motor_aperturas" and t["origen"] == "motor_aperturas" and t["tags"]["preset"] is None
+    assert t["tags"]["noticia_fiable"] == "ninguna" and t["tp2R"] == 3.0
+    w = _wimp(eng)
+    assert "cualquier movimiento" in w["why"] and "grupo fiable" in w["why"] and w["why"].endswith("como mucho 24 h")
+    assert w["coins"]["BTC"]["why"].endswith("como mucho 24 h")
+
+
+async def test_motor_cuenta_las_entradas_de_la_noticia_en_el_tope_del_dia():
+    now = [T0 + 30 * MIN + 3000]
+    hoy = ap.madrid_day_start(now[0])
+    pf = {"positions": [{"story": "nf-n9-sol", "coin": "SOL", "side": "long", "opened": hoy + MIN, "riskUsd": 50.0}],
+          "pending": [], "closed": [{"story": "n-fase2-ayer", "coin": "ETH", "opened": hoy - 5 * MIN, "riskUsd": 50.0}]}
+    eng, sent, _ = imp_engine(now, {"BTC": (1, 0.3)}, {"btc_filter": "ninguno", "max_day_entries": 1}, pf=pf)
+    await eng.step()
+    assert not sent and "Tope diario de 1 entradas" in _rimp(eng, "BTC").end_why
+    day = eng.view()["day"]
+    assert day["entries"] == 1 and day["risk_pct"] == pytest.approx(0.5)   # la de ayer no cuenta

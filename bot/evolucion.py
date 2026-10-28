@@ -124,8 +124,10 @@ TIPOS = {"fuente_añadida": "Medio añadido", "fuente_silenciada": "Medio silenc
          "peso_cambiado": "Peso cambiado", "estrategia_promovida": "Estrategia promovida",
          "estrategia_degradada": "Estrategia degradada", "parametro_cambiado": "Parámetro cambiado",
          "informe_semanal": "Informe semanal", "veredicto_medio": "Veredicto de un medio",
-         "propuesta_descartada": "Propuesta descartada", "filtro_cambiado": "Filtro de noticias cambiado"}
-PROPIOS = ("estrategia_promovida", "estrategia_degradada", "parametro_cambiado")   # los revierte este módulo
+         "propuesta_descartada": "Propuesta descartada", "filtro_cambiado": "Filtro de noticias cambiado",
+         "estrategia_cambiada": "Estrategia cambiada"}   # por decisión del usuario (scripts/activar_estrategia.py)
+PROPIOS = ("estrategia_promovida", "estrategia_degradada", "parametro_cambiado",
+           "estrategia_cambiada")   # los revierte este módulo
 NO_REVERSIBLES = ("informe_semanal", "veredicto_medio", "propuesta_descartada",
                   "filtro_cambiado")   # apuntes, no cambios que deshacer (el del código se deshace con el código)
 # Cambios del código que alteran la operativa en paper sin pasar por la evolución: entran con un reinicio. Se apuntan una
@@ -153,6 +155,32 @@ CAMBIOS_CODIGO = [{
                   "macro_reales_5_dias": {"n": 1892, "confirmada_pct": 2.9, "contraria_pct": 5.1,
                                           "misma_hora_direccion_al_azar_pct": 3.5},
                   "nota": "La dirección del triaje no se cumple más que al azar: una «confirmada» no prueba causa."}}]
+CAMBIOS_CODIGO.append({
+    "id": "codigo-entrada-noticias-2026-10-28", "tipo": "filtro_cambiado",
+    "sujeto": "Entrada por noticia fiable y topes del día compartidos en la cartera paper",
+    "antes": {"entrada_por_noticia": "no existía: solo abrían operaciones el motor de aperturas y la fase 2",
+              "topes_del_dia": "el tope de entradas y de riesgo del día del motor contaba solo las suyas",
+              "noticias_fiables": "no se calculaban"},
+    "despues": {"entrada_por_noticia": ("una noticia de un grupo fiable que pase la puerta para operar (bot/fiables.py) "
+                                        "y que el precio confirme en 60 min abre una horquilla pura: stop 1,5 %, "
+                                        "objetivo 3R, como mucho 24 h, origen «noticia_fiable»"),
+                "topes_del_dia": ("el motor cuenta todas las entradas del paper del día de Madrid (las suyas, las de "
+                                  "la fase 2 y las de la noticia): con E2, su tope de 4 entradas y 2 %; con «6 diarias», "
+                                  "6 y 3 %, compartidos con la entrada por noticia"),
+                "noticias_fiables": "se calculan al arrancar y cada hora; con «6 diarias» vetan entradas en contra"},
+    "motivo": ("Lo pidió el usuario: filtrar las noticias que aciertan ≥ 60 % de forma constante y entrar cuando el "
+               "precio las confirme. Mezcla regímenes en la cartera de prueba de 100 € desde este reinicio: las "
+               "entradas por noticia no cuentan como operaciones del campeón, pero sí gastan los topes del día que "
+               "comparten; el gemelo de la vigilancia no lleva esos topes. El 28-10-2026 ningún grupo pasa la puerta "
+               "para operar, así que hasta que alguno la pase no abre nada. Para medir la cartera limpia, empezar otra "
+               "con scripts/nueva_cartera_paper.py."),
+    "evidencia": {"cambio_codigo": "entrada-noticias-2026-10-28", "grupos_fiables_25_27_oct": 6,
+                  "por_azar_moneda_dia": 3.4, "por_azar_por_horas": 3.8, "p_por_horas": 0.19,
+                  "pasan_la_puerta": 0, "hacia_delante_28_oct_acierto_pct": 41.6,
+                  "nota": ("Los grupos que pasan los criterios no se distinguen del azar y el 28 fallaron hacia "
+                           "delante: la puerta impide operar con ellos.")}})
+# Operaciones paper que no son del motor de aperturas aunque no lleven firma: no cuentan para el campeón
+ORIGENES_AJENOS = ("noticia_fiable",)
 # Acciones de fuentes_vivas → tipos del historial («activar» = una fuente en prueba pasa a activa: sube su peso)
 FUENTE_TIPO = {"anadir": "fuente_añadida", "silenciar": "fuente_silenciada", "retirar": "fuente_retirada",
                "restaurar": "fuente_restaurada", "activar": "peso_cambiado", "a_prueba": "peso_cambiado"}
@@ -704,7 +732,7 @@ def op_paper(t: dict) -> dict | None:
             "ventana": _ventana(t.get("market"), t.get("window"), t.get("story")),
             "noticia": tags.get("noticia"), "vol_pct": _f(tags.get("volatilidad_pct")),
             "apertura_anterior": tags.get("apertura_anterior"), "btc": tags.get("btc"),
-            "firma": tags.get("estrategia_firma") or None,
+            "firma": tags.get("estrategia_firma") or None, "origen": tags.get("origen") or t.get("origen"),
             "estrategia": t.get("strategy"), "story": t.get("story"), "titular": t.get("headline")}
 
 
@@ -1250,7 +1278,10 @@ def calcular(paper: list[dict], meta: list[dict], filas: list[dict], activa: dic
     base = firma(activa)
     conf = _confirmacion_motor(activa, f_act, motor)
     hz = _f(ef.get("max_hold_h"), HORIZONTE_H[DUR_MOTOR]) or HORIZONTE_H[DUR_MOTOR]
-    mias = [o for o in paper if o.get("firma") == f_act or (o.get("firma") is None and es_preset(activa))]
+    # las del campeón: las de su versión (y, con el preset, las de antes de la firma); nunca las de la entrada por
+    # noticia fiable (otra estrategia que comparte la cartera: sin firma, con el preset se colaban como de E2)
+    mias = [o for o in paper if o.get("origen") not in ORIGENES_AJENOS
+            and (o.get("firma") == f_act or (o.get("firma") is None and es_preset(activa)))]
     champ, en_curso, sin_res = completas(mias, ahora, hz)
     cerradas = sorted((o for o in mias if o["R"] is not None), key=lambda o: o["t_out"])
     # «Desde»: cuando se aplicó esta versión o, con el preset, su primera operación (la carga del motor cambia en cada
@@ -2035,6 +2066,7 @@ class Evolucion:
             filtro = base.get("twin_filtro") if tw else None
             if tw and ({"windows", "coins"} & set(ch["params"])):   # gemelo aproximado: sin lo que se quita
                 filtro = {"windows": list(efn.get("windows") or []), "coins": list(efn.get("coins") or [])}
+            base = {k: v for k, v in base.items() if k not in ("preset", "descripcion")}   # ya no es el preset
             despues = {**base, "fuente": "evolucion", "params": params, "lab_id": None, "lab_twin": tw,
                        "twin_filtro": filtro, "nombre": f"{base.get('nombre')} · ajustada", "desde": ahora}
         else:
@@ -2129,8 +2161,8 @@ class Evolucion:
         ok, why = validar_activa(nuevo)
         if not ok:
             return {"ok": False, "why": f"No se puede volver a lo de antes: {why}"}
-        tipo = {"estrategia_promovida": "estrategia_degradada", "estrategia_degradada": "estrategia_promovida"} \
-            .get(e["tipo"], "parametro_cambiado")
+        tipo = {"estrategia_promovida": "estrategia_degradada", "estrategia_degradada": "estrategia_promovida",
+                "estrategia_cambiada": "estrategia_cambiada"}.get(e["tipo"], "parametro_cambiado")
         try:
             await asyncio.to_thread(escribir_activa, self.archivo, nuevo)
             registrar(self.store, tipo, nuevo.get("nombre") or e["sujeto"], actual, nuevo,

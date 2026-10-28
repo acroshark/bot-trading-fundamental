@@ -3,8 +3,9 @@
 Además de noticias, mercado, paper y aperturas, arrancan los módulos que miden y aprenden (todo solo paper):
 vigilancia (prueba en avance de las estrategias congeladas), aprendizaje (medida de noticias y medios, pesos y
 post-mortems), fuentes vivas (estado de cada fuente y descubrimiento), evolución (historial, campeón y aspirantes,
-propuestas e informe semanal), reacción (la cripto en cada apertura de bolsa: «cripto_aperturas») y reflejo (¿la cripto
-refleja las noticias macro y geopolíticas?). Si uno no arranca, el bot sigue sin él."""
+propuestas e informe semanal), reacción (la cripto en cada apertura de bolsa: «cripto_aperturas»), reflejo (¿la cripto
+refleja las noticias macro y geopolíticas?), noticias fiables (los grupos que aciertan ≥ 60 % de forma constante) y la
+entrada por noticia fiable confirmada por el precio. Si uno no arranca, el bot sigue sin él."""
 import asyncio
 import logging
 import os
@@ -24,8 +25,10 @@ from .backtest import Backtester
 from .bus import Bus
 from .claude_agents import Phase2
 from .desk import NewsDesk
+from .entrada_noticias import ENABLED as ENTRADA_NOTICIAS, EntradaNoticias
 from .evolucion import ARCHIVO as ESTRATEGIA_ACTIVA, Evolucion
 from .feeds import FeedPoller, load_registry
+from .fiables import ENABLED as FIABLES, Fiables
 from .fuentes_vivas import FuentesVivas
 from .hunters import SOURCES, SourceState, run_source
 from .local_ai import LocalAI
@@ -149,6 +152,18 @@ async def main() -> None:
         refl = optional("El reflejo", lambda: Reflejo(bus, bars=CacheBars(live=lambda c: vigil.bars.get(c)).get))
         if refl is not None:
             observe_bus(bus, refl.observe)
+        # Noticias fiables: los grupos (medio, feed, tipo×sentido, medio×sentido) que aciertan ≥ 60 % de forma constante,
+        # con lo que midió el aprendizaje (news_outcomes); al arrancar y cada hora. Los usan el veto de «6 diarias» y la
+        # entrada por noticia, solo con los grupos que pasan la puerta para operar (sin ellos, ninguno hace nada).
+        fiab = optional("Las noticias fiables", lambda: Fiables(bus, store)) if FIABLES else None
+        # Entrada por noticia fiable: espera a que el precio la confirme y entra en el paper (stop 1,5 %, 3R, 24 h) con
+        # los topes diarios compartidos con el motor. BOT_ENTRADA_NOTICIAS=0 la apaga.
+        entrada = None
+        if ENTRADA_NOTICIAS:
+            entrada = optional("La entrada por noticia fiable", lambda: EntradaNoticias(
+                bus, store, broker.submit, broker.portfolio, bars=CacheBars(live=lambda c: vigil.bars.get(c)).get))
+        if entrada is not None:
+            observe_bus(bus, entrada.observe)
         # Reacción: la cripto en cada apertura de bolsa (cripto_aperturas); la historia, en un hilo y una vez al día.
         react = optional("La reacción de la cripto en las aperturas", lambda: Reaccion(
             bus, bars=CacheBars(live=lambda c: vigil.bars.get(c)).get))
@@ -179,7 +194,7 @@ async def main() -> None:
 
         services = Services(feeds=feeds, predictor=predictor, broker=broker, phase2=phase2, backtest=bt, openings=openings,
                             vigilancia=vigil, aprendizaje=learn, evolucion=evo, fuentes_vivas=vivas, reaccion=react,
-                            reflejo=refl)
+                            reflejo=refl, fiables=fiab, entrada_noticias=entrada)
         runner = web.AppRunner(make_app(bus, health, services))
         await runner.setup()
         await web.TCPSite(runner, config.HOST, config.PORT).start()
@@ -202,7 +217,8 @@ async def main() -> None:
                     bus.publish({"type": "sources", "sources": view})
                 await asyncio.sleep(3)
 
-        extra = [m.run() for m in (learn, vivas, evo, refl, react) if m is not None]   # cada run() atrapa sus fallos
+        extra = [m.run() for m in (learn, vivas, evo, refl, react, fiab, entrada)
+                 if m is not None]   # cada run() atrapa sus fallos
         try:
             await asyncio.gather(*(run_source(st, session, desk) for st in states),
                                  market.run(), agenda.run(bus, session), local.run(), report_sources(),

@@ -143,14 +143,34 @@ def test_cambio_del_filtro_de_noticias_se_apunta_una_sola_vez(env):
     filtra la estrategia en paper; queda en el historial (no reversible desde la web) una sola vez, aunque se reinicie."""
     store, _, _ = env
     ev = evo(env)
-    [e] = ev.apuntar_cambios_codigo()
+    e, f = ev.apuntar_cambios_codigo()
     assert e["id"] == "codigo-noticias-2026-10-28" and e["tipo"] == "filtro_cambiado" and e["origen"] == "codigo"
     assert e["etiqueta"] == "Filtro de noticias cambiado" and "dos regímenes" in e["motivo"]
     assert "nueva_cartera_paper.py" in e["motivo"] and e["evidencia"]["azar_confirmada_pct"]["umbral_2sigma"] == 5.0
+    # la entrada por noticia y los topes compartidos (revisión de código del 28-10-2026): también una sola vez
+    assert f["id"] == "codigo-entrada-noticias-2026-10-28" and f["origen"] == "codigo" and "mezcla" in f["motivo"].lower()
+    assert "noticia_fiable" in f["despues"]["entrada_por_noticia"] and f["evidencia"]["pasan_la_puerta"] == 0
     assert ev.apuntar_cambios_codigo() == [] and E.apuntar_cambios_codigo(store) == []   # reinicio: no se repite
     assert evo(env).apuntar_cambios_codigo() == []
-    assert [x["id"] for x in E.leer(store, tipo="filtro_cambiado")] == ["codigo-noticias-2026-10-28"]
+    assert sorted(x["id"] for x in E.leer(store, tipo="filtro_cambiado")) == [
+        "codigo-entrada-noticias-2026-10-28", "codigo-noticias-2026-10-28"]
     assert "filtro_cambiado" in E.NO_REVERSIBLES and "filtro_cambiado" not in E.PROPIOS
+
+
+def test_las_entradas_por_noticia_no_cuentan_como_del_campeon():
+    """Con el preset, las operaciones sin firma cuentan como de E2; las de la entrada por noticia fiable no (comparten
+    la cartera, pero son otra estrategia)."""
+    ahora = DESDE + 30 * DAY
+
+    def tr(i, origen=None):
+        tags = {"origen": origen} if origen else {}
+        return {"opened": DESDE + i * DAY, "closed": DESDE + i * DAY + H, "R": 1.0, "pnl": 1.0, "coin": "BTC",
+                "side": "long", "tags": tags, "strategy": "x", "story": f"s{i}"}
+
+    paper = [E.op_paper(tr(i)) for i in range(4)] + [E.op_paper(tr(10 + i, "noticia_fiable")) for i in range(3)]
+    assert [o["origen"] for o in paper] == [None] * 4 + ["noticia_fiable"] * 3
+    res = E.calcular(paper, [], [], E.activa_por_defecto(), ahora, n_boot=50)
+    assert res["campeon"]["vivo"]["operaciones"] == 4
 
 
 def test_registrar_desde_otra_conexion_tipos_nuevos_y_errores(env, tmp_path):
@@ -1078,3 +1098,136 @@ async def test_sin_vigilancia_se_evalua_tras_la_espera_o_si_esta_apagada(env):
     bus.publish({"type": "vigilancia", "estado": "apagada", "estrategias": []})
     await ev.paso()
     assert len((await ev.api_informes())["informes"]) == 2
+
+
+# ---------------------------------------------------------------- estrategia cambiada por el usuario (activar_estrategia)
+
+def _script():
+    import importlib.util
+    from pathlib import Path
+    path = Path(__file__).resolve().parents[1] / "scripts" / "activar_estrategia.py"
+    spec = importlib.util.spec_from_file_location("activar_estrategia", path)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
+
+def _url_cerrada() -> str:
+    import socket
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()   # nada escucha ahí: el «bot» no está en marcha
+    return f"http://127.0.0.1:{port}/health"
+
+
+async def test_activar_seis_por_decision_del_usuario_y_volver(env, monkeypatch):
+    from bot import apertura as ap
+    store, bus, path = env
+    m = _script()
+    monkeypatch.setattr(m, "bot_en_marcha", lambda url, timeout=2.0: False)   # la comprobación real va aparte
+    ahora = ms(2026, 10, 28, 20, 0)
+    datos = ["--datos", str(path.parent), "--url", _url_cerrada()]
+    assert m.main(["--preset", "seis", "--simular", *datos], ahora=ahora) == 0 and not path.exists()
+    assert m.main(["--preset", "seis", *datos], ahora=ahora) == 0
+    act = E.leer_estrategia_activa(path)
+    assert act["preset"] == "seis" and act["nombre"] == "6 diarias" and act["fuente"] == "usuario" and act["solo_paper"]
+    assert E.validar_activa(act) == (True, None) and act["firma"] == E.firma_estrategia(act) and not act["pausada"]
+    assert act["lab_id"] is None and act["lab_twin"] is None and "lab" not in act["params"]
+    p = ap.impulse_params(E.params_motor(act))[0]
+    assert ap.preset_of(p) == "seis" and E.firma_motor(p) == act["firma"]
+    [e] = E.leer(store, tipo="estrategia_cambiada")
+    assert "Estrategia cambiada por decisión del usuario el 28-10-2026: 6 diarias" in e["motivo"] and "paper" in e["motivo"]
+    assert e["origen"] == "usuario" and e["antes"]["fuente"] == "preset" and e["despues"]["preset"] == "seis"
+    assert e["id"] == act["registro"] and e["evidencia"]["firma_despues"] == act["firma"]
+    row = store.db.execute("SELECT valor FROM evolution_state WHERE clave='ultimo_cambio'").fetchone()
+    assert json.loads(row[0]) == ahora   # la evolución automática espera 14 días para promocionar otra
+    # El motor la carga: preset «seis» con la firma del archivo
+    monkeypatch.setenv("BOT_APERTURAS_ESTRATEGIA", "impulso")
+    monkeypatch.delenv("BOT_IMPULSO_PARAMS", raising=False)
+    eng = ap.OpeningEngine(bus, None, lambda c, w: {"dir": 0}, lambda *a: True, lambda: {}, clock=lambda: ahora,
+                           activa_path=path)
+    st = eng.view()
+    assert eng.source == "usuario" and eng.firma == act["firma"] and st["params"]["preset"] == "seis"
+    assert st["params_source"] == "usuario" and st["estrategia_cargada"]["fuente"] == "usuario"
+    assert st["params"]["nombre"] == "6 diarias" and st["day"]["max_entries"] == 6
+    # Otra vez lo mismo: nada que cambiar (no se repite en el historial)
+    assert m.main(["--preset", "seis", *datos], ahora=ahora + 1000) == 0
+    assert len(E.leer(store, tipo="estrategia_cambiada")) == 1
+    # Se puede revertir desde la evolución (vuelve a lo de antes: el preset)
+    ev = evo(env, clock=lambda: ahora + 2000)
+    assert ev.reversible(e)
+    res = await ev.revertir(e["id"])
+    assert res["ok"], res
+    back = E.leer_estrategia_activa(path)
+    assert E.es_preset(back) and E.params_motor(back) is None
+    rev = E.leer(store, tipo="estrategia_cambiada")[0]
+    assert rev["revierte"] == e["id"]
+    # Y con el script, a E2 (el preset de siempre), apuntado también
+    assert m.main(["--preset", "seis", *datos], ahora=ahora + 3000) == 0
+    assert m.main(["--preset", "impulso", *datos], ahora=ahora + 4000) == 0
+    imp = E.leer_estrategia_activa(path)
+    assert imp["preset"] == "impulso" and E.es_preset(imp) and imp["nombre"] == "E2 · impulso"
+    assert "E2 · impulso" in E.leer(store, tipo="estrategia_cambiada")[0]["motivo"]
+
+
+def test_activar_se_niega_con_el_bot_en_marcha(tmp_path):
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    class Ok(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        def log_message(self, *a):
+            pass
+
+    srv = HTTPServer(("127.0.0.1", 0), Ok)
+    th = threading.Thread(target=srv.serve_forever, daemon=True)
+    th.start()
+    try:
+        m = _script()
+        url = f"http://127.0.0.1:{srv.server_address[1]}/health"
+        assert m.bot_en_marcha(url) and not m.bot_en_marcha(_url_cerrada())
+        assert m.main(["--preset", "seis", "--datos", str(tmp_path), "--url", url]) == 2
+        assert not (tmp_path / E.ARCHIVO).exists() and not (tmp_path / "bot.db").exists()
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_activar_no_escribe_lo_que_rompe_las_reglas(tmp_path, monkeypatch):
+    from bot import apertura as ap
+    m = _script()
+    monkeypatch.setitem(ap.PRESETS, "seis", {**ap.PRESETS["seis"], "params": {**ap.SEIS, "sl_pct": 1.0}})
+    res = m.activar("seis", tmp_path, ahora=ms(2026, 10, 28, 20))
+    assert not res["ok"] and "reglas del usuario" in res["why"] and not (tmp_path / E.ARCHIVO).exists()
+    assert not m.activar("otro", tmp_path)["ok"]
+
+
+def test_activar_sin_bot_db_no_crea_nada(tmp_path):
+    """--datos que no apunta a la carpeta del bot: no se crea una bot.db vacía ni se escribe la estrategia."""
+    m = _script()
+    res = m.activar("seis", tmp_path, ahora=ms(2026, 10, 28, 20))
+    assert not res["ok"] and "bot.db" in res["why"]
+    assert not (tmp_path / "bot.db").exists() and not (tmp_path / E.ARCHIVO).exists()
+
+
+def test_activar_es_todo_o_nada(env):
+    """Si falla el apunte del último cambio o el del historial, no queda ninguno de los dos y el archivo vuelve."""
+    store, _bus, path = env
+    m = _script()
+    E.asegurar_tablas(store)
+    store.db.execute("CREATE TRIGGER sin_estado BEFORE INSERT ON evolution_state BEGIN SELECT RAISE(ABORT, 'no'); END")
+    store.db.commit()
+    res = m.activar("seis", path.parent, ahora=ms(2026, 10, 28, 20))
+    assert not res["ok"] and "historial" in res["why"] and not path.exists()
+    assert E.leer(store, tipo="estrategia_cambiada") == []
+    store.db.execute("DROP TRIGGER sin_estado")
+    store.db.execute("CREATE TRIGGER sin_log BEFORE INSERT ON evolution_log BEGIN SELECT RAISE(ABORT, 'no'); END")
+    store.db.commit()
+    res = m.activar("seis", path.parent, ahora=ms(2026, 10, 28, 21))
+    assert not res["ok"] and not path.exists()
+    assert store.db.execute("SELECT COUNT(*) FROM evolution_state WHERE clave='ultimo_cambio'").fetchone()[0] == 0

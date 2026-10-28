@@ -48,6 +48,8 @@ class Services:
     fuentes_vivas: Any = None   # FuentesVivas (estado de cada fuente y descubrimiento de medios)
     reaccion: Any = None     # Reaccion (la cripto en cada apertura de bolsa: «cripto_aperturas»)
     reflejo: Any = None      # Reflejo (¿la cripto refleja las noticias macro y geopolíticas?)
+    fiables: Any = None      # Fiables (grupos de noticias que aciertan ≥ 60 % de forma constante)
+    entrada_noticias: Any = None   # EntradaNoticias (entrada por noticia fiable confirmada por el precio)
 
 
 def _hora(ms: int) -> str:
@@ -231,7 +233,8 @@ def state_summary(bus: Bus) -> dict:
                               "posiciones": len(cartera.get("positions", []))} if cartera else None}
 
 
-BT_BLOCK = re.compile(r'<script type="application/json" id="(?:bt(?:Open)?Data|impulsoData)">.*?</script>', re.S)
+BT_BLOCK = re.compile(r'<script type="application/json" id="(?:bt(?:Open)?Data|impulsoData|seisData)">.*?</script>',
+                      re.S)
 
 
 def make_app(bus: Bus, health, services: Services | None = None) -> web.Application:
@@ -686,10 +689,17 @@ def make_app(bus: Bus, health, services: Services | None = None) -> web.Applicat
         return j(res)
 
     async def api_bt_impulso(_request: web.Request) -> web.Response:
-        """La estrategia que opera el motor en vivo (variante de 7 días) y el resumen del laboratorio."""
+        """La estrategia del motor (E2, variante de 7 días), la de «6 diarias» y el resumen del laboratorio."""
         res = await asyncio.to_thread(resumen_backtest.load)
-        if res["impulso"] is None and res["lab"] is None:
+        if res["impulso"] is None and res["lab"] is None and res.get("seis") is None:
             raise web.HTTPNotFound(text="Aún no hay backtest del motor: python -m bot.laboratorio y controles/compara_impulso.py")
+        return j(res)
+
+    async def api_fiables(_request: web.Request) -> web.Response:
+        """El último cálculo de las noticias fiables (contrato 2.15); 404 si aún no hay ninguno."""
+        res = sv.fiables.view() if sv.fiables else bus.state.get("noticias_fiables")
+        if not res:
+            raise web.HTTPNotFound(text="Aún no hay cálculo de noticias fiables (se hace al arrancar y cada hora)")
         return j(res)
 
     app = web.Application()
@@ -710,6 +720,7 @@ def make_app(bus: Bus, health, services: Services | None = None) -> web.Applicat
     app.router.add_get("/api/aperturas", api_openings)
     app.router.add_get("/api/backtest/aperturas", api_bt_openings)
     app.router.add_get("/api/backtest/impulso", api_bt_impulso)
+    app.router.add_get("/api/noticias_fiables", api_fiables)
     app.router.add_get("/api/vigilancia", api_vigilancia)
     app.router.add_get("/api/cripto_aperturas", api_cripto_aperturas)
     app.router.add_get("/api/fuentes_vivas", api_fv)

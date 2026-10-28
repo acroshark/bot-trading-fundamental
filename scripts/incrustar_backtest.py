@@ -4,6 +4,8 @@ Uso: M:\\BotFundamental-runtime\\venv\\Scripts\\python.exe scripts\\incrustar_ba
 Con el bot en marcha la web no usa esto: pide /api/backtest.
 También incrusta un resumen ligero del laboratorio (labData): el ejemplo de la pestaña Evolución lo usa para poner los
 nombres y las cifras fuera de muestra reales de sus estrategias prometedoras (todo lo demás del ejemplo es inventado).
+Y el backtest del motor en vivo (impulsoData, E2) y el de la estrategia «6 diarias» (seisData, de
+seis_diarias_resumen.json), con la curva de R reducida.
 """
 import json
 import re
@@ -13,13 +15,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from bot import config  # noqa: E402
-from bot.resumen_backtest import impulso_summary, lab_summary  # noqa: E402,F401  (lab_summary: lo usan las pruebas)
+from bot.resumen_backtest import (SEIS_FILE, impulso_summary, lab_summary,  # noqa: E402,F401  (lab_summary: pruebas)
+                                  seis_summary)
 
 PAGE = ROOT / "dashboard" / "radar.html"
 BLOCK = re.compile(r'<script type="application/json" id="btData">.*?</script>', re.S)
 BLOCK_OPEN = re.compile(r'<script type="application/json" id="btOpenData">.*?</script>', re.S)
 BLOCK_LAB = re.compile(r'<script type="application/json" id="labData">.*?</script>', re.S)
 BLOCK_IMP = re.compile(r'<script type="application/json" id="impulsoData">.*?</script>', re.S)
+BLOCK_SEIS = re.compile(r'<script type="application/json" id="seisData">.*?</script>', re.S)
 POINTS = 40
 
 
@@ -84,6 +88,15 @@ def main() -> None:
             m = BLOCK_LAB.search(html) or BLOCK_OPEN.search(html) or BLOCK.search(html)
             html = html[:m.end()] + "\n" + tag4 + html[m.end():]
         print(f"Incrustado el backtest del motor en vivo ({len(tag4) / 1024:.1f} KB)")
+    src_seis = config.BACKTEST_DIR / SEIS_FILE
+    if src_seis.exists():   # la estrategia «6 diarias» (réplica de 3 años; pierde fuera de muestra, se enseña tal cual)
+        tag5 = _tag("seisData", seis_summary(json.loads(src_seis.read_text(encoding="utf-8"))))
+        if BLOCK_SEIS.search(html):
+            html = BLOCK_SEIS.sub(lambda _: tag5, html)
+        else:
+            m = BLOCK_IMP.search(html) or BLOCK_LAB.search(html) or BLOCK_OPEN.search(html) or BLOCK.search(html)
+            html = html[:m.end()] + "\n" + tag5 + html[m.end():]
+        print(f"Incrustado el backtest de «6 diarias» ({len(tag5) / 1024:.1f} KB)")
     PAGE.write_text(html, encoding="utf-8")
 
 

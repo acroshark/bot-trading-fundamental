@@ -157,11 +157,30 @@ def next_midnight(day) -> int | None:
 
 def paper_id() -> str | None:
     """Estrategia del laboratorio que opera el paper en modo impulso: la del preset IMPULSO con sus 7 días de
-    seguridad (None si apertura.py no la declara así)."""
+    seguridad (None si apertura.py no la declara así). El preset SEIS («6 diarias», lab None) no se vigila: su umbral 0
+    no está en la rejilla del laboratorio (ap_mom: 0,2, 0,5 y 1 %) ni el laboratorio tiene su tope de 6 entradas al día
+    ni el veto de noticias fiables; se mide solo en paper (y su réplica de 3 años, en seis_diarias_resumen.json)."""
     ref, imp = getattr(apertura, "LAB_REF", None), getattr(apertura, "IMPULSO", None) or {}
-    if not isinstance(ref, str) or imp.get("max_hold_h") != 168:
+    if not isinstance(ref, str) or imp.get("max_hold_h") != 168 or not paper_es_impulso():
         return None
     return ref.rsplit("|", 1)[0] + "|" + VARIANT_DUR
+
+
+def paper_es_impulso(path=None) -> bool:
+    """¿Opera el paper el preset IMPULSO? No si estrategia_activa.json (evolucion.leer_estrategia_activa) pone otra
+    estrategia: «6 diarias» (scripts/activar_estrategia.py) o una versión ajustada por la evolución. Entonces ninguna
+    vigilada es «la regla que opera el paper». Sin archivo, o si no se puede leer, el preset de siempre."""
+    try:
+        from . import evolucion   # perezoso: la evolución es otro módulo grande
+        act = evolucion.leer_estrategia_activa(path or config.DATA_DIR / evolucion.ARCHIVO)
+        over = evolucion.params_motor(act)
+        if not over:
+            return True
+        p = apertura.impulse_setup({k: v for k, v in over.items() if k != "estrategia"})[0]
+        return apertura.preset_of(p) == "impulso"
+    except Exception:
+        log.exception("Vigilancia: no pude leer la estrategia activa; se supone el preset IMPULSO")
+        return True
 
 
 def watch_item(sid: str, desde: int, nombre: str | None = None, clase: str = "prometedora",

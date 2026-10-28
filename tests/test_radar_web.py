@@ -1591,3 +1591,349 @@ def test_demostracion_terminada_solo_si_hoy_hay_sesion():
       return {sab: a.state, sabLast: a.last === null || typeof a.last === "object", vie: b.state, um: simUmbral(S.vnow)};""",
             live=False)
     assert r["sab"] == "por_abrir" and r["sabLast"] and r["vie"] == "terminada" and r["um"] >= 0.5
+
+
+# Noticias fiables (bot/fiables.py, mensaje «noticias_fiables» y GET /api/noticias_fiables), entrada por noticia fiable
+# (bot/entrada_noticias.py, evento «entrada_noticia») y preset «seis» del motor de aperturas («6 diarias»), 28-10-2026.
+FIAB = r"""
+const DIA = d => `2026-10-${d}`;
+const grp = (o = {}) => ({clave: "medio:rbc.ru", tipo: "medio", nombre: "rbc.ru", sentido: null, n: 36, dias: 3, dias_validos: 3,
+  acierto: 0.722, acierto_bruto: 0.5, acierto_1h: 0.472, n_1h: 36, ic90_bajo: 0.587, outlet: "rbc.ru",
+  por_dia: [{dia: DIA(25), n: 8, acierto: 0.875}, {dia: DIA(26), n: 20, acierto: 0.75}, {dia: DIA(27), n: 8, acierto: 0.5}], estado: "fiable", ...o});
+const fiab = (o = {}) => ({type: "noticias_fiables", ts: now, desde: DIA(25), hasta: DIA(27), dias: 3, dias_lista: [DIA(25), DIA(26), DIA(27)], unidades: 6597,
+  criterios: {n_min: 30, dias_min: 3, n_dia: 5, acierto_min: 0.6, wilson90_min: 0.5, dia_min: 0.5, horizonte_min: 240, permutaciones: 500},
+  probados: 60, con_muestra: 22, pasan: 1, por_azar: 3.47, por_azar_p95: 6, por_azar_max: 9,
+  familias: {medio: {probados: 19, pasan: 1, por_azar: 1.0}, fuente: {probados: 12, pasan: 0, por_azar: 0.19}},
+  grupos: [grp({nombre: "rbc.ru <b>"}),
+           grp({clave: "fuente:x", tipo: "fuente", nombre: "Canal X", n: 41, acierto: 0.61, ic90_bajo: 0.48, estado: "no_fiable",
+                por_dia: [{dia: DIA(25), n: 15, acierto: 0.733}, {dia: DIA(26), n: 10, acierto: 0.4}, {dia: DIA(27), n: 3, acierto: 0.667}]}),
+           grp({clave: "tipo_sentido:energía:-1", tipo: "tipo_sentido", nombre: "energía · bajista", sentido: -1, n: 12, dias: 2, dias_validos: 2,
+                acierto: 0.75, ic90_bajo: 0.51, estado: "en_prueba", por_dia: [{dia: DIA(26), n: 6, acierto: 0.833}, {dia: DIA(27), n: 6, acierto: 0.667}]})],
+  nota: "1 de 60 grupos pasan <i>; con la dirección barajada pasarían 3,5 de media.", ...o});
+const ent = (story, coin, estado, motivo, o = {}) => ev("entrada_noticia", story, {entrada_noticia: {estado, motivo, coin, dir: 1,
+  grupo: {clave: "medio:rbc.ru", nombre: "rbc.ru <b>", tipo: "medio", acierto: 0.722, n: 36}, umbral_pct: 0.62, mov_pct: 0.71,
+  hasta: now + 3600e3, ...o}}, {coins: [coin], title: `Compra ${coin} · noticia fiable`, text: motivo});
+const SEIS_P = {estrategia: "impulso", measure_min: 15, min_move_pct: 1e-9, entry: "t:15", rvol_min: null, vol_filter: "todos", btc_filter: "ninguno",
+  news_mode: "fiables", windows: ["tokio-seul", "china", "europa", "saopaulo", "nuevayork"], coins: ["BTC", "ETH", "SOL", "XRP"], sl_pct: 1.5,
+  target_r: 3, max_hold_h: 24, min_net_pct: 3, avg_hold_h: 13, long_instrument: "spot", short_instrument: "perp", risk_pct: null,
+  max_day_entries: 6, max_day_risk_pct: 3, lab: null};
+const opn = (params, o = {}) => ({type: "openings", ts: now, strategy: "impulso", params, params_source: "evolucion", notice: null, windows: [], ...o});
+"""
+
+
+def test_noticias_fiables_panel_criterios_azar_y_estados():
+    """Pestaña Evolución: criterios en lenguaje llano, probados / pasan / «por puro azar pasarían», tabla con los 3
+    estados (fiables primero), minibarra por día y filtro; resumen corto en Mando. Todo escapado y sin null."""
+    r = run(FIAB + """H.open(); reset(); H.recv(fiab()); S.tab = "evo"; evoBump(); renderAll(true);
+      const a = {head: H.el("#fiabHead").innerHTML, tbl: H.el("#fiabTbl").innerHTML, f: H.el("#fiabF").innerHTML};
+      H.fire("click", {"data-fiab-f": "fiable"}); renderAll(true);
+      const solo = H.el("#fiabTbl").innerHTML, f2 = H.el("#fiabF").innerHTML;
+      S.tab = "mando"; renderAll(true);
+      return {...a, solo, f2, md: H.el("#mdFiab").innerHTML, sub: H.el("#mdFiabSub").textContent};""")
+    head, tbl = r["head"], r["tbl"]
+    for t in ("≥ 60 %", "al menos 30 historias", "al menos 3 días con ≥ 5 historias", "Ajustado al mercado",
+              "también las que llegan tarde", "constancia", "Wilson", "(500 veces)", "nada mira el futuro", "acierta ≥ 50 % en cada uno"):
+        assert t in head, t
+    assert "<small>Probados</small><b>60</b>" in head and '<small>Pasan</small><b><span class="pos">1</span></b>' in head
+    assert "por puro azar pasarían ~3,5" in head and "hasta 6 el 95 % de las veces" in head and "Medios: 1 de 19 (azar ~1)" in head
+    assert "1 de 60 grupos pasan &lt;i&gt;" in head and "pasan <i>" not in head
+    assert "con el sentido acertado el 50 % de las veces se pierde" in head
+    assert "rbc.ru &lt;b&gt;" in tbl and "rbc.ru <b>" not in tbl
+    i_f, i_p, i_n = tbl.index(">Fiable</span>"), tbl.index(">En prueba</span>"), tbl.index(">No fiable</span>")
+    assert i_f < i_p < i_n   # fiables primero y luego por acierto
+    assert tbl.count("<svg") == 3 and "26/10: 10 historias×moneda, acierto 40 %" in tbl and "27/10: 3 historias" in tbl
+    assert "no cuenta para la constancia" in tbl and "72 %" in tbl and "59 %" in tbl and "Tipo y sentido" in tbl
+    assert 'data-fiab-f="fiable" aria-pressed="false">Fiables · 1' in r["f"] and "Tipo y sentido · 1" in r["f"]
+    assert 'data-fiab-f="fiable" aria-pressed="true"' in r["f2"] and "rbc.ru" in r["solo"] and "Canal X" not in r["solo"]
+    assert "rbc.ru &lt;b&gt;" in r["md"] and "acierto 72 %" in r["md"] and 'data-tabgo="evo"' in r["md"]
+    assert r["sub"].startswith("Pasan 1 de 60 grupos · por puro azar pasarían ~3,5")
+    _sin_null(head, tbl, r["f"], r["solo"], r["md"], r["sub"])
+
+
+def test_noticias_fiables_por_la_api_sin_grupos_y_404():
+    """Al conectar se pide GET /api/noticias_fiables; sin grupos fiables sale la nota honesta; el bus (más nuevo) manda
+    y uno más viejo no lo pisa; un bot sin la ruta (404) no rompe nada y se espera al mensaje."""
+    r = run(FIAB + """H.fetchReply = url => url === "/api/noticias_fiables" ? {ok: true, json: async () => fiab({ts: now - 5000, pasan: 0, nota: null,
+        grupos: [grp({estado: "no_fiable", acierto: 0.52})]})} : {ok: false};
+      H.open(); reset(); await loadApi();
+      S.tab = "evo"; evoBump(); renderAll(true); const cero = H.el("#fiabHead").innerHTML;
+      S.tab = "mando"; renderAll(true); const md0 = H.el("#mdFiab").innerHTML;
+      H.recv(fiab()); const nuevo = S.fiables.pasan;
+      H.recv(fiab({ts: now - 60000, pasan: 7})); const sigue = S.fiables.pasan;
+      const nf0 = H.fetches.filter(u => u === "/api/noticias_fiables").length;
+      H.fetchReply = null; reset(); await loadApi(); S.tab = "evo"; evoBump(); renderAll(true); const vacio = H.el("#fiabHead").innerHTML;
+      S.tab = "mando"; renderAll(true);
+      return {cero, md0, nuevo, sigue, nf0, vacio, md: H.el("#mdFiab").innerHTML, sub: H.el("#mdFiabSub").textContent, none: S.fiables === null};""")
+    assert "no hay medios que acierten ≥ 60 % de forma constante; el bot sigue midiendo" in r["cero"]
+    assert '<small>Pasan</small><b><span class="">0</span></b>' in r["cero"] and "por puro azar pasarían ~3,5" in r["cero"]
+    assert "todavía no hay medios que acierten ≥ 60 % de forma constante" in r["md0"] and "sin grupos fiables no se abre ninguna" in r["md0"]
+    assert r["nuevo"] == 1 and r["sigue"] == 1 and r["nf0"] >= 1
+    assert r["none"] and "aún no ha llegado" in r["vacio"] and "≥ 60 %" in r["vacio"] and "Sin cálculo" in r["md"]
+    assert r["sub"].startswith("Aún no ha llegado el cálculo")
+    _sin_null(r["cero"], r["md0"], r["vacio"], r["md"])
+
+
+def test_noticias_fiables_toleran_campos_ausentes_o_rotos():
+    r = run(FIAB + """H.open(); reset(); S.tab = "evo"; renderAll(true); const v = H.el("#fiabHead").innerHTML;
+      H.recv({type: "noticias_fiables"}); evoBump(); renderAll(true); const a = H.el("#fiabHead").innerHTML + H.el("#fiabTbl").innerHTML;
+      H.recv({type: "noticias_fiables", ts: now + 1, criterios: "x", probados: "x", pasan: null, por_azar: {media: 2.5, p95: 5}, dias: ["2026-10-25"],
+              desde: 5, hasta: "x", familias: {medio: null, fuente: {pasan: "x"}}, nota: 5,
+              grupos: [null, 7, {estado: "rara", tipo: 9, nombre: null, acierto: 72.6, ic90_bajo: "x", sentido: "x",
+                       por_dia: [null, {dia: null, n: "x"}, {dia: 1793000000000, n: 6, acierto: 55}]}, {}]});
+      evoBump(); renderAll(true); const b = H.el("#fiabHead").innerHTML + H.el("#fiabTbl").innerHTML + H.el("#fiabF").innerHTML;
+      S.tab = "mando"; renderAll(true);
+      return {v, a, b, md: H.el("#mdFiab").innerHTML + H.el("#mdFiabSub").textContent};""")
+    assert "aún no ha llegado" in r["v"] and "73 %" in r["b"] and "~2,5" in r["b"] and "rara" in r["b"] and "sin estado" in r["b"]
+    _sin_null(r["v"], r["a"], r["b"], r["md"])
+
+
+def test_entrada_por_noticia_cuatro_estados_en_cable_mando_y_expediente():
+    """Eventos «entrada_noticia»: esperando, confirmada, caducada y vetada (con motivo) en el cable, en Mando y en el
+    expediente; sin verificación ni impacto por medio, y un estado desconocido no rompe nada."""
+    r = run(FIAB + """H.open(); reset(); H.recv(fiab());
+      H.recv(ev("captured", "n1", {headline: "Titular <i>", src: "rbc.ru", tier: "T2", t0: now - 60e3, coins: ["BTC"]}),
+             ev("triaged", "n1", {triage: {tipo: "empresas", importancia: 4, temas: [], monedas: ["BTC"], repercusion: {direccion: 50}}}),
+             ent("n1", "BTC", "esperando", "Espera hasta 60 min a que BTC se mueva 0,62 % a su favor"),
+             ent("n2", "ETH", "confirmada", "ETH se movió +0,71 %"), ent("n3", "SOL", "caducada", "En 60 min no se movió"),
+             ent("n4", "XRP", "vetada", "Tope de 6 entradas del día <b>"),
+             ev("entrada_noticia", "n5", {}, {coins: ["BTC"], estado: "rara"}));
+      S.sel = "n1"; renderTrace(); const tr1 = H.el("#trace").innerHTML;
+      S.sel = "n4"; renderTrace(); const tr4 = H.el("#trace").innerHTML;
+      S.tab = "live"; lastFeedSig = ""; renderAll(true); const feed = H.el("#feed").innerHTML;
+      S.tab = "mando"; renderAll(true);
+      return {tr1, tr4, feed, md: H.el("#mdFiab").innerHTML, mdFeed: H.el("#mdFeed").innerHTML,
+              tones: S.events.filter(e => e.kind === "entrada_noticia").map(e => e.tone)};""")
+    feed, md, tr1, tr4 = r["feed"], r["md"], r["tr1"], r["tr4"]
+    for t in ("Noticia fiable · Esperando confirmación", "Noticia fiable · Confirmada → operación", "Noticia fiable · Caducada",
+              "Noticia fiable · Vetada", "Noticia fiable · Entrada por noticia"):
+        assert t in feed, t
+    assert "Tope de 6 entradas del día &lt;b&gt;" in feed and "día <b>" not in feed and "Noticia fiable · Vetada" in r["mdFeed"]
+    assert r["tones"] == ["warn", "good", "muted", "bad", "muted"]
+    for led, txt in (("wait", "Esperando confirmación"), ("busy", "Confirmada → operación"), ("off", "Caducada"), ("stop", "Vetada")):
+        assert f'<span class="led {led}"></span>' in md and txt in md, txt
+    assert 'data-story="n4"' in md and "XRP ▲" in md and "Tope de 6 entradas del día &lt;b&gt;" in md
+    assert "Entrada por noticia fiable" in tr1 and "Noticia fiable · Esperando confirmación" in tr1 and "rbc.ru &lt;b&gt;" in tr1
+    assert "0,62 % a favor" in tr1 and "72 % en 36 historias" in tr1 and "No hace falta para la entrada por noticia fiable" in tr1
+    assert "stop 1,5 % y objetivo 3R, como mucho 24 h" in tr1 and "Titular &lt;i&gt;" in tr1
+    assert "Vetada" in tr4 and 'class="reason">Tope de 6 entradas del día &lt;b&gt;' in tr4
+    _sin_null(feed, md, tr1, tr4, r["mdFeed"])
+
+
+def test_operaciones_por_noticia_fiable_y_estrategia_activa():
+    """Resultados y Cartera marcan las operaciones con origen «noticia_fiable» (enlazan a su noticia) y enseñan el nombre
+    de la estrategia activa del motor (params.nombre); con «6 diarias», también el aviso de que es tu decisión."""
+    r = run(FIAB + """H.open(); reset();
+      const tr = (o = {}) => ({id: "t1", story: "n9", strategy: "noticia_fiable-largo", window: "Noticia", market: "", coin: "SOL", side: "long",
+        qty: 1, entry: 100, exit: 104.5, opened: now - 3600e3, closed: now, reason: "Objetivo", pnl: 1.5, pnl_pct: 4.5, R: 3, fees: 0.1,
+        headline: "Titular <b>", instrument: "spot", funding: 0, commissions: 0.1,
+        tags: {origen: "noticia_fiable", grupo: {clave: "medio:rbc.ru", nombre: "rbc.ru <i>"}}, ...o});
+      S.results = {start_equity: 111.37, equity: 112.87, trades: [tr(), tr({id: "t2", story: "n8", strategy: "impulso-largo-sin-noticia", tags: {origen: "motor_aperturas"}})],
+        by_strategy: [], by_window: [], by_coin: [], equity_curve: [[now - 7200e3, 111.37], [now, 112.87]], daily: []};
+      S.tab = "results"; renderAll(true); const sin = H.el("#resStrat").innerHTML;
+      H.recv(opn({...SEIS_P, preset: "seis", nombre: "6 diarias"}), pf({closed: [{...tr(), closedAt: now}]}),
+             ev("strategy", "n7", {headline: "h7", src: "s", tier: "T1", t0: now, strat: strat("ETH", "long", {stopPct: 1.5, tp1R: 3, tp2R: 3, tp1Frac: 0,
+               trailPct: null, origen: "noticia_fiable", tags: {origen: "noticia_fiable"}})}));
+      S.btImp = {seis: {fuera: {n: 1538, mean_R: -0.12}}};
+      renderAll(true);
+      const res = {k: H.el("#resStrat").innerHTML, h: H.el("#resStrat").hidden, rows: H.el("#resRows").innerHTML, news: H.el("#resByNews").innerHTML};
+      S.tab = "trades"; renderAll(true);
+      const trd = {s: H.el("#tradesStrat").innerHTML, rows: H.el("#closedRows").innerHTML, kb: H.el("#kanban").innerHTML};
+      S.tab = "market"; renderAll(true); const mk = H.el("#openings").innerHTML, sub = H.el("#openSub").textContent;
+      H.recv(opn({preset: "impulso", nombre: "Impulso E2 <b>"})); S.tab = "results"; renderAll(true);
+      return {sin, res, trd, mk, sub, imp: H.el("#resStrat").innerHTML};""")
+    res, trd = r["res"], r["trd"]
+    assert "aún no ha publicado su estado" in r["sin"]
+    assert res["h"] is False and "6 diarias" in res["k"] and "preset 6 diarias" in res["k"] and "Puesta por tu decisión" in res["k"]
+    assert "-0,12 R por operación fuera de muestra" in res["k"] and "1 operación por noticia fiable" in res["k"]
+    assert res["rows"].count(">Noticia fiable</span>") == 1 and 'data-story="n9"' in res["rows"] and "grupo fiable rbc.ru &lt;i&gt;" in res["rows"]
+    assert "Titular &lt;b&gt;" in res["rows"] and "Por noticia fiable (entrada propia)" in res["news"]
+    assert "6 diarias" in trd["s"] and ">Noticia fiable</span>" in trd["rows"] and ">Noticia fiable</span>" in trd["kb"]
+    assert r["sub"].startswith("Modo impulso «6 diarias» (paper, por tu decisión)")
+    for t in ("(cualquier movimiento)", "entrada a +15 min", "sin filtro de volumen", "sin filtro de BTC",
+              "veta la entrada si hay una noticia fiable en contra", "stop 1,50 % y objetivo 3,0 R (+4,50 %)", "como mucho 24 h"):
+        assert t in r["mk"], t
+    assert "Impulso E2 &lt;b&gt;" in r["imp"] and "preset impulso" in r["imp"] and "por tu decisión" not in r["imp"]
+    _sin_null(r["sin"], res["k"], res["rows"], res["news"], trd["s"], trd["rows"], trd["kb"], r["mk"], r["imp"])
+
+
+SEIS_BT = {"generated": 1793188024481, "split": 1755295200000, "sl_pct": 1.5, "nota": "Réplica del motor <b>", "nombre": "6 diarias",
+           "params": {"measure_min": 15, "min_move_pct": 1e-09, "entry": "t:15", "rvol_min": None, "vol_filter": "todos", "btc_filter": "ninguno",
+                      "news_mode": "fiables", "sl_pct": 1.5, "target_r": 3.0, "max_hold_h": 24.0, "min_net_pct": 3.0, "max_day_entries": 6},
+           "fuera": {"n": 1538, "mean_R": -0.12, "win_rate": 0.3524, "salidas": {"stop": 865, "tiempo": 482, "objetivo": 191}, "horas_media": 13.1,
+                     "largos": {"n": 685, "mean_R": -0.2154}, "cortos": {"n": 853, "mean_R": -0.0434}, "desde": 1755476100000, "hasta": 1792505400000,
+                     "curva_R": [[1755480600000, -1.145], [1792505400000, -184.6]], "paper_R": -0.12, "paper_R_funding": -0.119},
+           "dentro": {"n": 2536, "mean_R": -0.1112, "win_rate": 0.3289, "desde": 1698624900000, "hasta": 1755328500000,
+                      "curva_R": [[1698646140000, -1.145], [1755328500000, -282.0]]}}
+IMP_BT = {"generated": 1793150000000, "split": 1755295200000, "nota": "E2",
+          "fuera": {"n": 202, "mean_R": 0.3459, "win_rate": 0.41, "salidas": {"stop": 113, "objetivo": 60, "tiempo": 29}, "horas_media": 64.9,
+                    "largos": {"n": 85, "mean_R": 0.098}, "cortos": {"n": 117, "mean_R": 0.526}, "desde": 1755655200000, "hasta": 1790778780000,
+                    "curva_R": [[1755655200000, 0.5], [1790778780000, 69.88]]},
+          "dentro": {"n": 469, "mean_R": 0.1297, "win_rate": 0.33, "desde": 1698845400000, "curva_R": [[1698845400000, -1], [1755481500000, 60.8]]}}
+
+
+def test_backtest_estrategia_en_marcha_seis_o_impulso():
+    """Con p.preset «seis», la pestaña Backtest abre con «Estrategia en marcha: 6 diarias» (KPI, curva y avisos: fuera de
+    muestra pierde y está en la cartera por tu decisión) y E2 pasa a «Estrategia anterior». Con «impulso» o sin dato,
+    E2 sigue en marcha y «6 diarias» sale debajo como medida y no en marcha."""
+    page = HTML.read_text(encoding="utf-8")
+    r = run("const now = Date.now();" + FIAB + f"""S.btImp = {{impulso: {json.dumps(IMP_BT)}, lab: null, seis: {json.dumps(SEIS_BT)}}};
+      const out = {{}};
+      for (const [k, m] of [["seis", opn({{...SEIS_P, preset: "seis", nombre: "6 diarias"}})], ["impulso", opn({{preset: "impulso"}})], ["nada", null]]){{
+        S.openings = m; S.tab = "bt"; S.btSig = null; renderAll(true);
+        out[k] = {{title: H.el("#btLiveTitle").textContent, sub: H.el("#btLiveSub").textContent, top: H.el("#btSeisTopP").hidden, alt: H.el("#btSeisAltP").hidden,
+          seis: (k === "seis" ? H.el("#btSeisTop") : H.el("#btSeisAlt")).innerHTML + H.el("#btSeisKpis").innerHTML,
+          e2: H.el("#btLive").innerHTML + H.el("#btLiveKpis").innerHTML}}; }}
+      S.btImp = {{impulso: null, lab: null, seis: null}}; S.openings = opn({{preset: "seis"}}); S.btSig = null; renderAll(true);
+      out.vacio = {{top: H.el("#btSeisTopP").hidden, html: H.el("#btSeisTop").innerHTML, title: H.el("#btLiveTitle").textContent}};
+      return out;""", live=False)
+    s, i, n = r["seis"], r["impulso"], r["nada"]
+    assert s["title"] == "Estrategia anterior (E2): impulso de los primeros minutos" and s["sub"].startswith("Ya no opera")
+    assert s["top"] is False and s["alt"] is True and "+0,35 R" in s["e2"]
+    h = s["seis"]
+    for t in ("Fuera de muestra pierde", "-0,12 R por operación en 1538 operaciones", "por jornada de lunes a viernes", "por día natural",
+              "Está en tu cartera paper por tu decisión, para medirla en vivo", "de −0,12 a −0,17 R por operación", "de −0,32 a −0,44 %",
+              "Con 3R el objetivo se cobra en 12 % de las operaciones", "13-17 %", "no lleva el veto de noticias fiables",
+              "desde el 28-10-2026", "Réplica del motor &lt;b&gt;", "veta la entrada si hay una noticia fiable en contra",
+              "<small>Fuera de muestra</small>", "<small>Por jornada</small>", "con funding -0,12 R", "-184,60 R", "sin interés compuesto"):
+        assert t in h, t
+    assert "-0,30 %" in h and "-0,22 %" in h   # 5,0 operaciones por jornada y 3,6 por día natural con 0,5 % de riesgo
+    for x in (i, n):
+        assert x["title"] == "Estrategia en marcha: impulso de los primeros minutos (E2)" and x["sub"].startswith("Lo que opera ahora")
+        assert x["top"] is True and x["alt"] is False and "Si la activas, será por tu decisión" in x["seis"] and "-0,12 R" in x["seis"]
+    assert r["vacio"]["top"] is False and "no trae el backtest de «6 diarias»" in r["vacio"]["html"]
+    assert r["vacio"]["title"].startswith("Estrategia anterior (E2)")
+    _sin_null(h, s["e2"], i["seis"], n["seis"], r["vacio"]["html"])
+    if 'id="seisData"' in page:   # el resumen real incrustado (scripts/incrustar_backtest.py) también se pinta sin huecos
+        blob = page.split('<script type="application/json" id="seisData">', 1)[1].split("</script>", 1)[0]
+        r2 = run("const now = Date.now();" + FIAB + f"""S.btImp = {{impulso: null, lab: null, seis: {blob}}}; S.openings = opn({{preset: "seis"}}); S.tab = "bt"; S.btSig = null; renderAll(true);
+          return H.el("#btSeisTop").innerHTML + H.el("#btSeisKpis").innerHTML;""", live=False)
+        assert "Fuera de muestra" in r2 and "por tu decisión" in r2
+        _sin_null(r2)
+
+
+def test_demostracion_noticias_fiables_y_entradas_por_noticia():
+    """Sin bot: noticias fiables de EJEMPLO rotuladas (0-2 fiables y «por azar» parecido) y entradas por noticia con
+    los cuatro estados; la confirmada entra por el camino de siempre con horquilla pura (sin break-even, 3R, 24 h)."""
+    r = run("""S.tab = "evo"; renderAll(true); const head = H.el("#fiabHead").innerHTML, tbl = H.el("#fiabTbl").innerHTML;
+      S.tab = "mando"; renderAll(true); const md = H.el("#mdFiab").innerHTML, sub = H.el("#mdFiabSub").textContent;
+      const F = S.fiables, fi = F.grupos.filter(g => g.estado === "fiable").length, hist = S.events.filter(e => e.kind === "entrada_noticia").length;
+      S.positions.length = 0; S.scheduled.length = 0; S.closed.length = 0; S.pending.length = 0; S.queue.length = 0; S.execStop = false;
+      const nueva = (id, c) => emit({kind: "captured", story: id, title: "Prueba " + id, coins: [c], patch: {headline: "Prueba " + id, src: "x", tier: "T1", t0: S.vnow, coins: [c]}});
+      const g = demoFiablePara("regulatorio", 1), est = id => S.stories.get(id).events.filter(e => e.kind === "entrada_noticia").map(e => entInfo(e).estado);
+      nueva("pc", "SOL"); simEntrada("pc", 1, g); S.prices.SOL *= 1.05; step(61000);
+      const tk = S.stories.get("pc").strat; sendOrder("pc"); step(2000);
+      const pos = S.positions.find(p => p.id === "pc"), br = pos ? {bracket: pos.bracket, tp1: pos.tp1, tags: pos.tags.origen} : null;
+      if (pos){ S.prices.SOL = pos.tp2 * 1.001; managePositions(); }
+      const cerrada = S.closed.find(x => x.id === "pc");
+      S.positions.push({id: "otra", coin: "XRP", side: "long", qty: 1, entry: 1, sl: 0.9, tp1: null, tp2: 2, notional: 1, riskUsd: 0.1, opened: S.vnow, be: false, bracket: true, maxAge: 864e5});
+      nueva("pv", "XRP"); simEntrada("pv", 1, g); S.prices.XRP *= 1.05; step(61000);
+      nueva("pk", "ETH"); const p0 = S.prices.ETH; simEntrada("pk", 1, g); for (let i = 0; i < 62; i++){ S.prices.ETH = p0; step(61000); }
+      S.tab = "trades"; renderAll(true);
+      return {head, tbl, md, sub, fi, hist, pasan: F.pasan, azar: F.por_azar, demo: F.demo, pc: est("pc"), pv: est("pv"), pk: est("pk"),
+              tk: {bracket: tk.bracket, stop: tk.stopPct, r: tk.tp2R, origen: tk.tags.origen, maxAge: tk.maxAgeMs}, br,
+              cerrada: cerrada ? cerrada.why : null, rows: H.el("#closedRows").innerHTML, sockets: H.sockets.length};""", live=False)
+    assert r["demo"] is True and 0 <= r["fi"] <= 2 and r["pasan"] == r["fi"] and abs(r["pasan"] - r["azar"]) <= 2
+    assert "Ejemplo inventado" in r["head"] and "por puro azar pasarían ~1,6" in r["head"] and ">Fiable</span>" in r["tbl"]
+    assert "ejemplo inventado" in r["sub"] and "regulatorio · alcista" in r["md"]
+    assert r["pc"] == ["esperando", "confirmada"] and r["pv"] == ["esperando", "vetada"] and r["pk"] == ["esperando", "caducada"]
+    assert r["tk"] == {"bracket": True, "stop": 1.5, "r": 3, "origen": "noticia_fiable", "maxAge": 86400000}
+    assert r["br"] == {"bracket": True, "tp1": None, "tags": "noticia_fiable"} and r["cerrada"] == "Objetivo (3 R)"
+    assert ">Noticia fiable</span>" in r["rows"] and r["sockets"] == 0
+    _sin_null(r["head"], r["tbl"], r["md"], r["sub"], r["rows"])
+
+
+def test_fiables_puerta_para_operar_azar_por_horas_y_noticias_distintas():
+    """Revisión del 28-10-2026: cada grupo enseña sus noticias distintas además de las historias×moneda, si opera o no
+    (con lo que le falta), la cota por bloques de 30 min y el azar que conserva la hora con su valor p."""
+    r = run(FIAB + """H.open(); reset();
+      H.recv(fiab({operan: 0, p_azar: 0.11, azar_bloques: {media: 3.8, p95: 7, max: 10, p: 0.186, bloque_min: 60},
+        puerta: {texto: "Para operar hace falta <b>más</b>."},
+        grupos: [grp({n_historias: 9, opera: false, bloques: 7, ic90_bajo_bloques: 0.41, vivo: {n: 32, n_historias: 8, acierto: 0.78},
+          adelante: {desde: DIA(26), n: 10, n_historias: 3, acierto: 0.4, acierto_bruto: 0.3}, no_opera: ["9 noticias distintas (hacen falta 30)", "acierto bruto 34 % <i>"],
+          por_dia: [{dia: DIA(25), n: 8, n_historias: 2, acierto: 0.875}]})]}));
+      S.tab = "evo"; evoBump(); renderAll(true);
+      const head = H.el("#fiabHead").innerHTML, tbl = H.el("#fiabTbl").innerHTML;
+      S.tab = "mando"; renderAll(true);
+      return {head, tbl, md: H.el("#mdFiab").innerHTML, sub: H.el("#mdFiabSub").textContent};""")
+    head, tbl, md = r["head"], r["tbl"], r["md"]
+    assert "conservando la hora ~3,8 (p = 0,186)" in head and "con el azar que conserva la hora (p = 0,186)" in head
+    assert "Pasan la puerta para operar: 0." in head and "· 0 operan" in head and "Para operar hace falta &lt;b&gt;más&lt;/b&gt;." in head
+    assert "(22 con la muestra mínima)" in head and "historias×moneda" in head and "noticias distintas" in head
+    assert "a 4 h desde el triaje y ajustado al mercado) y no garantiza ese 60 %" in head
+    assert ">No opera</span>" in tbl and "No opera: 9 noticias distintas (hacen falta 30); acierto bruto 34 % &lt;i&gt;" in tbl
+    assert "9 noticias</span>" in tbl and "por bloques 41 %" in tbl and "8 historias×moneda (2 noticias)" in tbl
+    assert "en vivo 78 % (8)" in tbl and "hacia delante 40 % (3)" in tbl and "(desde el 26/10)" in tbl
+    assert "9 noticias · 3 días · no opera" in md and r["sub"].endswith("· operan 0")
+    assert "ningún grupo fiable pasa la puerta para operar: no se abre ninguna" in md
+    _sin_null(head, tbl, md, r["sub"])
+
+
+def test_entrada_con_la_forma_del_backend_y_operacion_enlaza_la_noticia():
+    """El evento tal como lo publica bot/entrada_noticias.py (moneda, expira y el grupo corto con noticias distintas)
+    enseña «Espera hasta»; la operación por noticia (story nf-…) abre la noticia que la disparó (tags.story)."""
+    r = run(FIAB + """H.open(); reset();
+      H.recv(ev("captured", "n1", {headline: "Titular", src: "rbc.ru", tier: "T2", t0: now - 60e3, coins: ["BTC"]}),
+             ev("entrada_noticia", "n1", {entrada_noticia: {estado: "esperando", motivo: "Espero", moneda: "BTC", dir: 1, lado: "largo",
+               grupo: {clave: "medio:rbc.ru", tipo: "medio", nombre: "rbc.ru", sentido: null, n: 36, n_historias: 9, dias: 3, acierto: 0.722,
+                       acierto_bruto: 0.5, ic90_bajo: 0.587, opera: true}, ta: now, expira: Date.UTC(2026, 9, 28, 11, 1), ts_triaje: now}},
+               {coins: ["BTC"], title: "Noticia fiable: espero confirmación del precio en BTC", text: "Espero"}));
+      S.sel = "n1"; renderTrace(); const trace = H.el("#trace").innerHTML;
+      const tr = {id: "t1", story: "nf-n1-btc", strategy: "noticia-fiable-largo", window: "Noticia fiable", market: "", coin: "BTC", side: "long",
+        qty: 1, entry: 100, exit: 98.5, opened: now - 3600e3, closed: now, reason: "Stop", pnl: -0.5, pnl_pct: -1.5, R: -1, fees: 0.1,
+        headline: "h", instrument: "spot", funding: 0, commissions: 0.1, tags: {origen: "noticia_fiable", story: "n1", grupo: "medio:rbc.ru"}};
+      S.results = {start_equity: 111.37, equity: 110.87, trades: [tr], by_strategy: [], by_window: [], by_coin: [],
+                   equity_curve: [[now - 7200e3, 111.37], [now, 110.87]], daily: []};
+      H.recv(pf({closed: [{...tr, closedAt: now}]}));
+      S.tab = "results"; renderAll(true); const res = H.el("#resRows").innerHTML;
+      S.tab = "trades"; renderAll(true);
+      return {trace, res, cl: H.el("#closedRows").innerHTML};""")
+    assert "Espera hasta" in r["trace"] and "11:01:00 UTC" in r["trace"]
+    assert "72 % en 9 noticias distintas (36 historias×moneda) · a 4 h desde el triaje, ajustado al mercado" in r["trace"]
+    assert "con «6 diarias», 6 entradas y 3 % de riesgo; con E2, el motor cuenta también estas entradas en su tope de 4 y 2 %" in r["trace"]
+    assert 'data-story="n1"' in r["res"] and 'data-story="nf-n1-btc"' not in r["res"]
+    assert 'data-story="n1"' in r["cl"]
+    _sin_null(r["trace"], r["res"], r["cl"])
+
+
+def test_motor_puesto_por_el_usuario_y_vigilancia_sin_la_regla_del_paper():
+    """Con «6 diarias» activada por scripts/activar_estrategia.py: fuente «usuario» rotulada como tu decisión (no como
+    la pestaña Evolución), y ninguna vigilada sale como «la regla que opera el paper»."""
+    r = run(FIAB + VIGIL + """H.open(); reset();
+      H.recv(opn({...SEIS_P, preset: "seis", nombre: "6 diarias"}, {params_source: "usuario",
+        estrategia_cargada: {firma: "ab12", ts: now - 60e3, pausada: false, fuente: "usuario", registro: "v1-usuario-seis", preset: "seis"}}));
+      S.tab = "market"; renderAll(true); const mk = H.el("#openings").innerHTML;
+      H.recv(vig({estrategias: [{...E2, en_paper: true}]})); renderVigil(); const v = H.el("#vigil").innerHTML;
+      H.recv(opn({preset: "impulso"})); renderVigil(); const v2 = H.el("#vigil").innerHTML;
+      return {mk, v, v2};""")
+    assert "Tu decisión" in r["mk"] and "scripts/activar_estrategia.py" in r["mk"]
+    assert "aplicada por tu decisión (scripts/activar_estrategia.py)" in r["mk"] and "aplicada desde la pestaña Evolución" not in r["mk"]
+    assert "(usuario)" not in r["mk"] and "la regla que opera el paper" not in r["v"] and "la regla que opera el paper" in r["v2"]
+    _sin_null(r["mk"], r["v"], r["v2"])
+
+
+def test_demostracion_una_posicion_por_moneda_y_horquilla_pura():
+    """En la demostración las operaciones normales también cumplen tus reglas: una posición por moneda, el máximo de
+    posiciones de config (4), stop ≥ 1,5 % y horquilla pura (sin break-even)."""
+    r = run("""S.positions.length = 0; S.scheduled.length = 0; S.pending.length = 0; S.execStop = false;
+      S.positions.push({id: "ya", coin: "BTC", side: "long", qty: 1, entry: 1, sl: 0.9, tp1: null, tp2: 2, notional: 1, riskUsd: 0.1, opened: S.vnow, be: false, bracket: true, maxAge: 36e5});
+      emit({kind: "captured", story: "dos", title: "Prueba", coins: ["BTC"], patch: {headline: "Prueba", src: "x", tier: "T1", t0: S.vnow, coins: ["BTC"]}});
+      S.stories.get("dos").strat = {coin: "BTC", side: "long", mode: "x", risk: 0.5, stopPct: 1.5, timing: "now", tp1R: 3, tp2R: 3, bracket: true};
+      riskStage("dos"); const risk = S.stories.get("dos").risk;
+      return {ok: risk && risk.ok, why: risk && risk.why, max: S.limits.max_positions};""", live=False)
+    assert r["ok"] is False and "Una sola posición por moneda: ya hay una en BTC" in r["why"] and r["max"] == 4
+    page = HTML.read_text(encoding="utf-8")
+    assert "Math.max(1.5, 1.5*MKT.hours" in page and "Stop movido al precio de entrada" not in page   # sin break-even
+    assert "tp1R:3, tp2R:3, tp1Frac:0, bracket:true, maxAgeMs:60*60000" in page
+
+
+def test_la_curva_de_capital_va_sobre_la_cartera_de_prueba_y_no_sobre_10000():
+    """En vivo la curva dice el nombre y los euros de la cartera de prueba; en la demostración, 100 € (111,37 USDC) y
+    nunca la cuenta de 10.000 de antes."""
+    vivo = run("""H.open(); reset();
+      H.recv(pf({equity: 111.37, start_equity: 111.37, cuenta: {nombre: "Cartera de prueba de 100 €", eur: 100, eur_usdc: 1.1137, usdc: 111.37}}));
+      S.tab = "trades"; renderTrades(); return {n: H.el("#eqNote").textContent};""")
+    assert "Cartera de prueba de 100 €: 100 € ficticios (111,37 USDC al empezar)" in vivo["n"] and "10.000" not in vivo["n"]
+    demo = run("""S.tab = "trades"; renderTrades();
+      return {n: H.el("#eqNote").textContent, aviso: H.el("#avisoDemo").hidden};""", live=False)
+    assert "100 € ficticios" in demo["n"] and "10.000" not in demo["n"] and "10000" not in demo["n"]
+    assert demo["aviso"] is False   # la copia publicada avisa de que son datos de ejemplo

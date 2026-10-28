@@ -459,7 +459,164 @@ después, mirando el futuro) con probabilidad q. Mismas entradas a +15 min, sali
 | 100 % (saber el futuro) | +1,86 | +1,96 | +1,73 | +1,50 |
 
 Con las reglas del usuario y el riesgo de 0,5 % por operación, **ni sabiendo siempre hacia dónde irá el precio se llega al
-+2 % diario de la cuenta**. Para no perder, la noticia tendría que acertar el sentido un 60 % de las veces, y las medidas
-aciertan el 49 %. Lo que falta no es la entrada ni las salidas: es una señal que acierte el sentido. Eso se sigue midiendo en
++2 % diario de la cuenta**. Para no perder, la noticia tendría que acertar un 60 % de las veces hacia dónde estará el precio
+24 h después de entrar (en bruto, desde la entrada de la apertura), y las medidas aciertan el 49 % (a 4 h desde el triaje,
+ajustado al mercado). No son la misma medida: un grupo que acierte el 60 % a 4 h ajustado no deja la operación en tablas
+(con la horquilla de 2,2R, R3 calcula que hace falta un 66 % a 4 h), y acertar el sentido no es cobrar la horquilla. Lo que falta no es la entrada ni las salidas: es una señal que acierte el sentido. Eso se sigue midiendo en
 paper (aprendizaje por medio y el reflejo de la sección 18). Al reiniciar el 28-10, la cartera de prueba tenía 0
 operaciones: el cambio de filtro de la sección 18 no mezcla regímenes en sus resultados.
+
+## 20. Noticias fiables, entrada por noticia confirmada y estrategia de 6 diarias (28-10-2026)
+
+El usuario pidió empezar por lo básico: si las noticias grabadas aciertan el 49 %, hay que quedarse con las que aciertan al
+menos un 60 % de forma constante (no un día sí y otro no), aunque lleguen tarde; confirmar la tendencia; entrar y poner los
+límites de siempre (≥ 2:1), y hacer ≥ 6 operaciones al día en la cartera de prueba de 100 €. Tres piezas nuevas, todo solo
+paper (contratos 2.9, 2.15 y 2.16), revisadas el mismo día por una revisión estadística y otra de código.
+
+**1. Noticias fiables (`bot/fiables.py`, estado `noticias_fiables`, `GET /api/noticias_fiables`).** Al arrancar y cada
+hora, con lo que midió el aprendizaje (`news_outcomes`), sin mirar el futuro (solo días UTC completos y anteriores):
+- Unidad: una historia×moneda (la del primer medio), con dirección y `acc240` (4 h desde que el bot pudo usarla: cuentan
+  también las que llegan tarde). Acierto **ajustado al mercado**: dirección × (acc240 − media del día y la moneda) > 0.
+  Una noticia que vale para las 4 monedas son 4 unidades casi iguales: cada grupo dice también sus **noticias distintas**.
+- Grupos: medio, feed, tipo×sentido y medio×sentido. Un feed que es el único de su medio es el mismo grupo: no se prueba
+  dos veces (antes, rbc.ru contaba como medio y como feed).
+- **Criterios fijados de antemano**: ≥ 30 historias×moneda, ≥ 3 días con ≥ 5, acierto ≥ 60 %, cota inferior de Wilson al
+  90 % ≥ 50 % y ≥ 50 % en cada uno de esos días. No se cambian mirando el resultado. Único cambio, fijado con 3 días de
+  datos (hoy no cambia nada): desde 14 días de datos la constancia se mira por semanas. Por días el criterio pierde
+  potencia con cada día que se suma:
+
+  | acierto real del grupo | casos al día | pasa 30 días seguidos (por días) | pasa ~4 semanas (por semanas) |
+  |---|---|---|---|
+  | 60 % | 10 | 0,4 % | 86 % |
+  | 60 % | 20 | 1,7 % | 97 % |
+  | 70 % | 10 | 23 % | > 99 % |
+
+- **Dos cuentas de azar** (500 permutaciones cada una): la fijada (dirección barajada dentro de cada moneda×día) y otra
+  más exigente que **conserva la hora**: barajar el sentido de noticias enteras dentro de cada hora. La primera rompe que
+  las 4 monedas de una noticia van juntas y que los aciertos se agrupan en el tiempo, así que sale demasiado estrecha. El
+  veredicto se basa en el valor p de la segunda.
+- **Puerta para operar** (añadida tras la revisión; antes de tener más datos). Un grupo «fiable» solo veta o abre entradas
+  si además: el conjunto supera al azar que conserva la hora (p < 0,05); tiene ≥ 30 noticias distintas y una cota de
+  Wilson ≥ 50 % contando un caso por bloque de 30 min; acierta ≥ 50 % en bruto (lo que cobra una operación sin cobertura)
+  y la horquilla del usuario (1,5 %/4,5 % a 24 h, aproximada con el máximo a favor y en contra) da > 0 R en ≥ 30 noticias;
+  y **hacia delante**, en los días posteriores a su primera elección y con las noticias que usaría en vivo (`senal` = 1),
+  ≥ 30 noticias distintas con acierto ≥ 60 % y bruto ≥ 50 %. Cada grupo dice lo que le falta.
+- Cada cálculo nuevo se añade a la tabla `noticias_fiables` (no se borra).
+
+**2. Entrada por noticia confirmada (`bot/entrada_noticias.py`, eventos `entrada_noticia`).** Cuando se tría una noticia
+de un grupo que pasa la puerta y nombra una moneda (o una macro que la cripto confirmó: las cuatro), se espera a que el
+precio de esa moneda se mueva a su favor al menos el umbral del reflejo (el mayor de 0,5 % y 2σ de 60 min; sin σ todavía,
+0,5 % provisional y se recalcula) en los 60 min siguientes al triaje. Si lo hace, entra por el mismo camino que el motor
+(riesgo, aprobación y paper): stop 1,5 %, objetivo 3R (+4,5 %, ≥ 3 % neto), como mucho 24 h, largos al contado y cortos en
+perpetuo, 0,5 % de riesgo. Si no, caduca; una confirmación vista tarde no se persigue. Respeta una posición por moneda y
+los topes del día, **compartidos** con el motor (cuentan todas las entradas del paper del día de Madrid). Sin grupos que
+pasen la puerta no entra nunca: las noticias esperan en la cola hasta que ya no se pueden confirmar a tiempo.
+`BOT_ENTRADA_NOTICIAS=0` la apaga. Sus operaciones (`origen` `noticia_fiable`) no cuentan como del campeón E2 en la
+evolución, y la web las separa en Resultados.
+
+**3. Estrategia «6 diarias» (preset `seis` del motor de aperturas).** El impulso de los primeros 15 min sin filtros
+(cualquier movimiento, sin volumen relativo, volatilidad ni BTC), entrada al medir, stop 1,5 % y objetivo 3R, como mucho
+24 h, hasta 6 entradas y 3 % de riesgo al día, y como único filtro el veto de una noticia fiable (que pase la puerta) en
+contra en las 6 h previas. No es una estrategia del laboratorio, así que no tiene gemelo en la vigilancia: se mide en
+paper. El motor sigue con E2 hasta que se active con el bot parado: `scripts/activar_estrategia.py --preset seis` (y
+`--preset impulso` para volver), que escribe `estrategia_activa.json` y lo apunta en el historial de la evolución como
+«estrategia cambiada por decisión del usuario».
+
+**4. Lo que dicen los datos.** Scripts y resultados en `BACKTEST_DIR/controles/`: `fiables_estudio.py` (R1),
+`noticia_confirmacion.py` (R2), `historia_noticias_*.py` (R3) y `replica_seis.py` (R4). Todo de solo lectura.
+
+*R1. ¿Hay noticias que acierten ≥ 60 % de forma constante?* Días completos: 25, 26 y 27 de octubre (el 23 no tiene noticias
+con dirección y del 24 no hay datos). Son sesiones de 2, 5 y 3 h: 10 h de bot y unos 5 bloques de 4 h independientes.
+Entran 6.597 historias×moneda, que son 1.763 noticias distintas.
+
+| | lo medido | azar fijado (moneda×día) | azar que conserva la hora |
+|---|---|---|---|
+| grupos que pasan el criterio fijado | **6** (7 contando dos veces rbc.ru) | 3,4 de media (p = 0,11) | 3,8 de media, p95 7 (**p = 0,19**) |
+| pasan también la puerta para operar | **0** | — | — |
+
+La revisión probó un azar aún más exigente: cada día de noticias trasladado a un día de octubre sin noticias, a la misma
+hora y con las direcciones y grupos reales (300 repeticiones). Con él pasan 8,4 grupos de media (p95 20) y P(≥ 7) = 0,54.
+**Los grupos que pasan están en la mediana del azar bien hecho.** Por qué no operan:
+
+| grupo | historias×moneda | noticias | ajustado | bruto | Wilson por bloques de 30 min |
+|---|---|---|---|---|---|
+| empresas ↑ | 128 | 32 | 81 % | 90 % | 48 % (9 bloques) |
+| regulatorio ↓ | 289 | 80 | 64 % | 33 % | 37 % (17) |
+| rbc.ru | 36 | 9 | 72 % | 50 % | 41 % (7) |
+| geopolítica ↑ | 76 | 19 | 64 % | 55 % | 37 % (12) |
+| política ↑ | 40 | 10 | 65 % | 65 % | 34 % (7) |
+| ajunews.com ↓ | 32 | 9 | 66 % | 34 % | 39 % (7) |
+
+- Muestra efectiva diminuta. El 90 % de las noticias cuentan ×4 monedas con el mismo resultado. Además, los aciertos se
+  agrupan en el tiempo: hay una correlación de 0,5 dentro de bloques de 15 min. Por eso las 6.597 unidades valen unas
+  50-250 observaciones independientes. empresas ↑ incluye unas 15 noticias de los resultados de SK Hynix en 15 min, y
+  acierta solo el 32 % a 1 h.
+- El ajuste por la media favorece a un sentido. El 27, cualquier noticia bajista «acertaba» el 64,5 %, y regulatorio ↓
+  solo supera en 5,6 puntos a la base de su sentido. En bruto, lo que cobra una operación sin cobertura, regulatorio ↓ y
+  ajunews ↓ aciertan un 33-34 %.
+- Hacia delante, el 28 (día parcial, no usado para elegir), los 7 grupos juntos aciertan un 41,6 % ajustado y un 41,9 %
+  bruto (976 casos). Es menos que el 43,1 % de todas las noticias de ese día:
+  - rbc.ru, 9 %;
+  - regulatorio ↓, 35 %;
+  - ajunews ↓, 29 %;
+  - solo geopolítica ↑ se mantiene (60-63 %), pero no supera al azar.
+- Se mide sobre una población y se opera sobre otra. Casi todas las noticias de estos grupos son macro o no nombran
+  moneda: en vivo solo valdrían si las confirma el reflejo, que existe desde el 28 a las 11:12. Solo regulatorio ↓ tiene
+  casos que se operarían directamente (126 que nombran la moneda), y en ellos acierta el 50,0 %.
+- «Aunque lleguen tarde»: el 97 % se capta en menos de 15 min. Con triaje a 15-60 min aciertan el 56,2 % (233 casos), por
+  encima del azar fijado pero no de los exigentes. Con más de 60 min, el 58,5 % (82), por debajo de su azar. Cuando el
+  precio ya se había movido a favor antes de captarla, el 49,7 %: llegar tarde con el precio movido es peor, no mejor.
+- En cantidad darían para 6 operaciones al día de sobra: 21-75 noticias por sesión y 235 en las 8 primeras horas del 28.
+  Lo que falla es el acierto: esas mismas noticias aciertan el 41,4 % el 28.
+
+*R2. Noticia + confirmación del precio + horquilla* (19.133 historias×moneda del 25 al 28, con velas hasta el 28 a las
+11:39 UTC).
+- **Esos días no se podía ganar con las reglas.** El objetivo más pequeño permitido (3,75 %) solo se alcanzó en 24 h
+  desde el 0,76 % de los minutos, frente al 23 % del resto de octubre. Hubo 0 objetivos en las 72 variantes, y ni un
+  «oráculo» que conoce el sentido pasa de +0,27 R.
+- La variante principal, fijada de antemano (reflejo en 60 min, stop 3 %, 3R), da −0,33 R por señal en 399 señales (el
+  2,1 % de las noticias). Con la dirección barajada da −0,32 R (p = 0,98), y en cartera −0,25 %/día.
+- **La variante implementada** (reflejo en 60 min, stop 1,5 %, 3R, 24 h) da −0,70 R por señal en esas 399 señales: 0
+  objetivos y 41 % de stops. En cartera, −0,55 R. El 31 % de las operaciones acaba por fin de datos: hay que repetirlo con
+  24 h completas después del 28.
+- 0 de 72 variantes tienen R positivo, y frente a la dirección barajada la diferencia media es ≈ 0 R.
+- Con 4 monedas, una posición por moneda y 24 h salen unas 2 operaciones al día, no 6.
+
+*R3. 91 días de titulares públicos* (48.272 de 31 medios, del 29-07 al 27-10-2026; 8.178 casos con dirección).
+- Acierto ajustado del 49,2 %. Ningún medio con más de 300 casos supera el 55,8 % en la cota superior del 90 %.
+- El criterio por días no lo pasa ningún grupo (por azar, 0,11). Fuera de muestra no se elige nada, y el acierto de un
+  medio en un tramo se correlaciona solo 0,24 con el del siguiente. Yahoo Finance pasó con los datos hasta el 13-08
+  (68,7 %) y después acertó el 42,6 %.
+- Con la horquilla 1,5 %/3,3 % (2,2R) salen −0,127 R por operación, y −0,145 R con la dirección al azar. Para no perder
+  hay que acertar el sentido a 4 h un 66 %.
+- Límites (revisión): el léxico coincide con el movimiento de las 24 h ANTERIORES en el 55,8 % de los casos (describe lo
+  que ya pasó). Además son medios de cripto en inglés, así que no dice nada de los grupos que salieron en el bot.
+
+*R4. «6 diarias» con el propio motor, 3 años* (`seis_diarias_resumen.json`, rehecho el 28-10 con el umbral 0 del preset y
+las mismas cifras; corte el 16-08-2025 como en `impulso_7d.json`).
+- Reproduce `seis_diarias.py` al decimal.
+- Fuera de muestra: 1.538 operaciones a **−0,120 R** (−0,119 R con funding), con un 35 % de ganadoras. Salidas: 191 por
+  objetivo, 865 por stop y 482 por tiempo. Duran 13,1 h de media y hay 5,0 por día de aperturas.
+- Dentro de muestra: 2.536 operaciones a −0,111 R.
+- Con 0,5 % de riesgo son unos −0,30 % de la cuenta al día. La cuenta simulada, con interés compuesto, pierde un 57 % en
+  306 días. La exposición máxima del paper veta 964 intentos de entrada. **No hay ventaja.**
+
+**Sobre «aunque solo acertemos un 50 %, con más de 2 a 1 se gana más de un 5 % al día».** Acertar el sentido no es cobrar
+la horquilla: para cobrar 3R el precio tiene que recorrer +4,5 % antes que −1,5 %.
+- Si se cobrara el objetivo en la mitad de las operaciones (no la mitad de los sentidos), con 6 al día y 0,5 % de riesgo,
+  saldrían unos +3 %/día con 3R y +1,5 %/día con 2R, antes de costes.
+- Con el sentido al azar, el objetivo del 4,5 % se cobró en el 13-17 % de las operaciones en 3 años, y en el 0 % del 25 al
+  28 de octubre.
+- Un +5 %/día con 0,5 % de riesgo son +10 R al día: 5 objetivos de 6 operaciones, todos los días. Con el riesgo fijado
+  por las reglas, ni sabiendo el futuro se llega (sección 19: +1,96 %/día).
+
+**5. Qué falta.**
+- Hoy, con los datos que hay, **ninguna noticia acierta ≥ 60 % de forma constante**. El bot sigue midiendo cada hora y
+  entrará solo si algún grupo pasa la puerta.
+- La primera medida hacia delante llega cuando el 28 esté completo (el 29 a las 6:00 UTC). Después, cada día.
+- Hace falta medir los grupos con la población que se opera en vivo (moneda nombrada o macro confirmada por el reflejo),
+  que apenas tiene datos.
+- Repetir R2 con 24 h completas después del 28.
+- La cartera de prueba de 100 € (111,37 USDC, 0 operaciones al reiniciar) mezcla regímenes desde este reinicio: lo dice
+  el historial (`codigo-entrada-noticias-2026-10-28`). Para medirla limpia, empezar otra con
+  `scripts/nueva_cartera_paper.py`.

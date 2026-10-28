@@ -17,7 +17,9 @@ El usuario habla español: código, comentarios, textos de la web y documentaci�
 - El laboratorio de 2.000 estrategias (3 años) dejó 2 prometedoras y 0 robustas.
 - No se promete rentabilidad: se mide en paper y se enseñan las cifras. Lo único sin medir es la señal en vivo de las noticias.
 - Las expectativas del usuario (≥ 3 % por apertura) se contrastan con datos, sin discutir por discutir.
-- La estrategia en marcha (E2, impulso): +0,14 R por operación fuera de muestra con la salida del laboratorio y +0,35 R con la de 7 días, pero esta segunda se eligió después de ver los datos y no está validada. Con 0,5 % de riesgo son unos +0,09 % al día, no +2 %.
+- Desde el 28-10-2026 (14:49) la cartera de prueba opera «6 diarias» por decisión del usuario (`apertura.SEIS`, activada con `scripts/activar_estrategia.py --preset seis`): impulso de 15 min sin filtros, stop 1,5 %, 3R, como mucho 24 h, ≤ 6 entradas y 3 % de riesgo al día. En el backtest con el propio motor pierde: −0,12 R por operación fuera de muestra, ≈ −0,3 % de la cuenta por jornada. Se mide en vivo tal cual.
+- La anterior (E2, impulso): +0,14 R por operación fuera de muestra con la salida del laboratorio y +0,35 R con la de 7 días, pero esta segunda se eligió después de ver los datos y no está validada. `--preset impulso` vuelve a ella.
+- Noticias fiables (`bot/fiables.py`): con los criterios fijados (≥ 60 % ajustado, constancia por día, n y días mínimos) pasan grupos que no se distinguen del azar y ninguno pasa la puerta para operar, así que la entrada por noticia (`bot/entrada_noticias.py`) aún no abre nada. 91 días de titulares públicos: 49,2 %, ningún medio pasa (docs/05, sección 20).
 - Con ≥ 6 operaciones al día y las reglas del usuario, la mejor variante pierde (≈ −0,4 % de la cuenta al día fuera de muestra). Ni sabiendo el sentido a 24 h se pasa de +1,9 %/día con 0,5 % de riesgo. Para no perder, la noticia tendría que acertar el sentido un 60 %, y las grabadas aciertan el 49 % (docs/05, sección 19).
 - Nunca se maquillan resultados ni se cambia el riesgo para llegar a un objetivo. La cartera paper de prueba (100 € ficticios desde el 28-10-2026) se mide tal cual.
 
@@ -26,9 +28,9 @@ El usuario habla español: código, comentarios, textos de la web y documentaci�
   - Captura: `feeds.py` (5.714 RSS verificados en `bot/fuentes/*.json`), `hunters.py`, `filters.py`, `topics.py`, `desk.py`.
   - Análisis: `local_ai.py` (triaje con llama.cpp + Qwen local), `claude_agents.py` (fase 2: verificación, impacto y estrategia con la API de Claude), `predict.py`.
   - Mercado: `market.py` (precios, libro, flujo y funding de Binance), `trend.py`, `agenda.py`, `regions.py`.
-  - Operativa: `apertura.py` (motor de aperturas; modo «impulso» = preset de la prometedora n.º 2), `paper.py` (broker paper con perpetuos y funding).
+  - Operativa: `apertura.py` (motor de aperturas; presets «impulso» = E2 y «seis» = 6 diarias), `entrada_noticias.py` (entrada por noticia fiable confirmada por el precio), `paper.py` (broker paper con perpetuos y funding).
   - Medida: `backtest.py`, `backtest_aperturas.py`, `laboratorio.py`, `historia_extra.py`, `vigilancia.py` (prueba en avance virtual de la lista congelada), `reaccion.py` (la cripto en cada apertura, mensaje `cripto_aperturas`; historia en `BACKTEST_DIR/reaccion_aperturas.json`), `reflejo.py` (si la cripto confirma una noticia macro).
-  - Sistema que aprende: `aprendizaje.py` (acierto de noticias y medios ajustado al mercado, pesos), `fuentes_vivas.py` (estados prueba, activa, silenciada y retirada; descubrimiento), `evolucion.py` (historial solo de añadir, campeón frente a aspirantes, informe semanal, propuestas).
+  - Sistema que aprende: `aprendizaje.py` (acierto de noticias y medios ajustado al mercado, pesos), `fuentes_vivas.py` (estados prueba, activa, silenciada y retirada; descubrimiento), `evolucion.py` (historial solo de añadir, campeón frente a aspirantes, informe semanal, propuestas), `fiables.py` (grupos de noticias fiables, recalculados cada hora, con su azar de referencia).
   - Infraestructura: `bus.py`, `store.py` (SQLite WAL), `server.py` (API HTTP y WebSocket en 127.0.0.1:8765).
 - `dashboard/radar.html`: la web, en un solo archivo, con modo en vivo y modo de demostración. Lleva el backtest incrustado mediante `scripts/incrustar_backtest.py`.
 - `docs/04-contratos.md`: contrato de mensajes, rutas y tablas. **Actualízalo con cada cambio** de mensajes, rutas o esquemas.

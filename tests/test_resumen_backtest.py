@@ -57,3 +57,57 @@ async def test_ruta_impulso(tmp_path, monkeypatch):
         assert d["lab"] is None and d["impulso"]["fuera"]["total_R"] == 39.9
         assert len(d["impulso"]["fuera"]["curva_R"]) == rb.CURVE_POINTS + 1
     store.close()
+
+
+def _seis() -> dict:
+    d = _impulso(300)
+    d.update(sl_pct=1.5, nota="réplica del motor", nombre="6 diarias",
+             params={"measure_min": 15, "min_move_pct": 0.0, "entry": "t:15", "sl_pct": 1.5, "target_r": 3.0,
+                     "max_hold_h": 24, "news_mode": "fiables", "max_day_entries": 6})
+    d["fuera"]["mean_R"] = -0.12
+    return d
+
+
+def test_seis_diarias_con_nombre_y_parametros():
+    s = rb.seis_summary(_seis(), points=50)
+    assert s["nombre"] == "6 diarias" and s["params"]["max_day_entries"] == 6 and s["sl_pct"] == 1.5
+    assert len(s["fuera"]["curva_R"]) == 51 and s["fuera"]["mean_R"] == -0.12 and s["fuera"]["max_dd_R"] is not None
+    assert rb.seis_summary({"fuera": {}, "params": "roto"})["params"] is None
+
+
+async def test_ruta_con_seis(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "BACKTEST_DIR", tmp_path)
+    store = Store(tmp_path / "bot.db")
+    (tmp_path / rb.SEIS_FILE).write_text(json.dumps(_seis()), encoding="utf-8")
+    assert set(rb.load()) == {"impulso", "lab", "seis"}
+    async with TestClient(TestServer(make_app(Bus(store), lambda: {}))) as client:
+        r = await client.get("/api/backtest/impulso")   # solo con «6 diarias» ya responde
+        assert r.status == 200
+        d = await r.json()
+        assert d["impulso"] is None and d["lab"] is None and d["seis"]["nombre"] == "6 diarias"
+        assert d["seis"]["fuera"]["total_R"] == 29.9
+    store.close()
+
+
+def test_incrustar_y_quitar_el_bloque_de_seis(tmp_path, monkeypatch):
+    import importlib.util
+    from pathlib import Path
+    from bot import server
+    root = Path(__file__).resolve().parents[1]
+    spec = importlib.util.spec_from_file_location("incrustar_backtest", root / "scripts" / "incrustar_backtest.py")
+    inc = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(inc)
+    page = tmp_path / "radar.html"
+    page.write_text('<html><!--BT--><script type="application/json" id="seisData">{"viejo":1}</script></html>',
+                    encoding="utf-8")
+    bt = tmp_path / "bt"
+    bt.mkdir()
+    (bt / "resultados.json").write_text(json.dumps({"strategies": []}), encoding="utf-8")
+    (bt / rb.SEIS_FILE).write_text(json.dumps(_seis()), encoding="utf-8")
+    monkeypatch.setattr(inc, "PAGE", page)
+    monkeypatch.setattr(config, "BACKTEST_DIR", bt)
+    inc.main()
+    html = page.read_text(encoding="utf-8")
+    m = inc.BLOCK_SEIS.search(html)
+    assert m and '"nombre":"6 diarias"' in m.group(0) and '"viejo"' not in html and 'id="btData"' in html
+    assert "seisData" not in server.BT_BLOCK.sub("<!--BT-->", html)   # en vivo llega por /api/backtest/impulso

@@ -444,3 +444,32 @@ async def test_aperturas_solo_se_reescriben_si_cambian(env):
     v._need = True
     await v.step()
     assert "ultimo_calculo" in keys and "aperturas" not in keys and "vigiladas" not in keys
+
+
+def test_seis_diarias_no_rompe_la_vigilancia(monkeypatch):
+    """«6 diarias» no es una estrategia del laboratorio (umbral 0, tope de 6 al día y veto de noticias no están en su
+    rejilla): no se vigila, y con un preset sin lab ni 7 días el paper no reproduce ninguna vigilada."""
+    seis = "ap_mom:15:0|ninguna|todos|ninguno|todas|todas|todos|t:15|1,5|3|24h"
+    assert V.parse_id(seis) is None
+    assert V.paper_id() == "ap_mom:15:0,2|rvol:1,5|todos|a_favor|todas|todas|todos|t:30|3|3|7d"
+    monkeypatch.setattr(apertura, "IMPULSO", dict(apertura.SEIS))
+    assert V.paper_id() is None
+    it = V.watch_item("ap_mom:15:0,2|rvol:1,5|todos|a_favor|todas|todas|todos|t:30|3|3|7d", 0)
+    assert it is not None and it["en_paper"] is False
+
+
+def test_con_seis_activa_ninguna_vigilada_es_la_del_paper(tmp_path, monkeypatch):
+    """Con «6 diarias» en estrategia_activa.json, el paper ya no opera E2: ninguna vigilada lleva en_paper."""
+    import importlib.util
+    from bot import evolucion
+    spec = importlib.util.spec_from_file_location("activar_estrategia", "scripts/activar_estrategia.py")
+    act = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(act)
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    e2 = "ap_mom:15:0,2|rvol:1,5|todos|a_favor|todas|todas|todos|t:30|3|3|7d"
+    assert V.paper_es_impulso() and V.paper_id() == e2   # sin archivo: el preset de siempre
+    evolucion.escribir_activa(tmp_path / evolucion.ARCHIVO, act.construir("seis", 1793180000000, "v-prueba"))
+    assert not V.paper_es_impulso() and V.paper_id() is None
+    assert V.watch_item(e2, 0)["en_paper"] is False
+    evolucion.escribir_activa(tmp_path / evolucion.ARCHIVO, act.construir("impulso", 1793180000000, "v-vuelta"))
+    assert V.paper_es_impulso() and V.paper_id() == e2

@@ -3,7 +3,9 @@
 - `lab_summary`: lo justo de laboratorio.json (periodo, recuento, prometedoras y robustas con sus cifras dentro y fuera de
   muestra y la cuenta honesta en avance), unos pocos KB.
 - `impulso_summary`: impulso_7d.json, que escribe BACKTEST_DIR/controles/compara_impulso.py, con la curva de R acumulado
-  reducida a unos cientos de puntos. Es la variante de 7 días que opera el motor en vivo.
+  reducida a unos cientos de puntos. Es la variante de 7 días que opera el motor en vivo (E2, preset IMPULSO).
+- `seis_summary`: seis_diarias_resumen.json (misma forma que impulso_7d.json más «nombre» y «params»): la réplica del
+  motor con el preset SEIS («6 diarias», apertura.SEIS) en 3 años. Pierde fuera de muestra: se enseña tal cual.
 
 Los usa /api/backtest/impulso (bot/server.py) y scripts/incrustar_backtest.py para la demostración.
 """
@@ -61,6 +63,14 @@ def impulso_summary(d: dict, points: int = CURVE_POINTS) -> dict:
     return out
 
 
+def seis_summary(d: dict, points: int = CURVE_POINTS) -> dict:
+    """Como impulso_summary, con el nombre y los parámetros de la estrategia «6 diarias»."""
+    out = impulso_summary(d, points)
+    out["nombre"] = d.get("nombre")
+    out["params"] = d.get("params") if isinstance(d.get("params"), dict) else None
+    return out
+
+
 def _read(path: Path) -> dict | None:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -68,9 +78,14 @@ def _read(path: Path) -> dict | None:
         return None
 
 
+SEIS_FILE = "seis_diarias_resumen.json"
+
+
 def load() -> dict:
-    """{impulso, lab} desde BACKTEST_DIR; lo que falte va como None."""
+    """{impulso, lab, seis} desde BACKTEST_DIR; lo que falte va como None."""
     imp = _read(config.BACKTEST_DIR / "impulso_7d.json")
     lab = _read(config.BACKTEST_DIR / "laboratorio.json")
+    seis = _read(config.BACKTEST_DIR / SEIS_FILE)
     return {"impulso": impulso_summary(imp) if isinstance(imp, dict) else None,
-            "lab": lab_summary(lab) if isinstance(lab, dict) else None}
+            "lab": lab_summary(lab) if isinstance(lab, dict) else None,
+            "seis": seis_summary(seis) if isinstance(seis, dict) else None}
