@@ -143,17 +143,20 @@ def test_cambio_del_filtro_de_noticias_se_apunta_una_sola_vez(env):
     filtra la estrategia en paper; queda en el historial (no reversible desde la web) una sola vez, aunque se reinicie."""
     store, _, _ = env
     ev = evo(env)
-    e, f = ev.apuntar_cambios_codigo()
+    e, f, g = ev.apuntar_cambios_codigo()
     assert e["id"] == "codigo-noticias-2026-10-28" and e["tipo"] == "filtro_cambiado" and e["origen"] == "codigo"
-    assert e["etiqueta"] == "Filtro de noticias cambiado" and "dos regímenes" in e["motivo"]
+    assert e["etiqueta"] == "Cambio del código en el paper" and "dos regímenes" in e["motivo"]
     assert "nueva_cartera_paper.py" in e["motivo"] and e["evidencia"]["azar_confirmada_pct"]["umbral_2sigma"] == 5.0
     # la entrada por noticia y los topes compartidos (revisión de código del 28-10-2026): también una sola vez
     assert f["id"] == "codigo-entrada-noticias-2026-10-28" and f["origen"] == "codigo" and "mezcla" in f["motivo"].lower()
     assert "noticia_fiable" in f["despues"]["entrada_por_noticia"] and f["evidencia"]["pasan_la_puerta"] == 0
+    # los arreglos de la auditoría que tocan la cartera paper (huecos, 3 % neto, fase 2): también se apuntan
+    assert g["id"] == "codigo-auditoria-2026-10-28" and g["evidencia"]["hallazgos"] == [23, 24, 47]
+    assert "nueva_cartera_paper.py" in g["motivo"] and "velas de 1 min" in g["despues"]["huecos"]
     assert ev.apuntar_cambios_codigo() == [] and E.apuntar_cambios_codigo(store) == []   # reinicio: no se repite
     assert evo(env).apuntar_cambios_codigo() == []
     assert sorted(x["id"] for x in E.leer(store, tipo="filtro_cambiado")) == [
-        "codigo-entrada-noticias-2026-10-28", "codigo-noticias-2026-10-28"]
+        "codigo-auditoria-2026-10-28", "codigo-entrada-noticias-2026-10-28", "codigo-noticias-2026-10-28"]
     assert "filtro_cambiado" in E.NO_REVERSIBLES and "filtro_cambiado" not in E.PROPIOS
 
 
