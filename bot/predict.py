@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from . import apertura, backtest, config, reflejo, regions
+from .market import fresh_flow
 from .backtest import ASIA, VERDICT_TXT, binom_sf, known, prev_weekday
 from .local_ai import WINDOWS, upcoming_windows
 
@@ -448,7 +449,7 @@ class Predictor:
         news = self._news(t - NEWS_BIAS_H * H)
         return {"now": now, "t": t, "trend": (self._get(self.get_trend) or {}).get("markets") or {},
                 "of": (of.get("coins") or {}) if of_ok else {},
-                "prices": self._fresh_prices(market, t), "flow": market.get("flow") or {},
+                "prices": self._fresh_prices(market, t), "flow": fresh_flow(market, t),
                 "news": news, "news_bias": news_bias(news, t - NEWS_BIAS_H * H),
                 "reaccion": (self._get(self.get_reaccion) if self.get_reaccion else None) or {}}
 

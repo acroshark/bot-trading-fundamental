@@ -39,6 +39,7 @@ from datetime import datetime
 import numpy as np
 
 from . import apertura, aprendizaje, config, fiables, paper, reflejo
+from .market import fresh_flow
 from .models import now_ms
 
 log = logging.getLogger("entrada_noticias")
@@ -433,7 +434,7 @@ class EntradaNoticias:
 
     def _funding(self, coin: str) -> float | None:
         m = (getattr(self.bus, "state", None) or {}).get("market") or {}
-        return paper.funding_8h((m.get("flow") or {}).get(coin))
+        return paper.funding_8h(fresh_flow(m, self.clock()).get(coin))
 
     async def _entrar(self, c: dict, r: dict, extra: dict, now: int) -> int:
         story, coin, d = c["story"], c["coin"], c["dir"]

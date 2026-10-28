@@ -21,6 +21,7 @@ from zoneinfo import ZoneInfo
 import aiohttp
 
 from . import aprendizaje, config, history, reflejo
+from .market import fresh_flow
 from .models import now_ms
 from .local_ai import upcoming_windows
 from .regions import MARKETS, REGIONS
@@ -763,7 +764,7 @@ def trend_brief(tr: dict | None) -> dict:
 def market_brief(mk: dict | None) -> dict:
     mk = mk or {}
     flow = {c: {"ls": _r(f.get("ls")), "funding": _r(f.get("funding"), 5), "percentil_7d": _r(f.get("pctl"), 0),
-                "sesgo": f.get("label")} for c, f in (mk.get("flow") or {}).items()}
+                "sesgo": f.get("label")} for c, f in fresh_flow(mk).items()}
     return {"precios": mk.get("prices") or {}, "minorista": flow}
 
 

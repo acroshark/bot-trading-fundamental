@@ -32,6 +32,7 @@ from zoneinfo import ZoneInfo
 
 from . import config, regions
 from .bus import Bus
+from .market import fresh_flow
 from .models import now_ms
 from .store import Store
 
@@ -487,7 +488,7 @@ class PaperBroker:
 
     def _funding_rate(self, coin: str) -> float | None:
         """Tasa de funding de ahora en % por 8 h (funding_8h de market.flow[moneda]) o None sin dato."""
-        return funding_8h((self._market().get("flow") or {}).get(coin))
+        return funding_8h(fresh_flow(self._market(), self.clock()).get(coin))
 
     def _macro_soon(self, now: int) -> dict | None:
         for e in (self.bus.state.get("calendar") or {}).get("events") or []:

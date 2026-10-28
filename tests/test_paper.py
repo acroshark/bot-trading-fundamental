@@ -1490,3 +1490,15 @@ def test_objetivo_3_por_ciento_neto_de_costes_con_las_reglas(env, monkeypatch):
     monkeypatch.setattr(config, "FEE_PCT", 0.35)                 # sin cuenta X-Perps: 0,74 % de ida y vuelta
     assert not env.broker.submit(ticket(coin="SOL", stop=1.5, tp2=2.2), "n4")   # 3,3 − 0,74 = 2,56 % netos
     assert "deja 2,56 % neto" in _why(env, "n4")
+
+
+def test_flujo_minorista_viejo_no_se_usa(env):
+    """Hallazgo n.º 44: el flujo de Binance (funding, L/S) lleva la hora del dato; con más de 5 min no se usa como si
+    fuera actual (el paper cobra el funding con la última tasa conocida)."""
+    from bot.market import FLOW_STALE_MS, fresh_flow
+    m = {"flow": {"BTC": {"funding": 0.01, "ts": T0 - FLOW_STALE_MS - 1}, "ETH": {"funding": 0.02, "ts": T0 - 1000},
+                  "SOL": {"funding": 0.03}}}   # sin ts (de antes): se acepta
+    assert set(fresh_flow(m, T0)) == {"ETH", "SOL"} and fresh_flow(None, T0) == {}
+    env.market = lambda: {"prices": env.prices, "spread": env.spread, **m}
+    env.broker = env.new()
+    assert env.broker._funding_rate("BTC") is None and env.broker._funding_rate("ETH") == 0.02

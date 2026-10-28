@@ -13,7 +13,7 @@ from aiohttp import WSCloseCode, WSMsgType, web
 from . import aprendizaje, config, reaccion, reflejo, resumen_backtest
 from .backtest import filter_results
 from .bus import Bus
-from .market import bias_of, funding_8h
+from .market import bias_of, fresh_flow, funding_8h
 from .models import now_ms
 from .regions import MARKETS, REGIONS
 
@@ -208,7 +208,7 @@ def state_summary(bus: Bus) -> dict:
     st = bus.state
     market = st.get("market", {})
     flow = {}
-    for c, f in (market.get("flow") or {}).items():
+    for c, f in fresh_flow(market).items():
         b = bias_of(f["ls"], funding_8h(f), f.get("pctl"))
         flow[c] = {"sesgo_minorista": b["label"], "pct_cuentas_largo": round(b["longPct"]), "ratio_ls": round(f["ls"], 2),
                    "percentil_7_dias": round(f["pctl"]) if f.get("pctl") is not None else None,

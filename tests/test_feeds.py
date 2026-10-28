@@ -368,7 +368,8 @@ def test_resumen_por_region_y_api(tmp_path):
     a.hits.appendleft((now - 3_700_000, True))               # de hace más de una hora: no cuenta
     b.on_error("Tiempo agotado (20 s)")
     s = p.summary()
-    assert s["totals"] == {"feeds": 3, "ok": 1, "failing": 1, "waiting": 1, "items_last_hour": 3, "relevant_last_hour": 1}
+    assert s["totals"] == {"feeds": 3, "ok": 1, "failing": 1, "waiting": 1, "items_last_hour": 3, "relevant_last_hour": 1,
+                           "sin_red": False}
     jp, us = s["regions"]
     assert (jp["region"], jp["name"], jp["market"], jp["feeds"], jp["ok"], jp["failing"], jp["median_lat_s"]) == \
         ("jp", "Japón", "tokio", 2, 1, 1, 40)
@@ -1030,3 +1031,74 @@ def test_importador_anade_descubiertas_y_las_conserva(tmp_path):
     assert res["regions"] == {"jp": 3, "latam": 2} and res["kept"] == 1 and res["total"] == 5
     assert anadir({**nuevo, "id": "global-x", "url": "https://x.example/rss", "region": "global"}, dest)
     assert json.loads((dest / "global.json").read_text(encoding="utf-8"))[0]["id"] == "global-x"
+
+
+
+async def test_sin_red_no_suma_fallos_y_al_volver_reprograma_todo(tmp_path):
+    """Hallazgo n.º 44: en un corte de red del PC, los 5.714 feeds acumulaban fallos y pausas y tardaban hasta 30 min en
+    volver. Ahora, si casi todos los hosts fallan por la red, se entra en «sin red»: no se suman fallos ni pausas, se
+    prueba la conexión con un solo feed cada 15 s y, al volver, se ponen a cero y todo se reprograma repartido."""
+    specs = [spec(f"f{k}", f"https://host{k}.example/rss") for k in range(12)]
+    p, _, store = make(tmp_path, specs)
+    t = [1000.0]
+    p.clock = lambda: t[0]
+    key = SimpleNamespace(host="x", port=443, ssl=True)
+    caida = aiohttp.ClientConnectorError(key, OSError(11001, "getaddrinfo failed"))
+    modo = {"falla": True}
+
+    async def fake_poll(st):
+        if modo["falla"]:
+            raise caida
+
+    p.poll = fake_poll
+    for sp in specs[:9]:   # 9 hosts caídos: aún no es «sin red» (hacen falta 10)
+        await p.sem.acquire()
+        await p._poll(p.states[sp.id])
+    assert p.offline_since is None and p.states["f0"].fails == 1
+    await p.sem.acquire()
+    await p._poll(p.states["f9"])
+    assert p.offline_since == 1000.0 and p.summary()["totals"]["sin_red"] is True
+    for _ in range(5):   # durante el corte, los fallos de red no suman
+        await p.sem.acquire()
+        await p._poll(p.states["f10"])
+    assert p.states["f10"].fails == 0 and p.states["f10"].err == "Sin red en este PC"
+    # el planificador solo deja salir una prueba cada 15 s
+    p.sched = feeds.Scheduler()
+    for sp in specs:
+        p.sched.push(sp.id, 0)
+    sent = []
+    real_poll = p._poll
+
+    async def contar(st):
+        sent.append(st.spec.id)
+        await real_poll(st)
+
+    p._poll = contar
+    p.next_probe = 1010.0
+    disp = asyncio.create_task(p._dispatch())
+    await asyncio.sleep(0.6)
+    assert sent == []          # aún no toca probar: todos esperan a la prueba
+    t[0] = 1026.0              # pasada la hora de la prueba (y la de todos los que esperaban)
+    await asyncio.sleep(0.6)
+    assert len(sent) == 1      # una sola prueba, que sigue fallando: sigue sin red
+    assert p.offline_since == 1000.0
+    # vuelve la red: la siguiente prueba responde y todo se pone a cero y se reprograma
+    modo["falla"] = False
+    t[0] = 1060.0
+    await asyncio.sleep(0.6)
+    p._closed = True
+    await asyncio.sleep(0.6)
+    disp.cancel()
+    assert len(sent) >= 2
+    assert p.offline_since is None and p.offline_episodes == 1
+    assert all(p.states[s.id].fails == 0 for s in specs) and not p.gate.fails
+    assert all(v <= 1060.0 + p.gate.gap("x") for v in p.gate.next.values())   # sin pausas de host: solo el espaciado
+    store.close()
+
+
+def test_error_de_red_frente_a_respuesta_del_servidor():
+    key = SimpleNamespace(host="x", port=443, ssl=True)
+    assert feeds.is_network_error(aiohttp.ClientConnectorError(key, OSError(1, "x")))
+    assert feeds.is_network_error(asyncio.TimeoutError()) and feeds.is_network_error(aiohttp.ServerDisconnectedError())
+    assert not feeds.is_network_error(aiohttp.ClientResponseError(None, (), status=503))
+    assert not feeds.is_network_error(feeds.FeedError("Respuesta sin RSS ni Atom"))

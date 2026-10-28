@@ -51,6 +51,7 @@ from zoneinfo import ZoneInfo
 import aiohttp
 
 from . import config, paper, reflejo, regions
+from .market import fresh_flow
 from .models import now_ms
 
 log = logging.getLogger("apertura")
@@ -2555,7 +2556,7 @@ class OpeningEngine:
     def _funding_now(self, coin: str) -> float | None:
         """Tasa de funding de ahora en % por 8 h (paper.funding_8h de market.flow[moneda]) o None sin dato."""
         m = (getattr(self.bus, "state", None) or {}).get("market") or {}
-        return paper.funding_8h((m.get("flow") or {}).get(coin))
+        return paper.funding_8h(fresh_flow(m).get(coin))
 
     def _risk_imp(self) -> float:
         return float(self.p.get("risk_pct") or config.RISK_PER_TRADE_PCT)

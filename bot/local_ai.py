@@ -18,7 +18,7 @@ import aiohttp
 
 from . import config
 from .bus import Bus
-from .market import bias_of
+from .market import bias_of, fresh_flow
 from .models import now_ms
 from .regions import MARKETS, REGIONS
 from .topics import TOPIC_NAMES, TOPICS
@@ -415,7 +415,7 @@ class LocalAI:
         lines = [f"Ventana: {window}, {when.astimezone(MAD):%H:%M} hora de Madrid.", "Noticias de las últimas 4 horas (importancia/10):"]
         lines += [f"- {t['importancia']}/10 {t['sentimiento']} {','.join(t['monedas'])}: {t['resumen']}" for t in news] or ["- Ninguna relevante."]
         lines.append("Posicionamiento minorista:")
-        for c, f in (self.bus.state.get("market", {}).get("flow") or {}).items():
+        for c, f in fresh_flow(self.bus.state.get("market")).items():
             b = bias_of(f["ls"], f["funding"], f.get("pctl"))
             rank = f", percentil {f['pctl']:.0f} de los últimos 7 días" if f.get("pctl") is not None else ""
             lines.append(f"- {c}: {b['label']}, {b['longPct']:.0f} % de cuentas en largo{rank}, funding {f['funding']:.4f} %/8 h")

@@ -61,7 +61,10 @@ REGIONS: dict[str, (nombre, clave_bolsa | None)]   # jp, kr, cn, hk, me, de, uk,
 def session(m, now) -> {"state": "abierta|pausa|preapertura|cerrada", "open_utc", "close_utc", "next_open_utc"}
 def closes_before_open(a, b, day) -> bool;  def ordered_by_close(day) -> list[Market]
 
-# bot/market.py  (ya publica "market": {"prices": {coin: float}, "flow": {coin: {ls, funding, funding_h, oi, taker, prem, pctl, label, extreme}}, "spread"})
+# bot/market.py  (ya publica "market": {"prices": {coin: float}, "flow": {coin: {ls, funding, funding_h, oi, taker, prem, pctl, label, extreme, ts}}, "spread"})
+#   ts de cada fila del flujo: cuándo se leyó de Binance. market.fresh_flow(market, now) da solo las de ≤ 5 min (las demás
+#   no se publican ni se usan: predicciones, motor, paper, entrada por noticia, estratega, /api/estado y briefing;
+#   hallazgo n.º 44). Una fila sin ts (de antes del 28-10-2026) se acepta.
 #   funding: última tasa de Binance USDT-M en % de SU periodo; funding_h: horas de ese periodo (GET /fapi/v1/fundingInfo cada
 #   6 h; los símbolos que no lista liquidan cada 8 h). Sin respuesta de Binance no va funding_h y se supone 8 h
 #   (market.funding_8h y paper.funding_8h escalan a % por 8 h). Es la tasa de Binance, no la de OKX X-Perps EU: aproximación.
@@ -116,6 +119,10 @@ Monedas operables: `config.COINS = ["BTC", "ETH", "SOL", "XRP"]`, cotizadas en U
               "items_last_hour": 260, "relevant_last_hour": 31, "median_lat_s": 140}]}
 ```
 Se publica como mucho cada 10 s y solo si ha cambiado. El detalle por feed sale por `GET /api/fuentes?region=jp`, que devuelve una lista de `FeedState.view()`.
+`totals.sin_red` (hallazgo n.º 44): `true` mientras el PC está sin red. Si en 60 s fallan por la red (sin conexión, tiempo
+agotado, conexión cortada) al menos el 80 % de los hosts sondeados (y al menos 10), no se suman fallos ni pausas, se
+prueba la conexión con un solo feed cada 15 s y, al volver, los fallos y pausas de red se ponen a cero y todos los feeds
+se reprograman repartidos (antes tardaban hasta 30 min en volver).
 
 ### 2.2 `trend` (módulo tendencia: índices de las bolsas)
 ```json
