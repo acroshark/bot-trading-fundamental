@@ -395,11 +395,14 @@ class EntradaNoticias:
                     mov = f" ({_sg(r['mov_pct'])} % al final)" if r["mov_pct"] is not None else " (sin velas)"
                     self._event(c["story"], c["coin"], c["dir"], "caducada",
                                 f"{c['coin']} no se movió a favor ≥ {_n(c['umbral'] or reflejo.UMBRAL_PCT)} % en los "
-                                f"{VENTANA_MIN} min siguientes al triaje{mov}: no se entra", extra, now)
+                                f"{VENTANA_MIN} min siguientes al triaje{mov}: no se entra",
+                                {**extra, "motivo_codigo": "impulso_bajo" if r["mov_pct"] is not None else "sin_velas"},
+                                now)
                 elif now - r["t"] > LATE_MS:
                     self._event(c["story"], c["coin"], c["dir"], "caducada",
                                 f"Se confirmó a las {_hm(r['t'])} ({_sg(r['mov_pct'])} % en {r['min']} min), pero las "
-                                "velas llegaron tarde: no se persigue el precio", extra, now)
+                                "velas llegaron tarde: no se persigue el precio", {**extra, "motivo_codigo": "tarde"},
+                                now)
                 else:
                     entered += await self._entrar(c, r, extra, now)
             except Exception:
@@ -428,8 +431,10 @@ class EntradaNoticias:
         conf = (f"{coin} {_sg(r['mov_pct'])} % a los {r['min']} min del triaje (umbral "
                 f"{_n(c['umbral'] or reflejo.UMBRAL_PCT)} %)")
 
-        def veto(why: str) -> int:
-            self._event(story, coin, d, "vetada", f"Confirmada ({conf}), pero {why}: no se entra", extra, now)
+        def veto(why: str, codigo: str = "otro") -> int:
+            # motivo_codigo: el del catálogo de decisiones_apertura (bot/decisiones.py, docs/04 2.17)
+            self._event(story, coin, d, "vetada", f"Confirmada ({conf}), pero {why}: no se entra",
+                        {**extra, "motivo_codigo": codigo}, now)
             return 0
 
         try:
@@ -440,25 +445,26 @@ class EntradaNoticias:
         if not isinstance(pf, dict):
             return veto("sin acceso a la cartera del paper")
         if pf.get("halted") or (pf.get("limits") or {}).get("halted"):
-            return veto("el paper está detenido")
+            return veto("el paper está detenido", "otro" if pf.get("halted") else "perdida_dia")
         busy = apertura.OpeningEngine._coin_busy(pf, coin)
         if busy:
-            return veto(f"{busy}: una sola posición por moneda")
+            return veto(f"{busy}: una sola posición por moneda", "moneda_ocupada")
         n_open = sum(len(pf.get(k) or []) for k in ("positions", "pending", "scheduled"))
         if n_open >= config.MAX_POSITIONS:
-            return veto(f"ya hay {n_open} operaciones abiertas o en curso (máximo {config.MAX_POSITIONS})")
+            return veto(f"ya hay {n_open} operaciones abiertas o en curso (máximo {config.MAX_POSITIONS})",
+                        "max_posiciones")
         risk = float(config.RISK_PER_TRADE_PCT)
         entradas = {**self._own_today(now), **apertura.paper_day_entries(pf, now)}
         lim = limites_dia(entradas, risk)
         if lim:
-            return veto(lim)
+            return veto(lim, "tope_dia" if len(entradas) >= MAX_DIA else "riesgo_dia")
         entry = self._live(coin, now)
         if entry is None:
             return veto(f"sin precio reciente de {coin} en OKX EU")
         plan = plan_de(d, entry, self._funding(coin))
         why = reglas_ko(plan)
         if why:
-            return veto(why)
+            return veto(why, "reglas")
         inst = plan["instrument"]
         verb = "Compra" if d > 0 else "Venta"
         end = now + int(PARAMS["max_hold_h"] * H)

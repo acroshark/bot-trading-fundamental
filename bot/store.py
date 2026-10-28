@@ -15,6 +15,36 @@ BATCH_WAIT_S = 0.05       # el hilo escritor junta lo que llega seguido antes de
 IDLE_CHECKPOINT_S = 10.0  # sin claves nuevas, el hilo escritor vacía el WAL cada tanto
 PRUNE_BATCH = 500         # filas por lote al podar: cada lote es corto y el bucle respira entre uno y otro
 
+# Por qué entra o no en cada apertura (bot/decisiones.py, docs/04 §4): solo se añade, nada se borra ni se cambia.
+DECISIONES_COLS = (("id", "INTEGER PRIMARY KEY AUTOINCREMENT"), ("ts", "INTEGER NOT NULL"),
+                   ("ventana_id", "TEXT NOT NULL"), ("ventana", "TEXT"), ("dia", "TEXT"), ("apertura_ms", "INTEGER"),
+                   ("coin", "TEXT NOT NULL"), ("fase", "TEXT"), ("decision", "TEXT"), ("motivo_codigo", "TEXT"),
+                   ("motivo", "TEXT"), ("impulso_pct", "REAL"), ("lado", "TEXT"), ("preset", "TEXT"),
+                   ("estrategia", "TEXT"), ("trade_id", "TEXT"), ("story", "TEXT"), ("datos", "TEXT"))
+DECISIONES_TABLE = f"CREATE TABLE IF NOT EXISTS decisiones_apertura({', '.join(f'{c} {t}' for c, t in DECISIONES_COLS)})"
+DECISIONES_SCHEMA = """
+CREATE INDEX IF NOT EXISTS decisiones_apertura_ventana ON decisiones_apertura(ventana_id, coin);
+CREATE INDEX IF NOT EXISTS decisiones_apertura_ts ON decisiones_apertura(ts);
+CREATE TRIGGER IF NOT EXISTS decisiones_apertura_sin_borrar BEFORE DELETE ON decisiones_apertura
+  BEGIN SELECT RAISE(ABORT, 'decisiones_apertura: las decisiones no se borran'); END;
+CREATE TRIGGER IF NOT EXISTS decisiones_apertura_sin_cambios BEFORE UPDATE ON decisiones_apertura
+  BEGIN SELECT RAISE(ABORT, 'decisiones_apertura: las decisiones no se modifican'); END;
+"""
+
+
+def migrate_decisiones(db: sqlite3.Connection) -> None:
+    """Tabla decisiones_apertura (migración aditiva): la crea si falta y, en una base con una versión anterior de la
+    tabla, añade las columnas que le falten (sin tocar sus filas; las que en la nueva son NOT NULL, admitiendo NULL),
+    y después los índices y los disparadores que impiden borrar y cambiar."""
+    db.execute(DECISIONES_TABLE)
+    have = {r[1] for r in db.execute("PRAGMA table_info(decisiones_apertura)")}
+    for col, typ in DECISIONES_COLS:
+        if col not in have and col != "id":
+            db.execute(f"ALTER TABLE decisiones_apertura ADD COLUMN {col} {typ.replace(' NOT NULL', '')}")
+            log.info("decisiones_apertura: columna nueva %s", col)
+    db.commit()
+    db.executescript(DECISIONES_SCHEMA)
+
 
 async def in_batches(prune, *args) -> int:
     """Repite una poda por lotes cediendo el bucle entre lote y lote: en una base grande no lo bloquea."""
@@ -43,6 +73,7 @@ class Store:
             CREATE INDEX IF NOT EXISTS seen_ts ON seen(ts);
             """
         )
+        migrate_decisiones(self.db)
         # Claves vistas: las guarda por lotes un hilo con su propia conexión (commit y checkpoint fuera del bucle).
         # Hasta que se guardan están en _pending, así que is_seen responde al momento.
         self._memory = str(path) == ":memory:"

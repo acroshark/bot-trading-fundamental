@@ -222,8 +222,10 @@ def test_lab_a_params_solo_con_la_salida_del_motor():
     assert E.lab_a_params("basura")[0] is None
 
 
-def test_gemelo_del_preset_y_firma_del_motor():
+def test_gemelo_del_preset_y_firma_del_motor(tmp_path, monkeypatch):
     from bot import apertura, vigilancia
+    # Sin estrategia_activa.json: la prueba no depende de lo que opere la cartera paper real (DATA_DIR del PC)
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
     assert LAB7 == vigilancia.paper_id() and LAB7.endswith("|7d") and LAB_REF.endswith("|sig")
     d = E.activa_por_defecto()
     assert d["lab_id"] == LAB_REF and d["lab_twin"] == LAB7

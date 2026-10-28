@@ -50,6 +50,7 @@ class Services:
     reflejo: Any = None      # Reflejo (¿la cripto refleja las noticias macro y geopolíticas?)
     fiables: Any = None      # Fiables (grupos de noticias que aciertan ≥ 60 % de forma constante)
     entrada_noticias: Any = None   # EntradaNoticias (entrada por noticia fiable confirmada por el precio)
+    decisiones: Any = None   # Decisiones (por qué entra o no en cada apertura: tabla decisiones_apertura)
 
 
 def _hora(ms: int) -> str:
@@ -695,6 +696,19 @@ def make_app(bus: Bus, health, services: Services | None = None) -> web.Applicat
             raise web.HTTPNotFound(text="Aún no hay backtest del motor: python -m bot.laboratorio y controles/compara_impulso.py")
         return j(res)
 
+    async def api_decisiones(request: web.Request) -> web.Response:
+        """Por qué entra o no en cada apertura (contrato 2.17): {rows, n, desde}, la más reciente primero; por defecto los
+        3 últimos días y como mucho 2.000 filas. 404 si el módulo no está en marcha (entonces no se guardan)."""
+        if not sv.decisiones:
+            raise web.HTTPNotFound(text="Las decisiones de las aperturas no se guardan: el módulo no arrancó")
+        q = request.query
+        vid, coin = q.get("ventana_id") or None, q.get("coin") or None
+        if (vid and len(vid) > STORY_MAX + 16) or (coin and len(coin) > 16):
+            raise web.HTTPBadRequest(text="ventana_id o coin demasiado largos")
+        desde = q_int(request, "desde", None, 0, 10 ** 14)
+        limite = q_int(request, "limite", None, 1, 2000)
+        return j(await asyncio.to_thread(sv.decisiones.consulta, desde, vid, coin, limite))
+
     async def api_fiables(_request: web.Request) -> web.Response:
         """El último cálculo de las noticias fiables (contrato 2.15); 404 si aún no hay ninguno."""
         res = sv.fiables.view() if sv.fiables else bus.state.get("noticias_fiables")
@@ -721,6 +735,7 @@ def make_app(bus: Bus, health, services: Services | None = None) -> web.Applicat
     app.router.add_get("/api/backtest/aperturas", api_bt_openings)
     app.router.add_get("/api/backtest/impulso", api_bt_impulso)
     app.router.add_get("/api/noticias_fiables", api_fiables)
+    app.router.add_get("/api/decisiones", api_decisiones)
     app.router.add_get("/api/vigilancia", api_vigilancia)
     app.router.add_get("/api/cripto_aperturas", api_cripto_aperturas)
     app.router.add_get("/api/fuentes_vivas", api_fv)

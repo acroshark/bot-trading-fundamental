@@ -4,8 +4,9 @@ Además de noticias, mercado, paper y aperturas, arrancan los módulos que miden
 vigilancia (prueba en avance de las estrategias congeladas), aprendizaje (medida de noticias y medios, pesos y
 post-mortems), fuentes vivas (estado de cada fuente y descubrimiento), evolución (historial, campeón y aspirantes,
 propuestas e informe semanal), reacción (la cripto en cada apertura de bolsa: «cripto_aperturas»), reflejo (¿la cripto
-refleja las noticias macro y geopolíticas?), noticias fiables (los grupos que aciertan ≥ 60 % de forma constante) y la
-entrada por noticia fiable confirmada por el precio. Si uno no arranca, el bot sigue sin él."""
+refleja las noticias macro y geopolíticas?), noticias fiables (los grupos que aciertan ≥ 60 % de forma constante), la
+entrada por noticia fiable confirmada por el precio y las decisiones de las aperturas (por qué entra o no, tabla
+decisiones_apertura). Si uno no arranca, el bot sigue sin él."""
 import asyncio
 import logging
 import os
@@ -24,6 +25,7 @@ from .aprendizaje import Aprendizaje, CacheBars
 from .backtest import Backtester
 from .bus import Bus
 from .claude_agents import Phase2
+from .decisiones import Decisiones
 from .desk import NewsDesk
 from .entrada_noticias import ENABLED as ENTRADA_NOTICIAS, EntradaNoticias
 from .evolucion import ARCHIVO as ESTRATEGIA_ACTIVA, Evolucion
@@ -128,6 +130,11 @@ async def main() -> None:
         state = bus.state.get
         predictor = Predictor(bus, store, lambda: state("trend"), lambda: state("orderflow"), lambda: state("market"), bt,
                               get_reaccion=lambda: state("cripto_aperturas"))
+        # Por qué entra o no en cada apertura (decisiones_apertura): lo apuntan el motor y, por el gancho del bus, el
+        # riesgo, el paper y la entrada por noticia. Se engancha antes de que el paper publique nada.
+        decs = optional("Las decisiones de las aperturas", lambda: Decisiones(bus, store))
+        if decs is not None:
+            observe_bus(bus, decs.observe)
         broker = PaperBroker(bus, store, lambda: state("market", {}), lambda: state("orderflow", {}))
         phase2 = Phase2(bus, store, session, local, lambda: state("predictions"), lambda: state("trend"),
                         lambda: state("orderflow"), lambda: state("market"), bt, broker.portfolio, broker.submit)
@@ -137,7 +144,8 @@ async def main() -> None:
         # reglas del usuario; si no hay archivo, el preset.
         os.environ.setdefault("BOT_APERTURAS_ESTRATEGIA", "impulso")
         activa = config.DATA_DIR / ESTRATEGIA_ACTIVA if pick_strategy(None) == "impulso" else None
-        openings = OpeningEngine(bus, session, signal_getter(bus), broker.submit, broker.portfolio, activa_path=activa)
+        openings = OpeningEngine(bus, session, signal_getter(bus), broker.submit, broker.portfolio, activa_path=activa,
+                                 decisiones=decs)
         log.info("Motor de aperturas en modo %s (parámetros: %s)", getattr(openings, "strategy", "ruptura"),
                  getattr(openings, "source", "?"))
         # Vigilancia: prueba en avance (sin operar) de las estrategias congeladas del laboratorio.
@@ -194,7 +202,7 @@ async def main() -> None:
 
         services = Services(feeds=feeds, predictor=predictor, broker=broker, phase2=phase2, backtest=bt, openings=openings,
                             vigilancia=vigil, aprendizaje=learn, evolucion=evo, fuentes_vivas=vivas, reaccion=react,
-                            reflejo=refl, fiables=fiab, entrada_noticias=entrada)
+                            reflejo=refl, fiables=fiab, entrada_noticias=entrada, decisiones=decs)
         runner = web.AppRunner(make_app(bus, health, services))
         await runner.setup()
         await web.TCPSite(runner, config.HOST, config.PORT).start()
@@ -241,6 +249,11 @@ async def main() -> None:
             await phase2.close()
             local.close()
             await runner.cleanup()
+            if decs is not None:   # lo pendiente de decisiones_apertura, a la base (antes de cerrarla)
+                try:
+                    decs.close()
+                except Exception:
+                    log.exception("Las decisiones de las aperturas no pudieron guardar lo pendiente al cerrar")
             store.close()
 
 

@@ -19,7 +19,7 @@ Este documento es la referencia común. Cualquier módulo que publique o consuma
   - Nunca escribas en C:.
 - Publicar en la web: `bus.publish(dict)`.
   - Los mensajes con `"type": "event"` se guardan en SQLite y salen en el cable.
-  - El resto de tipos se guardan como último estado y se reenvían a cada web que se conecta.
+  - El resto de tipos se guardan como último estado y se reenvían a cada web que se conecta, salvo los de `bus.NO_STATE` (hoy `decision_apertura`, 2.17), que solo salen en el cable.
 - Textos para el usuario siempre en español, con decimales con coma solo en los textos (los números del JSON van como números).
 - Ninguna fuente de red puede tumbar el proceso:
   - Atrapa las excepciones por fuente.
@@ -89,7 +89,13 @@ def closes_before_open(a, b, day) -> bool;  def ordered_by_close(day) -> list[Ma
 #   riesgo → aprobación → paper, como el motor). BOT_ENTRADA_NOTICIAS=0 la apaga
 # bot/apertura.py       paper_day_entries(cartera, ahora) -> {story: riesgo %}: TODAS las entradas del paper del día de
 #   Madrid; la usan el motor y la entrada por noticia (topes diarios compartidos). PRESETS {impulso, seis},
-#   preset_of(params), preset_info(params, activa)
+#   preset_of(params), preset_info(params, activa). OpeningEngine(..., decisiones=Decisiones): por qué entra o no (2.17)
+# bot/decisiones.py     Decisiones(bus, store, clock=now_ms)  → mensaje «decision_apertura» y tabla decisiones_apertura (2.17)
+#   add(ventana_id, coin, fase, decision, motivo_codigo, motivo, **columnas) -> fila | None (nunca lanza; la guarda un
+#   hilo), ultima(ventana_id, coin), ventana(ventana_id), fases(ventana_id), de_story(story), consulta(desde,
+#   ventana_id, coin, limite) (GET /api/decisiones, en un hilo), observe(evento): gancho síncrono del bus (riesgo, paper
+#   y entrada por noticia), flush() (espera al primer intento de guardar; lo que falla se reintenta aparte), close()
+#   (antes de store.close()). La tabla y su migración aditiva: store.migrate_decisiones (Store la llama)
 # bot/predict.py        Predictor(bus, store, get_trend, get_orderflow, get_market, get_backtest, get_reaccion=None)
 #   get_reaccion() → último «cripto_aperturas» (tasa base de cada ventana y reacción de la apertura anterior)
 #   registrar(store, tipo, sujeto, antes, despues, motivo, evidencia, origen) y leer(...): historial evolution_log (4)
@@ -212,12 +218,12 @@ Todos llevan `kind`, `agent`, `story` (salvo `flow` y `brief`), `title`, `text`,
 | `verified`, `unverified` | `verifier` | `verify{score (0-1), checks[{ok, t}], why?, dt, llm}` |
 | `impact`, `noimpact` | `impact` | `impact{dir (+1 o −1), mag (% esperado en main), conf (0-1), hz (texto), why, main (moneda), per{moneda: %}, markets{bolsa: %}, drop? (texto), llm}` |
 | `strategy`, `nostrategy` | `strat` | `strat{coin, side, mode, risk (% del capital), stopPct, trailPct, timing ("now"/"window"), win (texto), winAt (ms o null), entryType, tp1R, tp2R, tp1Frac?, beR?, trailStartR?, maxAgeMs?, instrument? ("spot"/"perp"), tags?, winEnd?, holdLabel?, valid, inval, why, llm, none? (bool)}`; el motor de aperturas añade `tags` también en el patch |
-| `riskok`, `riskko` | `risk` | `risk{checks[{ok, t}], ok, why?}` |
+| `riskok`, `riskko` | `risk` | `risk{checks[{ok, t}], ok, why?, motivo_codigo?}` (`riskko`: `motivo_codigo` del catálogo de 2.17 para el primer control que falla, `paper.motivo_codigo`) |
 | `humanwait`, `humanok`, `humanko` | `human` | `human{mode, deadline?, by?, at?, no?}` |
-| `scheduled`, `order`, `filled`, `manage`, `blocked` | `exec` | `exec{scheduled?, sent?, px, slip (pb), ms, notional, sl, tp1?, tp2?, trail?, stopLossUsd?, blocked?, why?, instrument, funding?, funding_n?}` (un `manage` con `funding` es una liquidación de funding de un perpetuo) |
-| `closed` | `exec` | `result{coin, side, qty, entry, exit, why, pnl, pnl_pct, R, fees, opened, closedAt, riskUsd, notional, headline, strategy, window}`; el evento lleva `tone: "good"` o `"bad"` |
+| `scheduled`, `order`, `filled`, `manage`, `blocked` | `exec` | `exec{scheduled?, sent?, px, slip (pb), ms, notional, sl, tp1?, tp2?, trail?, stopLossUsd?, blocked?, why?, motivo_codigo? (blocked, 2.17), instrument, funding?, funding_n?}` (un `manage` con `funding` es una liquidación de funding de un perpetuo); `filled` lleva además `trade_id` en el patch (el `id` de la operación de 3.2) |
+| `closed` | `exec` | `result{coin, side, qty, entry, exit, why, pnl, pnl_pct, R, fees, opened, closedAt, riskUsd, notional, headline, strategy, window}` y `trade_id` (el `id` de la operación); el evento lleva `tone: "good"` o `"bad"` |
 | `reflejo` | `flow` | `reflejo{estado ("pendiente"\|"confirmada"\|"contraria"\|"sin_reflejo"), mov_pct, min, ref ("BTC"\|"media"), umbral_pct}` (ver abajo) |
-| `entrada_noticia` | `strat` | `entrada_noticia{estado ("esperando"\|"confirmada"\|"caducada"\|"vetada"), motivo, moneda (o null: toda la noticia), dir (±1), lado, grupo{clave, tipo, nombre, sentido, n, n_historias, dias, acierto, acierto_bruto, ic90_bajo, opera}, ta, expira?, ts_triaje?, umbral_pct?, mov_pct?, min?, paper_story?, entrada?, stop?, objetivo?, instrumento?, riesgo_pct?}`; `story` = la de la noticia (ver 2.16) |
+| `entrada_noticia` | `strat` | `entrada_noticia{estado ("esperando"\|"confirmada"\|"caducada"\|"vetada"), motivo, motivo_codigo? (caducada y vetada con moneda: el catálogo de 2.17), moneda (o null: toda la noticia), dir (±1), lado, grupo{clave, tipo, nombre, sentido, n, n_historias, dias, acierto, acierto_bruto, ic90_bajo, opera}, ta, expira?, ts_triaje?, umbral_pct?, mov_pct?, min?, paper_story?, entrada?, stop?, objetivo?, instrumento?, riesgo_pct?}`; `story` = la de la noticia (ver 2.16) |
 
 Prefiltro (`bot/filters.py`, 28-10-2026; `clase` en la captada y en la descartada relevante):
 - `cripto`: nombra BTC, ETH, SOL o XRP (`coins` = esas y solo esas) o habla de cripto en general (`coins` = []).
@@ -390,6 +396,7 @@ Estado (no evento) de `bot/apertura.py`, cada 3 s como mucho y solo si cambia. D
 - **`news_mode: "fiables"`:** veta la entrada si en las `news_hours` (6) horas previas hay una noticia de un grupo FIABLE (2.15, `fiables.fiable_para` con su medio, feed, tipo y sentido) que se aplica a esa moneda (`fiables.monedas_de`: la nombra o es una macro confirmada por la cripto) y va en contra del impulso. Solo cuentan los grupos que pasan la puerta para operar (2.15): sin ellos no veta nada. La señal (`signal_from`) lleva entonces `fiables: [{story, dir, ts, grupo, nombre, acierto, titular}]` (el campo no sale si no hay ninguna) y las etiquetas, `noticia_fiable`.
 - **Topes diarios compartidos (28-10-2026):** `day.entries` y `day.risk_pct` cuentan TODAS las entradas del paper del día de Madrid (`apertura.paper_day_entries`: posiciones y cerradas abiertas hoy, pendientes y programadas; también las de la entrada por noticia y las de la fase 2) más las que el motor acaba de enviar. Antes solo contaban las del motor (`a-…`). La entrada por noticia (2.16) cuenta lo mismo.
 - Con `max_hold_h` < 168 (24 h en «6 diarias»), el ticket lleva `valid` «como mucho 24 h (hasta el …)» y `holdLabel` «tope de 24 h»; con 168, como siempre.
+- **Por qué entra o no (28-10-2026, 2.17):** en modo impulso, cada punto de decisión de cada apertura×moneda va a `decisiones_apertura`. Al reiniciar, el `why` y el estado de una moneda salen de su última fila: una decisión final o una entrada ya enviada al paper la terminan con su motivo (nunca se repite una entrada), y con la medida hecha y la entrada aún por llegar se vuelve a medir con las noticias de entonces (`datos.noticias` de la fila). Una ventana cuya sesión acabó con el bot parado: con filas, cada moneda sale de la suya (no «pasó con el bot parado»); sin filas y sin ningún evento guardado durante la sesión, `why` «La sesión de esta apertura pasó con el bot parado: no se siguió» y una fila `perdida` por moneda; sin filas pero con eventos (la siguió una versión que no las guardaba), `why` «Esta apertura la siguió el bot antes del último reinicio sin guardar su decisión (versión anterior): no se repite» y ninguna fila. Al cerrar la sesión sin medir (sin velas) el `why` es «Fin de la sesión sin medir el impulso: no llegaron las velas de 1 min»; sin entrar, «Fin de la sesión sin entrar».
 
 ### 2.10 `aprendizaje` (medida de noticias y medios, pesos y post-mortems)
 
@@ -638,6 +645,81 @@ cola hasta que ya no se puedan confirmar a tiempo):
    `BOT_USER_RULES=0`) o el control de riesgo del paper la veta.
 - Al arrancar recupera las triadas, reflejos y eventos `entrada_noticia` de los últimos 75 min: lo final no se repite y lo
   que ya no se puede confirmar a tiempo no se reabre.
+- `caducada` y `vetada` con moneda llevan `motivo_codigo` (2.17): sin moverse lo bastante `impulso_bajo` (sin velas
+  `sin_velas`), vista tarde `tarde`, moneda ocupada `moneda_ocupada`, `max_posiciones`, `tope_dia`, `riesgo_dia`,
+  reglas `reglas`, el paper detenido por la pérdida del día `perdida_dia`, lo demás `otro`. Todo queda también en
+  `decisiones_apertura` con la ventana `noticia` (2.17).
+
+### 2.17 Por qué entra o no en cada apertura (mensaje `decision_apertura`, tabla `decisiones_apertura`)
+
+`bot/decisiones.py` (28-10-2026; solo paper). El motor de aperturas en modo impulso y la entrada por noticia fiable apuntan
+cada punto de decisión de cada apertura×moneda; los rechazos del riesgo y del paper y la apertura y el cierre de la
+operación los apunta su gancho del bus (`observe`: `riskko`, `humanko`, `blocked`, `filled`, `closed`). Cada fila sale al
+momento por el WebSocket y se guarda en la tabla (§4) en un hilo con su propia conexión: escribir no para el bucle
+(medido: 0,05 ms de media y menos de 1 ms como máximo por fila, también con la base bloqueada por otro escritor). Si
+guardar falla, queda en `bot.log` y en memoria (`GET /api/decisiones` la da igual) y se reintenta a 1 s, 2 s, 4 s… (como
+mucho cada 5 min, unas 4 h en total); si el lote falla por una sola fila, se guardan las demás, y una `id` que ya está en
+la base (otro bot escribiendo a la vez) se cambia por una libre. Lo que no se guarda tras reintentar, o al cerrar el bot,
+queda en `bot.log` y no estará en la base. El motor sigue siempre.
+
+```json
+{"type": "decision_apertura", "ts": 0,
+ "row": {"id": 17, "ts": 0, "ventana_id": "tokio-seul-2026-10-29", "ventana": "tokio-seul", "dia": "2026-10-29", "apertura_ms": 0,
+         "coin": "BTC", "fase": "cierre", "decision": "cerrada", "motivo_codigo": "objetivo",
+         "motivo": "Objetivo (3,0 R): +2,86 R (+125,00 USDC, dinero ficticio)", "impulso_pct": 0.3, "lado": "largo",
+         "preset": "seis", "estrategia": "6 diarias", "trade_id": "t3f2a…", "story": "a-tokio-seul-2026-10-29-btc-1",
+         "datos": {"R": 2.86, "resultado_usdc": 125.0, "resultado_pct": 4.3, "entrada": 100.3, "salida": 104.81}}}
+```
+- No va en el estado inicial del WebSocket (`bus.NO_STATE`): la web pide lo guardado a `GET /api/decisiones` (§3).
+- `ventana_id`: la clave de la apertura del motor (`<ventana>-<día local de la bolsa>`, p. ej. `tokio-seul-2026-10-29`) o
+  `noticia-<story de la noticia>` (entrada por noticia, `ventana: "noticia"`, `apertura_ms` null). `dia`: fecha de Madrid
+  de la apertura (de la fila, en las de noticia). `impulso_pct`: el impulso medido (en las de noticia, lo que se movió el
+  precio, `mov_pct`). `preset` y `estrategia`: los del motor (`params.preset` y `params.nombre`, 2.9) o
+  «Entrada por noticia fiable». `story`: la del evento `strategy` (`a-…` o `nf-…`) desde que se envía al paper (antes,
+  en las de noticia, la de la noticia); `trade_id`: el `id` de la operación del paper (3.2) desde que se abre.
+- Una fila solo en puntos de decisión, y nunca igual (decisión, código, motivo y operación) a la última de la misma
+  ventana×moneda×fase: un reinicio que vuelve a medir no duplica nada. Unas 100 al día. `ts` nunca es anterior al de la
+  fila previa de la misma ventana×moneda. Solo se añade: nada se borra.
+- `datos` (JSON, objeto en el mensaje y en la API; sin NaN):
+  - `medida`: `apertura`, `precio` (cierre al medir), `rango {maximo, minimo}`, `medida_min`, `umbral_pct`, `entrada`,
+    `rvol_min`, `filtro_volatilidad`, `volatilidad_pct`, `filtro_btc`, `btc_tendencia` (−1/0/1), `apertura_anterior_pct`,
+    `filtro_noticias` y `noticias {dir, fuerza, motivo, factores [{factor, peso}], fiables [{story, dir, ts, grupo,
+    nombre, acierto, titular}], etiqueta, fiable}` (las que pesaron; al reiniciar, `apertura.senal_de_fila` las vuelve a
+    dar como señal).
+  - `entrada`: `plan {entrada, stop, objetivo, stop_pct, objetivo_R, bruto_pct, neto_pct, coste_pct, funding_pct,
+    instrumento, riesgo_pct, tope_h}`, `limites {entradas, max_entradas, riesgo_pct, max_riesgo_pct}` (los del día de
+    Madrid al decidir), `rvol` (volumen relativo medido al entrar) y `rvol_min` (null los dos sin ese filtro, como en
+    «6 diarias»); `tarde`: `vela_ms`, `decision_ms`; sin volumen relativo: `rvol`, `rvol_min`. Si los datos de la medida
+    no se pueden preparar, la fila va con `datos` null y la decisión es la misma.
+  - `riesgo`: `controles_fallidos [texto]`. `paper` (abierta): `entrada`, `stop`, `objetivo`, `nominal_usdc`,
+    `instrumento`, `deslizamiento_pb`, `riesgo_con_costes_usdc`.
+  - `cierre`: `R` (la web lo lee), `resultado_usdc`, `resultado_pct`, `entrada`, `salida`, `costes_usdc`, `motivo_paper`.
+  - `perdida`: `arranque` (cuándo lo vio el bot), `fin_sesion`.
+
+Fases y decisiones (la última fila de cada ventana×moneda es su estado):
+
+| fase | decision | cuándo |
+|---|---|---|
+| `medida` | `esperando` | al abrir, mientras mide el impulso (una vez; no se apunta si el bot arranca con la medida ya pasada ni tras reiniciar si esa moneda ya tenía alguna fila en la apertura) |
+| `medida` | `entra` / `no_entra` | al acabar la medida: el impulso pasa (y sus filtros) o no (`impulso_nulo`, `impulso_bajo`, `veto_noticia`, `sin_velas`, `otro`: volatilidad o BTC) |
+| `entrada` | `entra` | se envía al paper (evento `strategy`), antes de saber qué dicen el riesgo y el paper |
+| `entrada` | `no_entra` | no se envía: `tarde`, `moneda_ocupada`, `tope_dia`, `riesgo_dia`, `reglas`, `perdida_dia` (paper parado por la pérdida del día), `otro` (sin cartera, paper detenido por ti, campeón pausado, sin volumen relativo, sin reanudación o ruptura a tiempo, fin de la sesión) |
+| `riesgo` | `rechazada` | `riskko` del paper (`exposicion`, `max_posiciones`, `perdida_dia`, `moneda_ocupada`, `reglas`, `otro`) |
+| `paper` | `abierta` | `filled`: abierta (con `trade_id`) |
+| `paper` | `rechazada` | `humanko` (`aprobacion`: rechazada por ti, caducada) o `blocked` (`exposicion`, `max_posiciones`, `perdida_dia`, `aprobacion`: aprobada tarde o cancelada, `otro`); también si el paper nunca la abrió sin decir por qué |
+| `cierre` | `cerrada` | `closed`: `objetivo`, `stop`, `tiempo` u `otro` (manual), con `datos.R` |
+| `perdida` | `perdida` | `bot_parado`: la sesión pasó con el bot parado (al arrancar, una vez por ventana×moneda; si no hay ningún evento guardado durante la sesión) o el bot se paró midiendo, antes de la hora de entrada o antes de apuntar esa moneda y volvió con la sesión acabada (en una apertura con filas de otras monedas: si son del motor, siempre; si solo hay filas del paper, como en el primer caso) |
+
+Catálogo cerrado de `motivo_codigo` (un código fuera del catálogo se guarda como `otro`): `entra`, `impulso_nulo`,
+`impulso_bajo`, `tarde`, `sin_velas`, `veto_noticia`, `tope_dia`, `riesgo_dia`, `perdida_dia`, `exposicion`,
+`moneda_ocupada`, `max_posiciones`, `reglas`, `aprobacion`, `bot_parado`, `objetivo`, `stop`, `tiempo`, `otro`.
+
+Entrada por noticia (2.16): `esperando` → `medida/esperando`; su `strategy` → `entrada/entra`; `caducada` y `vetada` →
+`entrada/no_entra` con su `motivo_codigo` (una `vetada` porque la rechazó el riesgo no repite la fila del riesgo);
+`confirmada` no añade nada (ya está la de su `strategy`); sin moneda, ninguna fila. Las operaciones de antes de la
+tabla (sin fila) se ligan por su story (`a-<ventana>-<fecha>-<moneda>-<n>` o `nf-<noticia>-<moneda>`); las de la fase 2
+no van aquí: solo liga el paper una story `a-…` o `nf-…`, así que una operación de la fase 2 (story = la de la noticia)
+no se cuela en la ventana `noticia-<story>` aunque la entrada por noticia haya apuntado esa noticia.
 
 ## 3. API de solo lectura (servidor en 127.0.0.1:8765)
 
@@ -652,6 +734,7 @@ cola hasta que ya no se puedan confirmar a tiempo):
 | `GET /api/backtest/aperturas` | `BACKTEST_DIR/aperturas.json`: el motor anterior (v2 «ruptura»), solo como referencia (404 sin archivo) |
 | `GET /api/backtest/impulso` | `{impulso, lab}` (`bot/resumen_backtest.py`): `impulso` = `BACKTEST_DIR/impulso_7d.json` (lo escribe `controles/compara_impulso.py`), la variante de 7 días que opera el motor, con `fuera` y `dentro` = `{n, mean_R, win_rate, salidas, horas_media, largos, cortos, desde, hasta, total_R, max_dd_R, curva_R [[ms, R acumulado]] (≤ 151 puntos)}` y `nota`; `lab` = resumen de `laboratorio.json` (`summary`, `promising`, `robust`, `avance` = cuenta honesta en avance trimestral con 0,5 % de riesgo); `seis` = `BACKTEST_DIR/seis_diarias_resumen.json` (la réplica del motor con el preset «6 diarias»), con la misma forma que `impulso` más `nombre` y `params`. Lo que falte va como `null`; 404 si faltan los tres |
 | `GET /api/noticias_fiables` | Último `noticias_fiables` (2.15); 404 si aún no hay ningún cálculo |
+| `GET /api/decisiones?desde=<ms>&ventana_id=&coin=&limite=` | `{rows, n, desde}`: filas de `decisiones_apertura` (2.17) con `ts ≥ desde` (por defecto, los 3 últimos días), de esa apertura y moneda si se piden, la más reciente primero (`ts` y luego `id`), como mucho 2.000 (`limite` de 1 a 2.000). `datos` como objeto. 400 con un parámetro no válido; 404 si el módulo no está en marcha (entonces no se guardan). No va en el estado inicial del WebSocket |
 | `GET /api/resultados` | Operaciones paper y agregados (3.2) |
 | `GET /api/vigilancia` | Último `vigilancia` (2.8) y `operaciones`: las operaciones virtuales que cuentan, de la más reciente a la más antigua (filas de la tabla `vigilancia`, hasta 500) |
 | `GET /api/aperturas` | Último `openings` (2.9) |
@@ -762,6 +845,7 @@ Origen permitido (vale para todas las órdenes, también las de fuentes, pesos y
 - `feed_state(id TEXT PRIMARY KEY, etag TEXT, last_modified TEXT, interval_s REAL, last_ok INTEGER, fails INTEGER)` (feeds).
 - `predictions(id TEXT, ts INTEGER, kind TEXT, target TEXT, when_utc INTEGER, horizon TEXT, prob_up REAL, expected_pct REAL, outcome_pct REAL, hit INTEGER, body TEXT, PRIMARY KEY(id, ts))` (predicciones).
 - `trades(id TEXT PRIMARY KEY, story TEXT, opened INTEGER, closed INTEGER, body TEXT)` (paper trading).
+- `decisiones_apertura(id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, ventana_id TEXT NOT NULL, ventana TEXT, dia TEXT, apertura_ms INTEGER, coin TEXT NOT NULL, fase TEXT, decision TEXT, motivo_codigo TEXT, motivo TEXT, impulso_pct REAL, lado TEXT, preset TEXT, estrategia TEXT, trade_id TEXT, story TEXT, datos TEXT)` (por qué entra o no, 2.17). Índices `(ventana_id, coin)` y `(ts)`. Solo se añade: dos disparadores impiden DELETE y UPDATE, y `store.prune` no la toca. `fase`: `medida|entrada|riesgo|paper|cierre|perdida`; `decision`: `entra|no_entra|rechazada|perdida|abierta|cerrada|esperando`; `motivo_codigo`: el catálogo cerrado de 2.17; `lado`: `largo|corto|null`; `datos`: JSON (2.17). Migración aditiva (`store.migrate_decisiones`, al abrir el `Store`): crea la tabla si falta y, en una base con una versión anterior, añade las columnas que le falten sin tocar sus filas. Las ids las reparte el bot en memoria (siguen a la mayor guardada) y las guarda un hilo.
 - `vigilancia(id TEXT PRIMARY KEY, estrategia TEXT, apertura TEXT, moneda TEXT, lado TEXT, entrada_t INTEGER, entrada REAL, stop REAL, objetivo REAL, salida_t INTEGER, salida REAL, R REAL, pct REAL, motivo TEXT, cuerpo TEXT)` (vigilancia, 2.8). Una fila por estrategia, apertura y moneda (`id` = código de la estrategia, `<ventana>-<día>` y moneda): un reinicio no duplica nada. `salida_t`, `salida`, `R` y `pct` van a NULL mientras está abierta; una cerrada ya no cambia (salvo el funding de un corto aún sin liquidar del todo). `lado`: `largo|corto`; `motivo`: `objetivo|stop|tiempo|abierta|sin_datos` (`sin_datos`: abierta que ya no se puede resolver tras un apagón largo; no cuenta); `salida` es el precio de salida con deslizamiento. `cuerpo` (JSON): `apertura_ms`, `ventana`, `ventana_nombre`, `dia`, `instrumento` (`contado|perpetuo`), `sl_pct`, `r`, `dur`, `R_modelo`, `pct_modelo`, `comision_perp_pct`, `funding_pct`, `funding_completo`, `previa` y, abierta, `R_latente`, `pct_latente` y `datos_hasta`.
 - `vigilancia_estado(clave TEXT PRIMARY KEY, valor TEXT)` (vigilancia): `ultimo_calculo`, `datos_hasta`, `vigiladas` y `aperturas` (las evaluadas; se reescriben solo si cambian). Sirven para recalcular lo que faltó tras un apagón.
 - Aprendizaje (2.10; las crea y migra `bot/aprendizaje.py`):

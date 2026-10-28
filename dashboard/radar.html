@@ -596,6 +596,18 @@ details.evo-more p{margin:6px 0 0}
 .strat-now{padding:8px 14px;border-top:1px solid var(--line)}
 .strat-now .pill{margin-left:4px}
 @media (max-width:720px){ .kpis.kpis4{grid-template-columns:repeat(2,minmax(0,1fr))} }
+/* Por qué entra o no (tabla decisiones_apertura del bot) */
+.dec-note{margin-bottom:10px}
+.dec-trail{display:block;margin-top:3px;font-size:11.5px}
+details.dec-more summary{cursor:pointer;font-size:11.5px;color:var(--accent);margin-top:3px}
+details.dec-more p{margin:3px 0 0;font-size:11.5px;color:var(--muted);font-family:var(--f-mono);white-space:normal}
+#decBox .chip{padding:2px 8px;font-size:11.5px;white-space:nowrap}
+.dec-h{font-size:13px;font-weight:600;margin:18px 0 6px}
+.dec-sum{list-style:none;margin:12px 0 0;padding:10px 0 0;border-top:1px solid var(--line);display:grid;gap:5px;font-size:12.5px}
+.dec-sum li .pill{margin-right:6px}
+.md-dec{font-size:12px;padding:8px 14px 10px;border-top:1px solid var(--line);cursor:pointer;line-height:1.5}
+.md-dec:hover{background:var(--surface-2)}
+.md-dec .pill{margin-left:4px}
 
 /* Pie */
 .foot{border-top:1px solid var(--line);padding-block:14px 30px;color:var(--muted);font-size:12px}
@@ -725,7 +737,8 @@ details.evo-more p{margin:6px 0 0}
   <!-- MANDO: todo de un vistazo, pensado para un segundo monitor -->
   <section class="view mando" id="v-mando" hidden>
     <div class="md-col">
-      <div class="panel"><div class="panel-h"><h2>Estado</h2><p id="mdMode"></p></div><div class="panel-b" id="mdState"></div></div>
+      <div class="panel"><div class="panel-h"><h2>Estado</h2><p id="mdMode"></p></div><div class="panel-b" id="mdState"></div>
+        <div class="md-dec" id="mdDec" data-tabgo="market" title="Por qué entra o no en cada apertura: pestaña Mercado y aperturas"></div></div>
       <div class="panel"><div class="panel-h"><h2>Agentes</h2></div><ul class="md-list" id="mdAgents"></ul></div>
       <div class="panel"><div class="panel-h"><h2>Bolsas · cripto</h2><p>Barra: media de BTC, ETH, SOL y XRP desde cada apertura (4 h); discontinua, su apertura anterior</p></div><ul class="md-list" id="mdMarkets"></ul></div>
       <div class="panel"><div class="panel-h"><h2>Cripto</h2></div><ul class="md-list" id="mdCoins"></ul></div>
@@ -817,6 +830,7 @@ details.evo-more p{margin:6px 0 0}
     <div class="panel"><div class="panel-h"><h2>Bolsas del mundo: cómo reacciona la cripto en cada apertura</h2><p>BTC, ETH, SOL y XRP desde que abre cada bolsa: en curso sus 4 primeras horas, luego el resultado a las 4 h y, antes de abrir, lo que hizo en su apertura anterior. Los índices no se muestran.</p></div><div class="panel-b"><p class="note" id="mkNote" hidden style="margin-bottom:10px"></p><div class="mktgrid ca" id="mkTiles"></div></div></div>
     <div class="panel"><div class="panel-h"><h2>Flujo de órdenes cripto</h2><p>Libro de órdenes de OKX EU y operaciones agresivas de Binance: quién empuja ahora mismo.</p></div><div class="panel-b"><div class="mktgrid" id="ofTiles"></div></div></div>
     <div class="panel"><div class="panel-h"><h2>Motor de aperturas</h2><p id="openSub">Señal de las noticias → confirmación en los primeros minutos de la apertura (ruptura del rango con volumen y presión a favor) → entrada → stop dinámico → reentradas mientras el volumen acompañe.</p></div><div class="panel-b" id="openings"></div></div>
+    <div class="panel"><div class="panel-h"><h2>Por qué entra o no</h2><p>Cada apertura de los 3 últimos días, moneda a moneda: el impulso de los 15 primeros minutos, lo que decidió el motor y por qué, y si después la rechazó el riesgo o el paper. Solo paper.</p></div><div class="panel-b" id="decBox"></div></div>
     <div class="panel"><div class="panel-h"><h2>Vigilancia en vivo</h2><p>Prueba en avance de las estrategias congeladas del laboratorio y de su variante del usuario de 7 días: en cada apertura, si habrían entrado y cómo acaba cada operación VIRTUAL (sin dinero), frente a su cifra del backtest fuera de muestra.</p></div><div class="panel-b" id="vigil"></div></div>
     <div class="tiles" id="tiles"></div>
     <div class="two">
@@ -1244,7 +1258,9 @@ const S = {
   // Evolución: mensajes «evolucion», «aprendizaje» y «fuentes_vivas» más lo que llega por /api/... (evoRev cambia al llegar algo)
   evo:null, apr:null, fv:null, fvList:null, fvCand:null, evoHist:null, evoInf:null, evoNews:null, evoMedio:null, evoSel:null,
   evoF:{tipo:"", origen:"", dias:30}, evoMF:"todos", evoRev:0, evoDemo:false,
-  fiables:null, fiabF:"todos"   // último cálculo de «noticias_fiables» (bot/fiables.py) y filtro de su tabla
+  fiables:null, fiabF:"todos",   // último cálculo de «noticias_fiables» (bot/fiables.py) y filtro de su tabla
+  // Por qué entra o no: filas de «decisiones_apertura» (GET /api/decisiones y mensajes «decision_apertura»), la más reciente primero
+  dec:[], decRev:0, decDemo:false, decApi:null
 };
 for (const c of COINS){ S.prices[c]=INFO[c].price; S.p0[c]=INFO[c].price; S.hist[c]=[]; }
 S.prices.USDT = 1;
@@ -1279,6 +1295,7 @@ function ingest(msg){
   if (msg.type==="fuentes_vivas") onFv(msg);
   if (msg.type==="orden_web") onOrden(msg);
   if (msg.type==="noticias_fiables") onFiables(msg);
+  if (msg.type==="decision_apertura") onDecision(msg);
   if (msg.type==="portfolio") { applyPortfolio(msg); S.dirty=true; }
   if (msg.type==="market") {
     Object.assign(S.prices, msg.prices||{}); for (const c in (msg.flow||{})) S.flow[c]=msg.flow[c];
@@ -1323,6 +1340,17 @@ async function loadApi(which){   // datos que no van por el WebSocket: backtest 
   if (!which && !S.criptoAp) try {   // la cripto en cada apertura: también va en el estado inicial del WebSocket
     const r = await fetch("/api/cripto_aperturas"); if (r && r.ok){ const j = await r.json(); if (j && typeof j==="object" && j.markets && !S.criptoAp){ S.criptoAp = j; S.dirty = true; } }
   } catch(e){ /* un bot sin esta ruta todavía: se espera al mensaje del WebSocket */ }
+  // Por qué entra o no: no va en el estado inicial del WebSocket. Una sola petición a la vez; quien llegue mientras tanto la espera.
+  if (!which || which==="dec"){ if (!S.decP) S.decP = loadDec().finally(() => { S.decP = null; }); await S.decP; }
+}
+async function loadDec(){
+  try {
+    const r = await fetch(`/api/decisiones?desde=${Math.floor(Date.now() - DEC_DIAS*864e5 - 2*3600e3)}&limite=${DEC_MAX}`);
+    const j = r && r.ok ? await r.json() : null;
+    // 404: el bot en marcha no tiene la ruta, así que no guarda estas decisiones (no es lo mismo que un reinicio)
+    if (isObj(j) && Array.isArray(j.rows)){ decAdd(j.rows); S.decApi = "ok"; } else S.decApi = r && r.status===404 ? "sin_ruta" : "fallo";
+  } catch(e){ S.decApi = "fallo"; /* bot reiniciándose o sin esta ruta (404): se queda lo que había y las nuevas llegan por el WebSocket */ }
+  S.decRev++; S.dirty = true;
 }
 // Órdenes de la web al bot (paper) por el WebSocket. Si no está abierto, se avisa en vez de perder el clic.
 function sendBot(o){
@@ -1399,6 +1427,9 @@ function resetLive(msg){
     evo:null, apr:null, fv:null, fvList:null, fvCand:null, evoHist:null, evoInf:null, evoNews:null, evoMedio:null, evoSel:null,
     evoDemo:false, evoOrdTs:undefined, evoPend:null, fvPend:null, aprPend:null, evoRev:S.evoRev+1, fiables:null,
     sel:null, pickSel:true, dirty:true});
+  // Las decisiones guardadas siguen valiendo tras un reinicio del bot (están en su base); las de ejemplo, no.
+  if (S.decDemo) Object.assign(S, {dec:[], decDemo:false, decApi:null});
+  S.decRev++;
   $("#evoDemoNote").hidden = true; $("#v-evo").classList.remove("demo");
   for (const c of COINS) S.flow[c] = {};
   lastFeedSig = "";
@@ -2466,6 +2497,7 @@ function renderVigil(){
 function renderMarket(){
   renderWorldMarkets();
   renderOpenings();
+  safe(renderDecisiones);
   safe(renderVigil);
   $("#tiles").innerHTML = COINS.map(c => {
     const p = S.prices[c];
@@ -3003,6 +3035,303 @@ function stratNow(){
   const extra = preset==="seis" ? `Puesta por tu decisión para medirla en la cartera paper; en el backtest ${sx && isNum(sx.mean_R) ? `da ${rT(sx.mean_R)} por operación fuera de muestra` : "pierde fuera de muestra"} (pestaña Backtest).` : "";
   return `<b>Estrategia activa del motor de aperturas:</b> ${esc(lbl)}${preset ? ` <span class="pill ${preset==="seis" ? "warn" : "info"}">preset ${esc(preset==="seis" ? "6 diarias" : preset)}</span>` : ""}${O.paused===true || ec.pausada===true ? ' <span class="pill bad">Pausada</span>' : ""}${extra ? ` <span class="note">${esc(extra)}</span>` : ""}`;
 }
+
+// ---------- Por qué entra o no (bot: tabla «decisiones_apertura», GET /api/decisiones y mensaje «decision_apertura») ----------
+// Cada fila es un punto de decisión del motor de aperturas o de la entrada por noticia fiable: al terminar la medida, al
+// entrar o descartar, al rechazarla el riesgo o el paper, al abrir y cerrar la operación y al detectar una apertura que pasó
+// con el bot parado. Solo se añaden: la más reciente de cada apertura×moneda es su estado. Contrato en docs/04-contratos.md
+// §2.17 (tabla decisiones_apertura, bot/decisiones.py); todo es opcional y cualquier campo puede llegar a null.
+const DEC_MAX = 2000, DEC_DIAS = 3;
+// Catálogo cerrado de motivo_codigo: [etiqueta corta (recuento y Mando), explicación cuando la fila no trae su texto]
+const DEC_MOT = {
+  entra:["entra", "El impulso de los primeros minutos marca el lado y se sigue a favor."],
+  impulso_nulo:["impulso nulo", "El precio acabó la medida igual que en la apertura: sin dirección no se entra."],
+  impulso_bajo:["impulso bajo", "El movimiento no llegó al mínimo para entrar."],
+  tarde:["tarde para entrar", "Ya había pasado la hora de entrada cuando el bot pudo decidir."],
+  sin_velas:["sin velas", "No llegaron las velas de 1 min para medir el impulso."],
+  veto_noticia:["noticia fiable en contra", "Una noticia de un grupo fiable que pasa la puerta para operar iba en contra del lado: se veta la entrada."],
+  tope_dia:["tope de entradas del día", "Ya se hicieron todas las entradas permitidas hoy (día de Madrid)."],
+  riesgo_dia:["riesgo del día agotado", "El presupuesto de riesgo del día ya está usado."],
+  perdida_dia:["pérdida máxima del día", "Se llegó a la pérdida máxima del día: hoy no se abre nada más."],
+  exposicion:["exposición", "Con esta operación la exposición pasaría del 100 % del capital."],
+  moneda_ocupada:["moneda ocupada", "Ya hay una posición paper abierta en esta moneda: una posición por moneda."],
+  max_posiciones:["máximo de posiciones", "Ya está abierto el máximo de posiciones a la vez."],
+  reglas:["tus reglas", "No cumple tus reglas: beneficio/riesgo ≥ 2:1, stop ≥ 1,5 % y objetivo ≥ 3 % neto de costes."],
+  aprobacion:["sin aprobación", "No se aprobó a tiempo o la rechazaste."],
+  bot_parado:["bot parado", "La apertura pasó con el bot parado: no se pudo medir ni entrar."],
+  objetivo:["objetivo", "Llegó al objetivo."],
+  stop:["stop", "Tocó el stop."],
+  tiempo:["fin del plazo", "Se cerró al acabar el plazo máximo de la operación."],
+  otro:["otro motivo", ""]};
+const DEC_CHIP = {entra:["good","Entra"], no_entra:["muted","No entra"], perdida:["warn","Perdida con el bot parado"], abierta:["info","Abierta (paper)"], esperando:["warn","Esperando"]};
+const DEC_FASE = {medida:"Medida", entrada:"Entrada", riesgo:"Riesgo", paper:"Paper", cierre:"Cierre", perdida:"Perdida"};
+const DEC_DTXT = {entra:"entra", no_entra:"no entra", rechazada:"rechazada", perdida:"perdida", abierta:"abierta", cerrada:"cerrada", esperando:"esperando"};
+const WIN_SHORT = {"tokio-seul":"Tokio", china:"Shanghái", europa:"Europa", saopaulo:"São Paulo", nuevayork:"Nueva York"};
+const decOrd = (a, b) => b.ts - a.ts || (isNum(b.id) ? b.id : 0) - (isNum(a.id) ? a.id : 0);
+const decKey = r => isNum(r.id) ? "i" + r.id : [r.ventana_id, r.coin, r.fase, r.decision, r.ts, r.motivo_codigo].join("|");
+const joinY = a => a.length < 2 ? a.join("") : a.slice(0, -1).join(", ") + " y " + a[a.length - 1];
+// Una fila del bot, con datos como objeto (llega como objeto o como texto JSON); sin moneda, apertura u hora no sirve.
+function decNorm(r){
+  if (!isObj(r) || Array.isArray(r)) return null;
+  const coin = strOk(r.coin), vid = strOk(r.ventana_id);
+  if (!coin || !vid || !okT(r.ts)) return null;
+  let d = r.datos;
+  if (typeof d==="string"){ try { d = JSON.parse(d); } catch(e){ d = null; } }
+  return {...r, coin, ventana_id:vid, datos:isObj(d) && !Array.isArray(d) ? d : null};
+}
+function decAdd(rows){
+  const m = new Map(S.dec.map(r => [decKey(r), r]));
+  for (const x of Array.isArray(rows) ? rows : []){ const r = decNorm(x); if (r) m.set(decKey(r), r); }
+  S.dec = [...m.values()].sort(decOrd).slice(0, DEC_MAX);
+  S.decRev++; S.dirty = true;
+}
+function onDecision(m){ if (S.decDemo) return; decAdd([isObj(m) ? m.row : null]); }
+// Aperturas (y entradas por noticia) con su estado por moneda, de la más reciente a la más antigua.
+function decWindows(){
+  if (S.decCache && S.decCache.rev===S.decRev) return S.decCache.ws;
+  const by = new Map();
+  for (const r of S.dec){   // ya van de la más reciente a la más antigua: la primera de cada moneda es su estado
+    let w = by.get(r.ventana_id);
+    if (!w){ w = {id:r.ventana_id, ventana:null, open:null, dia:null, first:r.ts, estrategia:null, preset:null, coins:new Map()}; by.set(r.ventana_id, w); }
+    w.first = Math.min(w.first, r.ts);
+    if (w.open==null && okT(r.apertura_ms)) w.open = r.apertura_ms;
+    if (!w.dia && typeof r.dia==="string" && /^\d{4}-\d{2}-\d{2}$/.test(r.dia)) w.dia = r.dia;
+    w.ventana = w.ventana || strOk(r.ventana); w.estrategia = w.estrategia || strOk(r.estrategia); w.preset = w.preset || strOk(r.preset);
+    let c = w.coins.get(r.coin);
+    if (!c){ c = {coin:r.coin, last:r, rows:[], imp:null, lado:null, trade:null, story:null}; w.coins.set(r.coin, c); }
+    c.rows.push(r);
+    if (c.imp==null && isNum(r.impulso_pct)) c.imp = r.impulso_pct;
+    if (!c.lado && (r.lado==="largo" || r.lado==="corto")) c.lado = r.lado;
+    c.trade = c.trade || strOk(r.trade_id); c.story = c.story || strOk(r.story);
+  }
+  const ws = [...by.values()].map(w => { const t = w.open ?? w.first;
+    return {...w, t, dia:w.dia || madDay(t), noticia:w.ventana==="noticia" || /^noticia-/.test(w.id),
+      cs:[...w.coins.values()].sort((a, b) => (COINS.indexOf(a.coin) + 1 || 99) - (COINS.indexOf(b.coin) + 1 || 99) || (a.coin < b.coin ? -1 : 1))}; })
+    .sort((a, b) => b.t - a.t);
+  S.decCache = {rev:S.decRev, ws};
+  return ws;
+}
+const decWinName = w => WIN_NAME[w.ventana] || (w.ventana ? String(w.ventana) : String(w.id).replace(/-\d{4}-\d{2}-\d{2}$/, ""));
+const decWinShort = w => WIN_SHORT[w.ventana] || decWinName(w);
+// Resultado en R de una operación cerrada: el de la fila (datos) o el de la operación del paper con ese trade_id.
+function decR(c, r){
+  const d = isObj(r.datos) ? r.datos : {}, v = numOf(d.R, d.r, d.resultado_R, d.R_neto);
+  if (v!=null) return v;
+  const tr = S.live ? (isObj(S.results) && Array.isArray(S.results.trades) ? S.results.trades : []) : S.closed;
+  const t = c.trade ? tr.find(x => isObj(x) && x.id===c.trade) : null;
+  return t && isNum(t.R) ? t.R : null;
+}
+const decShort = r => { const k = r.motivo_codigo; return k && k!=="otro" && DEC_MOT[k] ? DEC_MOT[k][0] : strOk(r.motivo) ? short(r.motivo, 48) : k==="otro" ? DEC_MOT.otro[0] : "sin motivo"; };
+const decMotivo = r => strOk(r.motivo) || (DEC_MOT[r.motivo_codigo] || [])[1] || "";
+function decChip(c){
+  const r = c.last, d = r.decision, k = r.motivo_codigo;
+  if (d==="rechazada") return ["bad", r.fase==="riesgo" ? "Rechazada por el riesgo" : r.fase==="paper" ? "Rechazada por el paper" : "Rechazada"];
+  if (d==="cerrada"){ const R = decR(c, r);
+    return [isNum(R) ? (R > 0 ? "good" : R < 0 ? "bad" : "muted") : "muted", `Cerrada${["objetivo","stop","tiempo"].includes(k) ? ": " + DEC_MOT[k][0] : ""}${isNum(R) ? " · " + rT(R) : ""}`]; }
+  if (d==="perdida" && k && k!=="bot_parado") return ["warn", "Perdida"];
+  return DEC_CHIP[d] || ["muted", d ? String(d).replace(/_/g, " ") : "Sin decisión"];
+}
+// «datos» en texto llano para revisarlo: claves y valores (anidados con punto), sin los vacíos.
+const decNum = v => v.toLocaleString("es-ES", {maximumFractionDigits: Math.abs(v) >= 1000 ? 1 : Math.abs(v) >= 10 ? 2 : Math.abs(v) >= 1 ? 4 : 6});
+const decVal = v => typeof v==="number" ? (!isFinite(v) ? "" : v > 1e12 && okT(v) ? vigTime(v) : decNum(v))
+  : typeof v==="boolean" ? (v ? "sí" : "no") : typeof v==="string" ? short(v, 140) : "";
+function decDatos(d, pre = "", out = [], depth = 0){
+  if (!isObj(d) || depth > 3) return out;
+  for (const [k, v] of Object.entries(d)){
+    if (out.length >= 30) break;
+    const key = pre ? `${pre}.${k}` : k;
+    if (v==null || v==="") continue;
+    if (Array.isArray(v)){ const s = v.filter(x => x!=null && !isObj(x)).map(decVal).filter(Boolean);
+      if (s.length) out.push(`${key}: ${s.join(", ")}`); else v.filter(isObj).slice(0, 3).forEach((x, i) => decDatos(x, `${key}[${i + 1}]`, out, depth + 1));
+      continue; }
+    if (isObj(v)){ decDatos(v, key, out, depth + 1); continue; }
+    const s = decVal(v); if (s) out.push(`${key}: ${s}`);
+  }
+  return out;
+}
+const decHora = (t, dia) => okT(t) ? (madDay(t)!==dia ? vigTime(t) : madHM(t)) : "–";
+// Motivo, recorrido por fases (si hay más de una fila) y los datos de cada fila, desplegables.
+function decWhy(c, dia){
+  const r = c.last, txt = decMotivo(r), rows = [...c.rows].reverse();
+  const trail = rows.length > 1 ? `<span class="note dec-trail">${rows.map(x => `${esc(DEC_FASE[x.fase] || (x.fase ? String(x.fase) : "fase"))}: ${esc(DEC_DTXT[x.decision] || (x.decision ? String(x.decision).replace(/_/g, " ") : "–"))} ${decHora(x.ts, dia)}`).join(" → ")}</span>` : "";
+  const det = rows.map(x => { const f = decDatos(x.datos); return f.length ? `<p>${esc(DEC_FASE[x.fase] || "Fila")} ${decHora(x.ts, dia)} · ${esc(f.join(" · "))}</p>` : ""; }).join("");
+  return `${txt ? esc(txt) : '<span class="note">Sin motivo.</span>'}${trail}${det ? `<details class="dec-more"><summary>Datos de la decisión</summary>${det}</details>` : ""}`;
+}
+// Enlace a la operación (trade_id): su expediente si la web lo tiene; si no, Resultados. En la demostración es de ejemplo.
+function decLink(c){
+  const id = c.trade ? esc(short(c.trade, 18)) : "", has = c.story && S.stories.has(c.story);
+  if (c.trade && S.decDemo) return `<span class="mono note" title="Operación paper de ejemplo">${id}</span>`;
+  if (c.trade && has) return `<button type="button" class="chip" data-story="${esc(c.story)}" title="Abre el expediente de la operación paper ${esc(c.trade)}">Operación <span class="mono">${id}</span></button>`;
+  if (c.trade) return `<button type="button" class="chip" data-tabgo="results" title="Operación paper ${esc(c.trade)}: está en la pestaña Resultados">Resultados <span class="mono">${id}</span></button>`;
+  if (has) return `<button type="button" class="chip" data-story="${esc(c.story)}" title="Abre el expediente: qué propuso el motor y quién lo rechazó">Expediente</button>`;
+  return '<span class="note">–</span>';
+}
+function decImp(c, noticia){
+  if (!isNum(c.imp)) return `<span class="note">${noticia ? "–" : "sin medir"}</span>`;
+  return `<b class="mono ${c.imp > 0 ? "pos" : c.imp < 0 ? "neg" : ""}">${pct(c.imp, 2)}</b>${c.lado ? ` <span class="note">${c.lado==="largo" ? "▲ largo" : "▼ corto"}</span>` : ""}`;
+}
+// Recuento de un día por apertura×moneda (estado final): entran, no entran y rechazadas por motivo, perdidas y esperando.
+function decCount(ws){
+  const o = {n:0, entra:0, abiertas:0, cerradas:0, no:new Map(), rech:new Map(), perd:0, esp:0, otras:0}, inc = (m, k) => m.set(k, (m.get(k) || 0) + 1);
+  for (const w of ws) for (const c of w.cs){ const r = c.last, d = r.decision; o.n++;
+    if (d==="entra" || d==="abierta" || d==="cerrada"){ o.entra++; if (d==="abierta") o.abiertas++; if (d==="cerrada") o.cerradas++; }
+    else if (d==="no_entra") inc(o.no, decShort(r));
+    else if (d==="rechazada") inc(o.rech, `${decShort(r)}${r.fase==="riesgo" ? " (riesgo)" : r.fase==="paper" ? " (paper)" : ""}`);
+    else if (d==="perdida") o.perd++;
+    else if (d==="esperando") o.esp++;
+    else o.otras++; }
+  return o;
+}
+const decMapTxt = m => [...m.entries()].sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n}`).join(" · ");
+function decSumHtml(o){
+  const li = (tone, lbl, n, txt) => `<li><span class="pill ${tone}">${esc(lbl)} ${nf(n, 0)}</span>${txt ? esc(txt) : ""}</li>`;
+  const sumN = m => [...m.values()].reduce((a, x) => a + x, 0);
+  return li("good", "Entran", o.entra, [o.abiertas ? `${nf(o.abiertas,0)} ${o.abiertas===1 ? "abierta" : "abiertas"}` : "", o.cerradas ? `${nf(o.cerradas,0)} ${o.cerradas===1 ? "cerrada" : "cerradas"}` : ""].filter(Boolean).join(" · "))
+    + li("muted", "No entran", sumN(o.no), decMapTxt(o.no)) + li("bad", "Rechazadas", sumN(o.rech), decMapTxt(o.rech))
+    + (o.perd ? li("warn", "Perdidas con el bot parado", o.perd, "") : "") + (o.esp ? li("warn", "Esperando", o.esp, "midiendo el impulso o esperando la hora de entrada") : "")
+    + (o.otras ? li("muted", "Otras", o.otras, "") : "");
+}
+// Mando: «Tokio: entra en BTC y ETH; SOL rechazada (exposición); XRP no entra (impulso nulo)» (texto sin escapar).
+function decLine(w){
+  const gs = new Map(), add = (d, m, c) => { const k = d + "\u0001" + m, g = gs.get(k) || {d, m, cs:[]}; g.cs.push(c); gs.set(k, g); };
+  const out = [], cerr = [];
+  for (const c of w.cs){ const r = c.last, d = r.decision;
+    if (d==="entra" || d==="abierta") add("entra", "", c.coin);
+    else if (d==="cerrada"){ const R = decR(c, r); cerr.push(`${c.coin} cerrada (${["objetivo","stop","tiempo"].includes(r.motivo_codigo) ? DEC_MOT[r.motivo_codigo][0] : "paper"}${isNum(R) ? " " + rT(R) : ""})`); }
+    else if (d==="rechazada" || d==="no_entra") add(d, decShort(r), c.coin);
+    else if (d==="perdida" || d==="esperando") add(d, "", c.coin);
+    else add("otra", d ? String(d).replace(/_/g, " ") : "sin decisión", c.coin); }
+  const e = gs.get("entra\u0001"); if (e) out.push(`entra en ${joinY(e.cs)}`);
+  out.push(...cerr);
+  for (const g of gs.values()){ const n = g.cs.length, l = joinY(g.cs), d = g.d, m = g.m;
+    if (d==="rechazada") out.push(`${l} ${n > 1 ? "rechazadas" : "rechazada"} (${m})`);
+    else if (d==="no_entra") out.push(`${l} ${n > 1 ? "no entran" : "no entra"} (${m})`);
+    else if (d==="perdida") out.push(`${l} ${n > 1 ? "perdidas" : "perdida"} (bot parado)`);
+    else if (d==="esperando") out.push(`${l} ${n > 1 ? "esperan" : "espera"} (midiendo el impulso)`);
+    else if (d==="otra") out.push(`${l}: ${m}`); }
+  return `${decWinShort(w)}: ${out.join("; ")}`;
+}
+function decEstado(rows){
+  if (S.decDemo) return `<p class="note dec-note"><span class="pill warn">Ejemplo inventado</span> En la demostración no hay aperturas de verdad: las decisiones son de mentira, con la lógica de «6 diarias» (impulso de 15 min, entrada a +15 min, stop 1,5 % y 3R, como mucho 24 h, ≤ 6 entradas y 3 % de riesgo al día, una posición por moneda y exposición ≤ 100 %).</p>`;
+  if (S.decApi==="sin_ruta") return `<p class="note dec-note"><span class="pill warn">El bot no lo guarda</span> El bot en marcha aún no guarda estas decisiones (no tiene GET /api/decisiones): ${rows ? "solo se enseña lo que ha llegado por el WebSocket, y se pierde al reiniciarlo." : "no hay nada que enseñar."}</p>`;
+  if (S.decApi==="fallo") return `<p class="note dec-note"><span class="pill warn">Sin lo guardado</span> No se pudo leer GET /api/decisiones (el bot quizá aún no tiene esta ruta o se está reiniciando)${rows ? ": se enseña lo que ha llegado por el WebSocket." : ". Las decisiones nuevas llegan por el WebSocket."}</p>`;
+  if (S.decApi==="ok") return `<p class="note dec-note"><span class="pill good">Guardado en el bot</span> Viene de la tabla decisiones_apertura del bot, así que sobrevive a los reinicios.</p>`;
+  return "";
+}
+function renderDecisiones(){
+  const box = $("#decBox"); if (!box) return;
+  if (!S.live) demoDecRefresh();
+  const now = S.vnow, d2 = madDay(now - (DEC_DIAS - 1)*864e5), all = decWindows().filter(w => w.dia >= d2);
+  const ws = all.filter(w => !w.noticia), ns = all.filter(w => w.noticia);
+  let h = decEstado(ws.length + ns.length);
+  if (!ws.length && !(S.live && S.decApi==="sin_ruta")) h += `<p class="note">${S.live ? (S.decApi==null ? "Leyendo las decisiones guardadas en el bot…" : S.decApi==="ok" ? "Aún no hay decisiones guardadas en los 3 últimos días: el motor escribe una al terminar la medida de cada apertura, al entrar o descartar, si la rechaza el riesgo o el paper y al cerrar." : "Aún no ha llegado ninguna decisión en los 3 últimos días.") : "Sin aperturas de ejemplo en los 3 últimos días."}</p>`;
+  else h += `<div class="tbl-wrap"><table><thead><tr><th>Apertura</th><th>Moneda</th><th>Impulso 15 min</th><th>Decisión</th><th class="wrapc">Motivo</th><th>Hora</th><th>Operación</th></tr></thead><tbody>`
+    + ws.map(w => w.cs.map((c, i) => { const [tone, lbl] = decChip(c);
+      return `<tr>${i===0 ? `<td rowspan="${w.cs.length}" class="wrapc"><b>${esc(decWinName(w))}</b><br><span class="note mono">${okT(w.t) ? `${madDM(w.t)} · ${madHM(w.t)} Madrid` : esc(w.dia)}</span>${w.estrategia ? `<br><span class="note">${esc(w.estrategia)}</span>` : ""}</td>` : ""}
+        <td><b>${esc(c.coin)}</b></td><td>${decImp(c, false)}</td><td><span class="pill ${tone}">${esc(lbl)}</span></td>
+        <td class="wrapc">${decWhy(c, w.dia)}</td><td class="mono">${decHora(c.last.ts, w.dia)}</td><td>${decLink(c)}</td></tr>`; }).join("")).join("") + `</tbody></table></div>`;
+  // Recuento del día (o del último día con decisiones), por apertura×moneda
+  if (ws.length){ const today = madDay(now), dd = ws.some(w => w.dia===today) ? today : ws[0].dia, o = decCount(ws.filter(w => w.dia===dd));
+    h += `<ul class="dec-sum"><li><b>${dd===today ? "Recuento de hoy" : "Recuento del último día con decisiones"} (${esc(fiabDia(dd))}, día de Madrid)</b> · ${nf(o.n, 0)} apertura×moneda</li>${decSumHtml(o)}</ul>`; }
+  // Entradas por noticia fiable (ventana «noticia»), aparte
+  h += `<h3 class="dec-h">Entradas por noticia fiable</h3>`;
+  if (!ns.length) h += `<p class="note">Ninguna en los 3 últimos días: solo abren entradas las noticias de grupos fiables que pasan la puerta para operar.</p>`;
+  else h += `<div class="tbl-wrap"><table><thead><tr><th class="wrapc">Noticia</th><th>Moneda</th><th>Movimiento</th><th>Decisión</th><th class="wrapc">Motivo</th><th>Hora</th><th>Operación</th></tr></thead><tbody>`
+    + ns.map(w => w.cs.map((c, i) => { const [tone, lbl] = decChip(c), sid = c.story || String(w.id).replace(/^noticia-/, ""), st = S.stories.get(sid);
+      const hl = st && (st.headline || st.title);
+      return `<tr>${i===0 ? `<td rowspan="${w.cs.length}" class="wrapc"><b>${esc(short(hl || `Noticia ${sid}`, 110))}</b><br><span class="note mono">${okT(w.t) ? `${madDM(w.t)} · ${madHM(w.t)} Madrid` : ""}</span></td>` : ""}
+        <td><b>${esc(c.coin)}</b></td><td>${decImp(c, true)}</td><td><span class="pill ${tone}">${esc(lbl)}</span></td>
+        <td class="wrapc">${decWhy(c, w.dia)}</td><td class="mono">${decHora(c.last.ts, w.dia)}</td><td>${decLink(c)}</td></tr>`; }).join("")).join("") + `</tbody></table></div>`;
+  putH(box, h);
+}
+function renderMdDec(){
+  const el = $("#mdDec"); if (!el) return;
+  if (!S.live) demoDecRefresh();
+  const w = decWindows().find(x => !x.noticia);
+  if (!w){ putH(el, `<b>Última apertura</b> · <span class="note">${S.live ? (S.decApi==="sin_ruta" ? "el bot en marcha aún no guarda estas decisiones" : S.decApi==="fallo" ? "sin decisiones guardadas (el bot quizá aún no tiene GET /api/decisiones)" : "aún no hay decisiones guardadas") : "–"}</span>`); return; }
+  putH(el, `<b>Última apertura</b>${S.decDemo ? ' <span class="pill warn">Ejemplo</span>' : ""} · ${esc(decLine(w))} <span class="note mono">${okT(w.t) ? `${madDM(w.t)} ${madHM(w.t)}` : ""}</span>`);
+}
+// Demostración: aperturas de EJEMPLO de los 3 últimos días con la lógica de «6 diarias» (impulso de 15 min sin filtros,
+// entrada a +15 min, stop 1,5 % y 3R, como mucho 24 h, ≤ 6 entradas y 3 % de riesgo al día de Madrid, una posición por
+// moneda y exposición ≤ 100 %: cada posición es un tercio del capital con 0,5 % de riesgo y stop 1,5 %). Semilla fija por
+// apertura y moneda: rehacerla da lo mismo, y lo que ya pasó no cambia. Salidas en la proporción de la réplica de 3 años.
+const DEC_WINS = [["tokio-seul","tokio"], ["china","shanghai"], ["europa","londres"], ["saopaulo","saopaulo"], ["nuevayork","nuevayork"]];
+function seedRnd(s){
+  let h = 2166136261; for (const ch of String(s)) h = Math.imul(h ^ ch.charCodeAt(0), 16777619);
+  return () => { h = (h + 0x6D2B79F5) | 0; let t = h; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+function demoDecisiones(now){
+  const d2 = madDay(now - (DEC_DIAS - 1)*864e5).split("-").map(Number), from = zonedToUtc("Europe/Madrid", d2[0], d2[1], d2[2], 0, 0), opens = [];
+  for (const [id, mk] of DEC_WINS){ const m = MKBY[mk];
+    for (let k = -3; k <= 1; k++){ const p = zparts(m.tz, now + k*864e5), t = zonedToUtc(m.tz, p.y, p.m, p.d, m.o[0], m.o[1]), wd = zparts(m.tz, t).wd;
+      if (wd==="Sat" || wd==="Sun" || t < from || t > now || opens.some(o => o.id===id && o.t===t)) continue;
+      opens.push({id, t}); } }
+  opens.sort((a, b) => a.t - b.t);
+  const veta = isObj(S.fiables) && objs(S.fiables.grupos).some(g => g.opera===true);
+  const lost = opens.find(o => o.id==="china" && madDay(o.t)===madDay(from)) || null;   // una apertura pasó con el bot parado
+  const rows = [], open = [], day = {}, R_USD = DEMO_EQUITY*0.005;
+  let seq = 0;
+  for (const o of opens){
+    const dia = madDay(o.t), vid = `${o.id}-${dia}`, te = o.t + 15*60000;
+    const row = (coin, x) => rows.push({id:++seq, ts:te, ventana_id:vid, ventana:o.id, dia, apertura_ms:o.t, coin, impulso_pct:null, lado:null,
+      preset:"seis", estrategia:"6 diarias", trade_id:null, story:null, motivo:null, datos:null, ...x});
+    if (o===lost){ const ts = Math.min(now, o.t + 5*3600e3);
+      for (const c of COINS) row(c, {ts, fase:"perdida", decision:"perdida", motivo_codigo:"bot_parado", motivo:"Pasó con el bot parado: no se midió el impulso ni se pudo entrar (lo vio al arrancar).", datos:{arranque:ts}});
+      continue; }
+    if (now < te){ for (const c of COINS) row(c, {ts:o.t, fase:"medida", decision:"esperando", motivo_codigo:"otro", motivo:`Midiendo el impulso de los 15 primeros minutos: decide a las ${madHM(te)}.`}); continue; }
+    for (const p of open.splice(0)) if (p.until > te) open.push(p);   // las que ya cerraron dejan sitio
+    const dd = day[dia] = day[dia] || {n:0, risk:0};
+    for (const c of COINS){
+      const rnd = seedRnd(vid + "|" + c), u = rnd(), g = Math.sqrt(-2*Math.log(1 - rnd()))*Math.cos(2*Math.PI*rnd());
+      const imp = u < 0.05 ? 0 : (Math.round(g*45)/100 || 0.01), lado = imp > 0 ? "largo" : imp < 0 ? "corto" : null;
+      const p0 = INFO[c].price*(1 + (rnd() - 0.5)*0.03), px = p0*(1 + imp/100), lo = Math.min(p0, px)*(1 - rnd()*0.002), hi = Math.max(p0, px)*(1 + rnd()*0.002);
+      const med = {fase:"medida", impulso_pct:imp, lado, datos:{apertura:p0, precio_15min:px, rango:{minimo:lo, maximo:hi}, medida_min:15}};
+      if (!imp){ row(c, {...med, decision:"no_entra", motivo_codigo:"impulso_nulo", motivo:"Impulso de 0,00 % en los 15 primeros min: sin dirección no se entra."}); continue; }
+      row(c, {...med, decision:"entra", motivo_codigo:"entra", motivo:`Impulso ${pct(imp, 2)} en los 15 primeros min: ${imp > 0 ? "largo al contado" : "corto en perpetuo"} a +15 min.`});
+      const lim = {entradas:dd.n, max_entradas:6, riesgo_pct:dd.risk, max_riesgo_pct:3, posiciones:open.length, exposicion_pct:Math.round(open.length*100/3)};
+      const ent = {fase:"entrada", ts:te + 2000, impulso_pct:imp, lado}, busy = open.find(p => p.coin===c), vv = rnd();
+      if (veta && vv < 0.05){ row(c, {...ent, decision:"no_entra", motivo_codigo:"veto_noticia", motivo:`Noticia fiable ${imp > 0 ? "bajista" : "alcista"} en contra (regulatorio): se veta la entrada.`, datos:{limites:lim}}); continue; }
+      if (busy){ row(c, {...ent, decision:"no_entra", motivo_codigo:"moneda_ocupada", motivo:`Ya hay una posición paper abierta en ${c} (${WIN_NAME[busy.win]} del ${madDM(busy.t)}): una posición por moneda.`, datos:{limites:lim}}); continue; }
+      if (dd.n >= 6){ row(c, {...ent, decision:"no_entra", motivo_codigo:"tope_dia", motivo:"Tope de 6 entradas del día (día de Madrid) alcanzado.", datos:{limites:lim}}); continue; }
+      const sl = imp > 0 ? px*0.985 : px*1.015, tp = imp > 0 ? px*1.045 : px*0.955;
+      const plan = {entrada:px, stop:sl, objetivo:tp, stop_pct:1.5, objetivo_R:3, riesgo_pct:0.5, instrumento:imp > 0 ? "contado" : "perpetuo"};
+      row(c, {...ent, decision:"entra", motivo_codigo:"entra", motivo:`Se envía al paper: ${imp > 0 ? "compra al contado" : "venta en perpetuo"} a ${pricef(px)}, stop ${pricef(sl)} (1,5 %) y objetivo ${pricef(tp)} (3R), como mucho 24 h.`, datos:{plan, limites:lim}});
+      if (open.length >= 3){ row(c, {...ent, ts:te + 3000, fase:"paper", decision:"rechazada", motivo_codigo:"exposicion", motivo:`La exposición subiría al ${nf((open.length + 1)*100/3, 0)} % del capital (máximo 100 %): ya hay ${open.length} posiciones de un tercio del capital.`, datos:{limites:lim}}); continue; }
+      const tid = "t" + [rnd(), rnd()].map(x => Math.floor(x*16777216).toString(16).padStart(6, "0")).join("");
+      row(c, {...ent, ts:te + 3000, fase:"paper", decision:"abierta", motivo_codigo:"entra", trade_id:tid, motivo:`Abierta en el paper: ${imp > 0 ? "compra" : "venta"} ${c} a ${pricef(px)} (dinero ficticio).`,
+        datos:{posiciones:open.length + 1, exposicion_pct:Math.round((open.length + 1)*100/3)}});
+      dd.n++; dd.risk += 0.5;
+      const v = rnd(), out = v < 0.56 ? "stop" : v < 0.88 ? "tiempo" : "objetivo";   // réplica de 3 años: 865 stop, 482 tiempo, 191 objetivo
+      const until = te + (out==="tiempo" ? 24 : out==="stop" ? 0.5 + rnd()*12 : 3 + rnd()*18)*3600e3;
+      const R = out==="stop" ? -1.07 : out==="objetivo" ? 2.86 : Math.round((rnd()*1.6 - 0.7)*100)/100;
+      open.push({coin:c, until, win:o.id, t:o.t});
+      if (until <= now) row(c, {ts:until, fase:"cierre", decision:"cerrada", motivo_codigo:out, impulso_pct:imp, lado, trade_id:tid,
+        motivo:out==="stop" ? "Tocó el stop (−1,5 %)." : out==="objetivo" ? "Llegó al objetivo (3R, +4,5 %)." : "Fin del plazo de 24 h: cierre a mercado.",
+        datos:{R, resultado_usdc:Math.round(R*R_USD*100)/100}});
+    }
+  }
+  return rows;
+}
+// Entradas por noticia de la demostración: las de su cable (eventos «entrada_noticia»), con el mismo formato que el bot.
+const DEC_ENT = {esperando:["medida","esperando","otro"], confirmada:["entrada","entra","entra"], caducada:["entrada","no_entra","impulso_bajo"], vetada:["entrada","no_entra","otro"]};
+function demoDecNoticias(){
+  const out = [];
+  for (const e of S.events){ if (e.kind!=="entrada_noticia" || !e.story) continue;
+    const x = entInfo(e), m = DEC_ENT[x.estado]; if (!x.coin || !m) continue;
+    const mo = x.motivo || "", code = x.estado!=="vetada" ? m[2] : /tope/i.test(mo) ? "tope_dia" : /posici|ocupad/i.test(mo) ? "moneda_ocupada" : /pérdida/i.test(mo) ? "perdida_dia" : /riesgo/i.test(mo) ? "riesgo_dia" : "otro";
+    out.push({id:null, ts:e.ts, ventana_id:"noticia-" + e.story, ventana:"noticia", dia:madDay(e.ts), apertura_ms:null, coin:x.coin, fase:m[0], decision:m[1],
+      motivo_codigo:code, motivo:x.motivo, impulso_pct:x.mov, lado:x.dir > 0 ? "largo" : x.dir < 0 ? "corto" : null, preset:"seis", estrategia:"Entrada por noticia fiable",
+      trade_id:null, story:e.story, datos:{umbral_pct:x.umbral, grupo:grupoTxt(x.grupo)}}); }
+  return out;
+}
+function demoDecRefresh(){
+  if (S.live) return;
+  const k = Math.floor(S.vnow/60000) + "|" + S.events.length;
+  if (S.decDemoK===k) return;
+  S.decDemoK = k;
+  S.dec = [...demoDecisiones(S.vnow), ...demoDecNoticias()].map(decNorm).filter(Boolean).sort(decOrd).slice(0, DEC_MAX);
+  S.decDemo = true; S.decRev++;
+}
 function renderEvo(force){
   if (!force && S.evoSig===S.evoRev) return;
   S.evoSig = S.evoRev;
@@ -3366,6 +3695,7 @@ function renderMando(){
           ["Operaciones", nf((R.trades||[]).length,0)],
           ["Pérdida del día", `${nf(S.dayLoss||0,2)} % de ${nf(S.limits.max_daily_loss_pct,0)} %`]]);
   safe(renderMdFiab);   // noticias fiables y entradas por noticia
+  safe(renderMdDec);    // por qué entra o no en la última apertura
   const preds = ((S.predictions && S.predictions.items) || []).filter(p => p.kind!=="bolsa").sort((a,b) => a.when_utc-b.when_utc).slice(0,8);   // solo cripto
   $("#mdPred").innerHTML = preds.map(p => `<li data-tabgo="pred"><span class="led ${p.confidence==="alta"?"busy":p.confidence==="media"?"wait":""}"></span><span class="nm">${esc(p.label)}</span>
     <span class="tx">${p.when_utc>now ? "en "+dur(p.when_utc-now) : "ahora"} · confianza ${esc(p.confidence)}</span><b class="${p.prob_up>=0.5?"pos":"neg"}">${Math.round(p.prob_up*100)} %</b></li>`).join("")
@@ -4489,6 +4819,8 @@ document.addEventListener("click", ev => {
     try { if (HASH_OF[S.tab] && location.hash.slice(1)!==HASH_OF[S.tab]) history.replaceState(null, "", "#"+HASH_OF[S.tab]); } catch(e){}
     if (BC) try { BC.postMessage({type:"hello", from:ME, tab:S.tab}); } catch(e){}
     if (S.tab==="results" || S.tab==="mando") loadApi("res"); if (S.tab==="bt"){ S.btSig = null; if (!S.backtest) loadApi("bt"); }
+    if (S.tab==="market" || S.tab==="mando") loadApi("dec");   // por qué entra o no: lo guardado en el bot
+
     document.body.classList.toggle("world-mode", S.tab==="world");
     document.body.classList.toggle("mando-mode", S.tab==="mando"); mdFeedSig = "";
     document.documentElement.style.setProperty("--hdr", $(".top").offsetHeight+"px");

@@ -1937,3 +1937,239 @@ def test_la_curva_de_capital_va_sobre_la_cartera_de_prueba_y_no_sobre_10000():
       return {n: H.el("#eqNote").textContent, aviso: H.el("#avisoDemo").hidden};""", live=False)
     assert "100 € ficticios" in demo["n"] and "10.000" not in demo["n"] and "10000" not in demo["n"]
     assert demo["aviso"] is False   # la copia publicada avisa de que son datos de ejemplo
+
+
+# Por qué entra o no (tabla «decisiones_apertura» del bot: GET /api/decisiones y mensaje «decision_apertura»), 28-10-2026.
+# T0: Tokio hace 3 h; AYER, Europa 24 h antes; CHINA, 26 h antes (perdida con el bot parado); VIEJA, hace 4 días (no sale).
+DEC = r"""
+const dia = t => new Date(t).toLocaleDateString("sv-SE", {timeZone: "Europe/Madrid"});
+const T0 = now - 3 * 3600e3, AYER = T0 - 864e5, CHINA = T0 - 26 * 3600e3, VIEJA = now - 4 * 864e5, M15 = 15 * 60e3;
+let ID = 0;
+const fila = (o = {}) => { const ap = o.apertura_ms !== undefined ? o.apertura_ms : T0, v = o.ventana || "tokio-seul";
+  return {id: ++ID, ts: (ap || now) + M15, ventana_id: `${v}-${dia(ap || now)}`, ventana: v, dia: dia(ap || now), apertura_ms: ap, coin: "BTC",
+    fase: "medida", decision: "entra", motivo_codigo: "entra", motivo: "Impulso +0,32 % en los 15 primeros min", impulso_pct: 0.32, lado: "largo",
+    preset: "seis", estrategia: "6 diarias", trade_id: null, story: null, datos: null, ...o}; };
+const dec = o => ({type: "decision_apertura", ts: now, row: fila(o)});
+// Tokio: BTC y ETH entran (BTC ya abierta en el paper), SOL la rechaza el paper (exposición) y XRP no entra (impulso nulo)
+const TOKIO = [
+  fila({coin: "BTC"}), fila({coin: "BTC", fase: "entrada", ts: T0 + M15 + 2000, motivo: "Se envía al paper"}),
+  fila({coin: "BTC", fase: "paper", decision: "abierta", ts: T0 + M15 + 3000, trade_id: "tabc123", story: "a-tok-btc-1", motivo: "Abierta en el paper",
+        datos: {plan: {entrada: 84000.5, stop: 82740.5}, nulo: null, lista: [1, null, 2], hora: T0, ok: true}}),
+  fila({coin: "ETH", impulso_pct: -0.21, lado: "corto"}),
+  fila({coin: "ETH", fase: "entrada", ts: T0 + M15 + 2000, impulso_pct: -0.21, lado: "corto", motivo: "Se envía al paper"}),
+  fila({coin: "SOL", impulso_pct: 0.4}),
+  fila({coin: "SOL", fase: "paper", decision: "rechazada", motivo_codigo: "exposicion", ts: T0 + M15 + 3000, story: "a-tok-sol-1", estrategia: "6 diarias <i>",
+        motivo: "La exposición subiría al 133 % <b>", datos: '{"limites": {"exposicion_pct": 100, "posiciones": 3}, "x": null}'}),
+  fila({coin: "XRP", decision: "no_entra", motivo_codigo: "impulso_nulo", motivo: null, impulso_pct: 0, lado: null})];
+const EUROPA = [
+  fila({ventana: "europa", apertura_ms: AYER, coin: "BTC", fase: "cierre", decision: "cerrada", motivo_codigo: "stop", ts: AYER + 5 * 3600e3,
+        trade_id: "tbtc0", motivo: "Tocó el stop", datos: {R: -1.07}}),
+  fila({ventana: "europa", apertura_ms: AYER, coin: "ETH", fase: "cierre", decision: "cerrada", motivo_codigo: "objetivo", ts: AYER + 9 * 3600e3,
+        trade_id: "teth0", motivo: "Llegó al objetivo", datos: {R: 2.86}}),
+  fila({ventana: "europa", apertura_ms: AYER, coin: "SOL", fase: "riesgo", decision: "rechazada", motivo_codigo: "perdida_dia", motivo: "Pérdida del día 3 % <i>"}),
+  fila({ventana: "europa", apertura_ms: AYER, coin: "XRP", fase: "entrada", decision: "no_entra", motivo_codigo: "tope_dia", motivo: "Tope de 6 entradas"})];
+const PERDIDA = [fila({ventana: "china", apertura_ms: CHINA, coin: "BTC", fase: "perdida", decision: "perdida", motivo_codigo: "bot_parado",
+                       ts: CHINA + 3 * 3600e3, motivo: null, impulso_pct: null, lado: null})];
+const VIEJAS = [fila({ventana: "saopaulo", apertura_ms: VIEJA, coin: "BTC"})];
+const decHtml = () => H.el("#decBox").innerHTML;
+"""
+
+
+def test_decisiones_por_la_api_agrupadas_por_apertura_con_recuento_y_mando():
+    """Al conectar se pide GET /api/decisiones; el panel «Por qué entra o no» agrupa por apertura (la más reciente arriba)
+    y por moneda con impulso, chip de la decisión, motivo, hora y enlace a la operación; debajo, el recuento del día; en
+    Mando, la línea corta de la última apertura. Lo de más de 3 días no sale; todo escapado y sin null."""
+    r = run(DEC + """const ROWS = [...TOKIO, ...EUROPA, ...PERDIDA, ...VIEJAS];
+      H.fetchReply = url => url.startsWith("/api/decisiones") ? {ok: true, json: async () => ({rows: ROWS.slice().reverse(), n: ROWS.length, desde: now - 3 * 864e5})} : {ok: false};
+      H.open(); reset();
+      H.recv(ev("strategy", "a-tok-btc-1", {headline: "Apertura Tokio · Compra BTC", src: "Motor de aperturas", tier: "Plan", t0: T0, coins: ["BTC"], strat: strat()}),
+             ev("strategy", "a-tok-sol-1", {headline: "Apertura Tokio · Compra SOL", src: "Motor de aperturas", tier: "Plan", t0: T0, coins: ["SOL"], strat: strat("SOL")}));
+      await loadApi();
+      S.tab = "market"; renderAll(true); const box = decHtml();
+      S.tab = "mando"; renderAll(true);
+      return {box, md: H.el("#mdDec").innerHTML, f: H.fetches.slice(), n: S.dec.length, api: S.decApi};""")
+    box, md = r["box"], r["md"]
+    assert any(u.startswith("/api/decisiones?desde=") and "limite=2000" in u for u in r["f"]) and r["api"] == "ok"
+    assert r["n"] == 14
+    # agrupación: la más reciente arriba; lo de hace 4 días no sale
+    i_t, i_e, i_c = box.index("Tokio y Seúl"), box.index("<b>Europa</b>"), box.index("Shanghái y Hong Kong")
+    assert i_t < i_e < i_c and "São Paulo" not in box and box.count('rowspan="4"') == 2 and 'rowspan="1"' in box
+    # cada decisión con su chip
+    for chip in ("Abierta (paper)", ">Entra<", "Rechazada por el paper", ">No entra<", "Cerrada: stop · -1,07 R", "Cerrada: objetivo · +2,86 R",
+                 "Rechazada por el riesgo", "Perdida con el bot parado"):
+        assert chip in box, chip
+    # impulso, motivo en llano (el del bot o el del catálogo), recorrido por fases y datos sin null
+    assert "+0,32 %" in box and "-0,21 %" in box and "▼ corto" in box and "0,00 %" in box
+    assert "La exposición subiría al 133 % &lt;b&gt;" in box and "Pérdida del día 3 % &lt;i&gt;" in box and "133 % <b>" not in box
+    assert "sin dirección no se entra" in box and "pasó con el bot parado" in box and "6 diarias &lt;i&gt;" in box
+    assert "Medida: entra" in box and "Entrada: entra" in box and "Paper: abierta" in box and "Paper: rechazada" in box
+    assert "plan.entrada: 84.000,5" in box and "lista: 1, 2" in box and "ok: sí" in box and "limites.exposicion_pct: 100" in box
+    # enlace a la operación: expediente si la web lo tiene; si no, Resultados
+    assert 'data-story="a-tok-btc-1"' in box and "tabc123" in box and 'data-story="a-tok-sol-1"' in box and ">Expediente<" in box
+    assert 'data-tabgo="results"' in box and "teth0" in box
+    # recuento del día de la apertura más reciente
+    assert "Recuento de" in box and "4 apertura×moneda" in box
+    assert '<span class="pill good">Entran 2</span>1 abierta' in box and '<span class="pill muted">No entran 1</span>impulso nulo 1' in box
+    assert '<span class="pill bad">Rechazadas 1</span>exposición (paper) 1' in box
+    # entradas por noticia, aparte (aquí ninguna)
+    assert "Entradas por noticia fiable" in box and "Ninguna en los 3 últimos días" in box
+    # Mando
+    assert "Tokio: entra en BTC y ETH; SOL rechazada (exposición); XRP no entra (impulso nulo)" in md and "Última apertura" in md
+    assert "Ejemplo" not in md
+    _sin_null(box, md)
+
+
+def test_decisiones_catalogo_de_motivos_en_lenguaje_llano():
+    """Cada motivo_codigo del catálogo cerrado (docs/04) se explica en llano cuando la fila no trae su texto, y sale con
+    su nombre corto en el recuento y en Mando; uno desconocido no rompe nada."""
+    r = run(DEC + """H.open(); reset();
+      const B = Date.parse(dia(now) + "T10:00:00Z");   // todas el mismo día de Madrid: un solo recuento
+      const CODES = ["impulso_nulo", "impulso_bajo", "tarde", "sin_velas", "veto_noticia", "tope_dia", "riesgo_dia", "perdida_dia", "exposicion",
+                     "moneda_ocupada", "max_posiciones", "reglas", "aprobacion", "otro", "zzz"];
+      H.recv(...CODES.map((k, i) => dec({ventana: "w" + i, coin: "BTC", fase: "entrada", decision: k === "exposicion" ? "rechazada" : "no_entra",
+        motivo_codigo: k, motivo: null, apertura_ms: B - i * 60e3})));
+      H.recv(...["objetivo", "stop", "tiempo"].map((k, i) => dec({ventana: "c" + i, coin: "ETH", fase: "cierre", decision: "cerrada", motivo_codigo: k,
+        motivo: null, apertura_ms: B - (20 + i) * 60e3})));
+      S.tab = "market"; renderAll(true); const box = decHtml();
+      S.tab = "mando"; renderAll(true);
+      return {box, md: H.el("#mdDec").innerHTML, lines: decWindows().slice(0, 3).map(decLine)};""")
+    box = r["box"]
+    for t in ("sin dirección no se entra", "no llegó al mínimo para entrar", "Ya había pasado la hora de entrada", "No llegaron las velas de 1 min",
+              "se veta la entrada", "todas las entradas permitidas hoy", "presupuesto de riesgo del día", "pérdida máxima del día",
+              "pasaría del 100 % del capital", "una posición por moneda", "el máximo de posiciones", "No cumple tus reglas",
+              "No se aprobó a tiempo", "Llegó al objetivo.", "Tocó el stop.", "plazo máximo de la operación", "Sin motivo."):
+        assert t in box, t
+    for t in ("impulso nulo 1", "impulso bajo 1", "tarde para entrar 1", "sin velas 1", "noticia fiable en contra 1", "tope de entradas del día 1",
+              "riesgo del día agotado 1", "pérdida máxima del día 1", "moneda ocupada 1", "máximo de posiciones 1", "tus reglas 1",
+              "sin aprobación 1", "otro motivo 1", "sin motivo 1", "exposición 1"):
+        assert t in box, t
+    assert "Cerrada: objetivo" in box and "Cerrada: stop" in box and "Cerrada: fin del plazo" in box
+    assert r["lines"][0].endswith("BTC no entra (impulso nulo)") and r["lines"][1].endswith("BTC no entra (impulso bajo)")
+    assert r["lines"][2].endswith("BTC no entra (tarde para entrar)") and "BTC no entra (impulso nulo)" in r["md"]
+    _sin_null(box, r["md"], *r["lines"])
+
+
+def test_decisiones_por_websocket_404_reinicio_y_campos_rotos():
+    """Un bot sin GET /api/decisiones (404) no rompe nada y se avisa; cada «decision_apertura» que llega se añade (sin
+    duplicar la misma fila) y la última de cada apertura×moneda manda; tras un reinicio siguen; abrir la pestaña vuelve a
+    pedir la ruta; filas rotas o sin moneda no rompen nada."""
+    r = run(DEC + """H.open(); reset(); await loadApi();
+      S.tab = "market"; renderAll(true); const vacio = decHtml();
+      S.tab = "mando"; renderAll(true); const md0 = H.el("#mdDec").innerHTML;
+      const NY = now - 5 * 60e3, ny = o => dec({ventana: "nuevayork", apertura_ms: NY, ts: NY, fase: "medida", decision: "esperando", motivo_codigo: "otro",
+        motivo: "Midiendo el impulso de los 15 primeros minutos", impulso_pct: null, lado: null, ...o});
+      const a = ny({coin: "BTC"}), b = ny({coin: "ETH"});
+      H.recv(a, b); renderAll(true); const md1 = H.el("#mdDec").innerHTML;
+      H.recv(a); const n1 = S.dec.length;
+      H.recv(ny({coin: "BTC", ts: NY + M15, fase: "entrada", decision: "entra", motivo_codigo: "entra", motivo: "Se envía al paper", impulso_pct: 0.12, lado: "largo"}));
+      renderAll(true); const md2 = H.el("#mdDec").innerHTML;
+      reset(); const n2 = S.dec.length;
+      H.fetches.length = 0; H.fire("click", {"data-tab": "market"}); const f = H.fetches.slice();
+      H.recv({type: "decision_apertura"}, {type: "decision_apertura", row: null}, {type: "decision_apertura", row: {coin: "BTC"}},
+             {type: "decision_apertura", row: 7}, dec({ts: "x"}), dec({coin: null}),
+             dec({ventana: "europa", apertura_ms: AYER, coin: "SOL", fase: "cierre", decision: "cerrada", motivo_codigo: "objetivo", motivo: null,
+                  datos: '{"R": 1.5, "x": null, "y": [null, {"z": null}]}'}),
+             dec({ventana: "europa", apertura_ms: AYER, coin: "ETH", fase: "cierre", decision: "cerrada", motivo_codigo: "stop", motivo: null,
+                  datos: '{"R": NaN}'}),
+             dec({ventana: "europa", apertura_ms: AYER, coin: "XRP", fase: "zzz", decision: "rara", motivo_codigo: "zzz", motivo: null, impulso_pct: "x",
+                  lado: "arriba", datos: "no es JSON", estrategia: 5, preset: null, trade_id: 9, story: {a: 1}}),
+             dec({ventana: null, ventana_id: "suelta", apertura_ms: null, dia: null, coin: "DOGE", decision: null, fase: null, motivo_codigo: null}));
+      S.tab = "market"; renderAll(true); const rotas = decHtml();
+      S.tab = "mando"; renderAll(true);
+      return {vacio, md0, md1, md2, n1, n2, f, rotas, md3: H.el("#mdDec").innerHTML, api: S.decApi};""")
+    assert r["api"] == "fallo"
+    assert "No se pudo leer GET /api/decisiones" in r["vacio"] and "Aún no ha llegado ninguna decisión" in r["vacio"]
+    assert "Aún no hay decisiones guardadas" not in r["vacio"] and "sobrevive" not in r["vacio"]   # sin la ruta, nada «guardado»
+    assert "sin decisiones guardadas" in r["md0"]
+    assert "Nueva York: BTC y ETH esperan (midiendo el impulso)" in r["md1"]
+    assert r["n1"] == 2 and "Nueva York: entra en BTC; ETH espera (midiendo el impulso)" in r["md2"]
+    assert r["n2"] == 3   # un reinicio del bot no borra lo guardado
+    assert any(u.startswith("/api/decisiones?") for u in r["f"])
+    rotas = r["rotas"]
+    assert "Cerrada: objetivo · +1,50 R" in rotas and "Llegó al objetivo." in rotas and ">rara<" in rotas and "Sin motivo." in rotas
+    assert ">Cerrada: stop</span>" in rotas   # un JSON que no se puede leer (NaN) se queda sin datos, sin romper nada
+    assert "DOGE" in rotas and "suelta" in rotas and "Sin decisión" in rotas
+    _sin_null(r["vacio"], r["md0"], r["md1"], r["md2"], rotas, r["md3"])
+
+
+def test_decisiones_sin_la_ruta_404_no_dice_que_el_bot_las_guarda():
+    """Un bot en marcha sin GET /api/decisiones (404) no guarda estas decisiones: la web lo dice así y no afirma en ningún
+    sitio que sobrevivan a los reinicios. Solo cuando la ruta responde dice que vienen de lo guardado en el bot."""
+    r = run(DEC + """H.fetchReply = url => url.startsWith("/api/decisiones") ? {ok: false, status: 404} : {ok: false};
+      H.open(); reset(); await loadApi();
+      S.tab = "market"; renderAll(true); const vacio = decHtml();
+      S.tab = "mando"; renderAll(true); const md0 = H.el("#mdDec").innerHTML;
+      H.recv(...TOKIO.map(x => ({type: "decision_apertura", ts: now, row: x})));
+      S.tab = "market"; renderAll(true); const conWs = decHtml(), api404 = S.decApi;
+      H.fetchReply = url => url.startsWith("/api/decisiones") ? {ok: true, json: async () => ({rows: TOKIO, n: TOKIO.length, desde: now - 3 * 864e5})} : {ok: false};
+      await loadDec(); renderAll(true);
+      return {vacio, md0, conWs, api404, ok: decHtml(), api: S.decApi};""")
+    assert r["api404"] == "sin_ruta" and r["api"] == "ok"
+    assert "El bot no lo guarda" in r["vacio"] and "aún no guarda estas decisiones" in r["vacio"] and "no hay nada que enseñar" in r["vacio"]
+    assert "Aún no hay decisiones guardadas" not in r["vacio"] and "el motor escribe una" not in r["vacio"] and "sobrevive" not in r["vacio"]
+    assert "el bot en marcha aún no guarda estas decisiones" in r["md0"]
+    assert "se pierde al reiniciarlo" in r["conWs"] and "Tokio y Seúl" in r["conWs"] and "sobrevive" not in r["conWs"]
+    assert "Guardado en el bot" in r["ok"] and "sobrevive a los reinicios" in r["ok"] and "El bot no lo guarda" not in r["ok"]
+    # la cabecera fija del panel no afirma que el bot lo guarde (eso depende de que responda la ruta)
+    page = HTML.read_text(encoding="utf-8")
+    cab = page[page.index("<h2>Por qué entra o no</h2>"):page.index('id="decBox"')]
+    assert "sobrevive" not in cab and "decisiones_apertura" not in cab and "Solo paper." in cab
+    _sin_null(r["vacio"], r["md0"], r["conWs"], r["ok"])
+
+
+def test_decisiones_entradas_por_noticia_aparte():
+    """Las entradas por noticia fiable (ventana «noticia», ventana_id «noticia-<story>») van en su propia tabla con el
+    titular escapado y el enlace al expediente; no cuentan en el recuento de aperturas ni en la línea de Mando."""
+    r = run(DEC + """H.open(); reset();
+      H.recv(ev("captured", "n1", {headline: "Titular <i>", src: "rbc.ru", tier: "T2", t0: now - 600e3, coins: ["SOL"]}));
+      const nt = (story, o) => dec({ventana: "noticia", ventana_id: "noticia-" + story, apertura_ms: null, dia: dia(now), story, estrategia: "Entrada por noticia fiable", ...o});
+      H.recv(...TOKIO.map(x => ({type: "decision_apertura", ts: now, row: x})),
+             nt("n1", {coin: "SOL", ts: now - 300e3, fase: "entrada", decision: "entra", motivo_codigo: "entra", motivo: "SOL se movió +0,71 % <b>", impulso_pct: 0.71}),
+             nt("n2", {coin: "XRP", ts: now - 200e3, fase: "entrada", decision: "no_entra", motivo_codigo: "tope_dia", motivo: null, impulso_pct: null, lado: null}));
+      S.tab = "market"; renderAll(true); const box = decHtml();
+      S.tab = "mando"; renderAll(true);
+      return {box, md: H.el("#mdDec").innerHTML};""")
+    box = r["box"]
+    ap, nt = box.split("Entradas por noticia fiable")
+    assert "Titular" not in ap and "4 apertura×moneda" in ap
+    assert "Titular &lt;i&gt;" in nt and "Titular <i>" not in nt and 'data-story="n1"' in nt and "SOL se movió +0,71 % &lt;b&gt;" in nt
+    assert "Noticia n2" in nt and "todas las entradas permitidas hoy" in nt and "+0,71 %" in nt
+    assert r["md"].count("Tokio:") == 1 and "SOL se movió" not in r["md"]
+    _sin_null(box, r["md"])
+
+
+def test_decisiones_demostracion_seis_diarias_marcada_como_ejemplo():
+    """Sin bot: decisiones de EJEMPLO de los 3 últimos días con la lógica de «6 diarias» (≤ 6 entradas al día, una
+    posición por moneda, exposición ≤ 100 %: como mucho 3 a la vez, stop 1,5 % y 3R), rotuladas como ejemplo, sin
+    estrategias que ya no existen y sin pedir nada al bot."""
+    r = run("""const out = {};
+      for (const [k, t] of [["noche", Date.UTC(2026, 9, 28, 21, 0)], ["midiendo", Date.UTC(2026, 9, 28, 0, 5)]]){
+        S.vnow = t; S.decDemoK = null; S.tab = "market"; renderAll(true); const box = H.el("#decBox").innerHTML;
+        S.tab = "mando"; renderAll(true);
+        const rows = S.dec.filter(x => x.ventana !== "noticia"), ab = {}, abiertas = rows.filter(x => x.decision === "abierta");
+        for (const x of abiertas) ab[x.dia] = (ab[x.dia] || 0) + 1;
+        const fin = id => { const c = rows.find(x => x.trade_id === id && x.decision === "cerrada"); return c ? c.ts : Infinity; };
+        const iv = abiertas.map(x => ({c: x.coin, a: x.ts, b: fin(x.trade_id)}));
+        const maxA = Math.max(0, ...iv.map(x => iv.filter(y => y.a <= x.a && y.b > x.a).length));
+        const dup = iv.some(x => iv.some(y => y !== x && y.c === x.c && y.a <= x.a && y.b > x.a));
+        out[k] = {box, md: H.el("#mdDec").innerHTML, demo: S.decDemo, n: rows.length, ab, maxA, dup,
+          presets: [...new Set(rows.map(x => x.preset))], estr: [...new Set(rows.map(x => x.estrategia))],
+          rech: [...new Set(rows.filter(x => x.decision === "rechazada").map(x => x.motivo_codigo))],
+          no: [...new Set(rows.filter(x => x.decision === "no_entra").map(x => x.motivo_codigo))],
+          decs: [...new Set(rows.map(x => x.decision))], tid: abiertas.every(x => /^t[0-9a-f]{12}$/.test(x.trade_id)),
+          plan: rows.filter(x => x.datos && x.datos.plan).every(x => x.datos.plan.stop_pct === 1.5 && x.datos.plan.objetivo_R === 3),
+          dias: [...new Set(rows.map(x => x.dia))].sort()}; }
+      return {...out, fetches: H.fetches.length, sockets: H.sockets.length};""", live=False)
+    a, b = r["noche"], r["midiendo"]
+    assert a["demo"] is True and a["n"] > 40 and a["dias"] == ["2026-10-26", "2026-10-27", "2026-10-28"]
+    assert a["presets"] == ["seis"] and a["estr"] == ["6 diarias"] and a["tid"] and a["plan"]
+    assert all(v <= 6 for v in a["ab"].values()) and a["maxA"] <= 3 and a["dup"] is False
+    assert set(a["rech"]) <= {"exposicion"} and set(a["no"]) <= {"impulso_nulo", "veto_noticia", "moneda_ocupada", "tope_dia"}
+    assert {"entra", "abierta", "cerrada", "perdida"} <= set(a["decs"]) and "esperando" not in a["decs"]
+    box = a["box"]
+    assert "Ejemplo inventado" in box and "«6 diarias»" in box and "Perdida con el bot parado" in box and "Recuento de hoy (28/10" in box
+    assert "E2" not in box and "ruptura" not in box.lower() and "Operación paper de ejemplo" in box and 'data-tabgo="results"' not in box
+    assert "Última apertura" in a["md"] and "Ejemplo" in a["md"] and "Nueva York:" in a["md"]
+    assert "esperando" in b["decs"] and "Tokio: BTC, ETH, SOL y XRP esperan (midiendo el impulso)" in b["md"]
+    assert r["fetches"] == 0 and r["sockets"] == 0
+    _sin_null(a["box"], a["md"], b["box"], b["md"])

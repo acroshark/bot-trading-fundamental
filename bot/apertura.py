@@ -13,6 +13,9 @@ Preset SEIS («6 diarias», 28-10-2026, lo pidió el usuario): el impulso de los
 bot/fiables.py). Pierde en el backtest de 3 años: se mide en paper y solo se activa con scripts/activar_estrategia.py.
 Los topes diarios de entradas y de riesgo cuentan TODAS las entradas del paper del día (paper_day_entries): son
 compartidos con la entrada por noticia confirmada (bot/entrada_noticias.py).
+Por qué entra o no (28-10-2026): en modo impulso cada punto de decisión de cada apertura×moneda queda en la tabla
+decisiones_apertura (bot/decisiones.py, docs/04 2.17) y, al reiniciar, la última fila manda: lo ya decidido no se vuelve
+a decidir y una entrada ya hecha nunca se repite.
 
 Modo «ruptura» (v2, sin cambios): la ruptura del rango de apertura solo a favor de la señal de las noticias.
 Reglas (las mismas en vivo y en bot/backtest_aperturas.py, que llama a estas funciones):
@@ -209,6 +212,11 @@ def _f(x, default=None):
         return float(x) if x not in (None, "") else default
     except (TypeError, ValueError):
         return default
+
+
+def _dicts(x, n: int | None = None) -> list[dict]:
+    """Los diccionarios de los n primeros elementos de una lista o tupla; cualquier otra cosa, ninguno."""
+    return [y for y in x[:n] if isinstance(y, dict)] if isinstance(x, (list, tuple)) else []
 
 
 async def _maybe(x):
@@ -1698,32 +1706,39 @@ def impulse_tags(d: int, mom: float, ctx: dict | None, sig: dict | None, params:
             "impulso_pct": round(mom, 3), "medida_min": p["measure_min"]}
 
 
-def impulse_filters(d: int, tags: dict, ctx: dict | None, params: dict | None = None) -> str | None:
-    """Motivo para no seguir el impulso, o None. Volatilidad y BTC con las reglas del laboratorio (sin dato de
-    volatilidad no se opera; sin dato de BTC cuenta como neutral) y las noticias según news_mode."""
+def impulse_filter(d: int, tags: dict, ctx: dict | None, params: dict | None = None) -> tuple[str | None, str | None]:
+    """(motivo para no seguir el impulso o None, código de decisiones_apertura: «veto_noticia» si son las noticias,
+    «otro» la volatilidad o BTC). Volatilidad y BTC con las reglas del laboratorio (sin dato de volatilidad no se
+    opera; sin dato de BTC cuenta como neutral) y las noticias según news_mode."""
     p, v = _ip(params), (ctx or {}).get("atr_pct")
     vf = p["vol_filter"]
     if vf != "todos":
         if v is None:
-            return "sin dato de volatilidad (ATR de 14 h en los 30 días previos): no se opera"
+            return "sin dato de volatilidad (ATR de 14 h en los 30 días previos): no se opera", "otro"
         ok = v >= 1 / 3 if vf == "no_baja" else v >= 2 / 3 if vf == "alta" else v < 1 / 3
         if not ok:
             rule = {"no_baja": "≥ 33 %", "alta": "≥ 67 %", "baja": "< 33 %"}[vf]
-            return f"volatilidad en el percentil {_n(v * 100, 0)} % de 30 días (hace falta {rule}): no se opera"
+            return f"volatilidad en el percentil {_n(v * 100, 0)} % de 30 días (hace falta {rule}): no se opera", "otro"
     b, bf = tags.get("btc"), p["btc_filter"]
     if bf == "no_contra" and b == "en_contra":
-        return "va contra la tendencia diaria de BTC (medias de 20 y 50 días): no se opera"
+        return "va contra la tendencia diaria de BTC (medias de 20 y 50 días): no se opera", "otro"
     if bf == "a_favor" and b != "a_favor":
-        return "la tendencia diaria de BTC no acompaña (medias de 20 y 50 días): no se opera"
+        return "la tendencia diaria de BTC no acompaña (medias de 20 y 50 días): no se opera", "otro"
     nl, nm = tags.get("noticia"), p["news_mode"]
     if nm == "no_contra" and nl == "en_contra":
-        return f"las noticias van claramente en contra (fuerza {_n(tags.get('noticia_fuerza') or 0.0)}): no se opera"
+        return (f"las noticias van claramente en contra (fuerza {_n(tags.get('noticia_fuerza') or 0.0)}): no se opera",
+                "veto_noticia")
     if nm == "a_favor" and nl != "a_favor":
-        return "las noticias no van a favor (se exige noticia a favor): no se opera"
+        return "las noticias no van a favor (se exige noticia a favor): no se opera", "veto_noticia"
     if nm == "fiables" and tags.get("noticia_fiable") == "en_contra":
         return (f"una noticia de un grupo fiable va en contra ({tags.get('noticia_fiable_grupo') or 'sin nombre'}, en las "
-                f"{_n(p['news_hours'], 0)} h previas): no se opera")
-    return None
+                f"{_n(p['news_hours'], 0)} h previas): no se opera", "veto_noticia")
+    return None, None
+
+
+def impulse_filters(d: int, tags: dict, ctx: dict | None, params: dict | None = None) -> str | None:
+    """Motivo para no seguir el impulso, o None (impulse_filter sin el código)."""
+    return impulse_filter(d, tags, ctx, params)[0]
 
 
 def impulse_strategy(d: int, tags: dict | None) -> str:
@@ -1790,7 +1805,10 @@ class ImpulseRun:
     Fases: midiendo_impulso → esperando_entrada (paso: hora, retroceso, reanudacion o ruptura) → en_posicion → terminada.
     Sin red ni órdenes: el motor le pasa las velas de 1 min cerradas (feed), el contexto (ctx), las noticias (news) y
     las velas de las sesiones anteriores (prior); los minutos sin vela repiten el último cierre (con volumen 0), como la
-    rejilla densa del laboratorio."""
+    rejilla densa del laboratorio.
+    Cada punto de decisión (fin de la medida: entra o no y por qué; la entrada que no llega: tarde, sin volumen,
+    caducada; sin la vela de la apertura) queda en decs ({fase, decision, motivo_codigo, motivo, datos}), que el motor
+    vacía en decisiones_apertura (bot/decisiones.py); end() solo cambia el estado (al reiniciar no apunta nada)."""
 
     free = False
 
@@ -1813,6 +1831,7 @@ class ImpulseRun:
         self.end_why: str | None = None
         self.feats: dict = {}
         self.moving = None
+        self.decs: list[dict] = []           # decisiones por apuntar (las vacía el motor)
 
     @property
     def done(self) -> bool:
@@ -1825,6 +1844,50 @@ class ImpulseRun:
     def end(self, why: str) -> dict:
         self.state, self.step, self.end_why, self.last_why = "terminada", None, why, why
         return {"action": "end", "why": why}
+
+    def _dec(self, fase: str, decision: str, codigo: str, motivo: str, datos: dict | None = None) -> None:
+        self.decs.append({"fase": fase, "decision": decision, "motivo_codigo": codigo, "motivo": motivo, "datos": datos})
+
+    def _no(self, fase: str, codigo: str, why: str, datos: dict | None = None) -> dict:
+        """No se entra en esta apertura: decisión apuntada y fin."""
+        self._dec(fase, "no_entra", codigo, why, datos)
+        return self.end(why)
+
+    def news_data(self) -> dict | None:
+        """Las noticias con que se decidió (la señal al medir) para «datos»: dirección, fuerza, factores y las de grupos
+        fiables. Al reiniciar, senal_de_fila las vuelve a dar como señal. Con cualquier forma rara de la señal da lo que
+        pueda (factores o fiables que no sean una lista: ninguno)."""
+        n = self.news if isinstance(self.news, dict) else None
+        if n is None:
+            return None
+        t = self.tags if isinstance(self.tags, dict) else {}
+        return {"dir": n.get("dir") or 0, "fuerza": _f(n.get("strength"), 0.0), "motivo": _cut(n.get("why"), 240),
+                "factores": [{"factor": _cut(x.get("factor"), 160), "peso": x.get("peso")}
+                             for x in _dicts(n.get("drivers"), 3)],
+                "fiables": [{k: x.get(k) for k in ("story", "dir", "ts", "grupo", "nombre", "acierto", "titular")}
+                            for x in _dicts(n.get("fiables"), 5)],
+                "etiqueta": t.get("noticia"), "fiable": t.get("noticia_fiable")}
+
+    def measure_data(self) -> dict | None:
+        """Lo medido para «datos» de la fila de la medida: precios, rango, umbral, filtros y contexto, y las noticias.
+        Se calcula dentro de la decisión de trading, así que nunca lanza: si algo falla, None (y queda en bot.log). Con
+        el registro o sin él se decide igual."""
+        try:
+            return self._measure_data()
+        except Exception:
+            log.warning("Aperturas: no pude preparar los datos de la medida de %s (la decisión sigue igual)", self.coin,
+                        exc_info=True)
+            return None
+
+    def _measure_data(self) -> dict:
+        ctx, p = self.ctx or {}, self.p
+        v = ctx.get("atr_pct")
+        return {"apertura": self.po, "precio": self.last_c, "rango": {"maximo": self.hi, "minimo": self.lo},
+                "medida_min": self.N, "umbral_pct": p["min_move_pct"], "entrada": p["entry"], "rvol_min": p["rvol_min"],
+                "filtro_volatilidad": p["vol_filter"], "volatilidad_pct": round(v * 100, 1) if v is not None else None,
+                "filtro_btc": p["btc_filter"], "btc_tendencia": ctx.get("btc_dir"),
+                "apertura_anterior_pct": ctx.get("prev_react"), "filtro_noticias": p["news_mode"],
+                "noticias": self.news_data()}
 
     def set_signal(self, d: int) -> None:   # la dirección la da el impulso; las noticias solo filtran y etiquetan
         return None
@@ -1846,7 +1909,7 @@ class ImpulseRun:
             if bar[T] < self.open_ms:
                 return None
             if bar[T] > self.open_ms:   # el laboratorio no opera una apertura sin su primera vela
-                return self.end("Falta la vela de la apertura: no se puede medir el impulso")
+                return self._no("medida", "sin_velas", "Falta la vela de la apertura: no se puede medir el impulso")
         elif bar[T] < self.t_next:
             return None
         while self.t_next is not None and self.t_next < bar[T] and not self.done and self.state != "en_posicion":
@@ -1895,7 +1958,7 @@ class ImpulseRun:
                                                f"de {_px(self.level)} (rango de {self.N} min y margen)")
         if st != "hora" and tc >= op + self.E * MIN:
             what = "reanudación" if self.kind == "pb" else "ruptura"
-            return self.end(f"Sin {what} en los primeros {self.E} min: caduca sin entrar")
+            return self._no("entrada", "otro", f"Sin {what} en los primeros {self.E} min: caduca sin entrar")
         return None
 
     def _measured(self, b: list, live_ok: bool) -> dict | None:
@@ -1905,13 +1968,16 @@ class ImpulseRun:
         d = self.dir = 1 if mom >= x and mom > 0 else -1 if mom <= -x and mom < 0 else 0
         head = f"Impulso de {_sg(mom)} % en {self.N} min"
         if not d:
-            return self.end(f"{head}: " + (f"no llega a ±{_n(x)} %, no se opera" if x > 0
-                                            else "sin movimiento, no hay sentido que seguir"))
+            return self._no("medida", "impulso_bajo" if x > 0 and mom != 0 else "impulso_nulo",
+                            f"{head}: " + (f"no llega a ±{_n(x)} %, no se opera" if x > 0
+                                           else "sin movimiento, no hay sentido que seguir"), self.measure_data())
         self.tags = impulse_tags(d, mom, self.ctx, self.news, p)
-        why = impulse_filters(d, self.tags, self.ctx, p)
+        why, code = impulse_filter(d, self.tags, self.ctx, p)
         if why:
-            return self.end(f"{head}, pero {why}")
+            return self._no("medida", code, f"{head}, pero {why}", self.measure_data())
         side = f"{'compra' if d > 0 else 'venta'} {INST_TEXT[self.tags['instrumento']]}"
+        self._dec("medida", "entra", "entra", f"{head}: se sigue ({side}) · {impulse_entry_type(p)}",
+                  self.measure_data())
         self.ext = self.hi if d > 0 else self.lo
         self.state = "esperando_entrada"
         if self.kind == "pb":
@@ -1939,12 +2005,16 @@ class ImpulseRun:
             self.rvol = lab_rvol(self.vol, prior)
             if self.rvol is None or self.rvol < self.p["rvol_min"]:
                 rv = "sin volumen de referencia de las sesiones anteriores" if self.rvol is None else _n(self.rvol)
-                return self.end(f"{why}, pero el volumen relativo desde la apertura ({rv}) no llega a "
-                                f"{_n(self.p['rvol_min'])}: no se opera")
+                return self._no("entrada", "otro", f"{why}, pero el volumen relativo desde la apertura ({rv}) no llega "
+                                                   f"a {_n(self.p['rvol_min'])}: no se opera",
+                                {"rvol": round(self.rvol, 3) if self.rvol is not None else None,
+                                 "rvol_min": self.p["rvol_min"]})
             self.tags["rvol"] = round(self.rvol, 3)
             why += f" con volumen relativo {_n(self.rvol)}"
         if not live_ok:
-            return self.end(f"{why}, pero en una vela antigua: tarde para entrar (no se persigue el precio)")
+            return self._no("entrada", "tarde",
+                            f"{why}, pero en una vela antigua: tarde para entrar (no se persigue el precio)",
+                            {"vela_ms": b[T], "decision_ms": t_dec})
         self.state, self.step, self.entries = "en_posicion", None, self.entries + 1
         self.last_why = f"Entrada: {why}"
         return {"action": "enter", "dir": self.dir, "price": b[C], "t": t_dec, "why": why, "rvol": self.rvol,
@@ -1990,6 +2060,26 @@ class ImpulseRun:
             self.last_why = "Entrada enviada al paper (recuperada tras reiniciar): a la espera de ejecutarse"
 
 
+def senal_de_fila(row: dict | None) -> dict | None:
+    """La señal de noticias con que se midió una apertura, de su fila de decisiones_apertura (datos.noticias, que
+    escribe ImpulseRun.news_data), con la forma de signal_from. None si la fila no la trae."""
+    d = (row or {}).get("datos")
+    n = d.get("noticias") if isinstance(d, dict) else None
+    if not isinstance(n, dict):
+        return None
+    out = {"dir": n.get("dir") if n.get("dir") in (-1, 0, 1) else 0, "strength": _f(n.get("fuerza"), 0.0),
+           "why": n.get("motivo") or "", "drivers": _dicts(n.get("factores"))}
+    fl = _dicts(n.get("fiables"))
+    if fl:
+        out["fiables"] = fl
+    return out
+
+
+# Códigos de decisiones_apertura para los motivos del motor que no salen de ImpulseRun
+def _limit_code(why: str) -> str:
+    return "tope_dia" if str(why).startswith("Tope diario") else "riesgo_dia"
+
+
 # ---------------------------------------------------------------- motor en vivo
 
 def entry_type(params: dict | None = None) -> str:
@@ -2022,13 +2112,20 @@ class OpeningEngine:
     las reglas del usuario (evolucion.leer_estrategia_activa; si no, el preset), manda sobre el preset y sobre
     BOT_IMPULSO_PARAMS (fuente «evolucion»); con «pausada» no se abren entradas nuevas (las abiertas siguen en el
     paper). Se vuelve a leer si cambia, pero solo cuando no hay ninguna sesión de entrada en curso. Cada ticket lleva la
-    versión en tags.estrategia_firma (evolucion.firma_motor) y «openings» la publica en estrategia_cargada."""
+    versión en tags.estrategia_firma (evolucion.firma_motor) y «openings» la publica en estrategia_cargada.
+    decisiones (modo impulso): bot/decisiones.Decisiones. Cada punto de decisión de cada apertura×moneda va a la tabla
+    decisiones_apertura (al empezar a medir, al acabar la medida, al enviar o descartar la entrada y al detectar al
+    arrancar una apertura que pasó con el bot parado); lo del riesgo y el paper lo apunta su gancho del bus. Al
+    arrancar, la última fila de cada apertura×moneda manda sobre volver a medir: lo ya decidido no se repite (ni una
+    entrada ya hecha). Sin decisiones (None) todo funciona igual, sin apuntar nada; un fallo al apuntar no para nada."""
 
     def __init__(self, bus, session: aiohttp.ClientSession | None, get_signal, submit, get_portfolio, clock=now_ms,
-                 params: dict | None = None, history=None, activa_path: Path | str | None = None):
+                 params: dict | None = None, history=None, activa_path: Path | str | None = None, decisiones=None):
         self.bus, self.session = bus, session
         self.get_signal, self.submit, self.get_portfolio = get_signal, submit, get_portfolio
         self.clock = clock
+        self.dec = decisiones   # bot/decisiones.Decisiones (o None)
+        self._dec_err_at = 0.0
         self.notice: str | None = None   # aviso para la web sobre los parámetros en uso
         self.preset = {"preset": None, "nombre": None, "descripcion": None}   # preset_info (modo impulso)
         self.strategy = pick_strategy(params)
@@ -2151,7 +2248,7 @@ class OpeningEngine:
                     self.windows[key] = {**o, "key": key, "armed": False, "at_open": False, "missed": False,
                                          "signals": {}, "runs": {}, "bars": {}, "prior": {}, "prior_tries": {},
                                          "done_i": {}, "stories": {}, "seq": {}, "why": "", "gate": {}, "plans": {},
-                                         "ctx": {},
+                                         "ctx": {}, "dec_esp": set(),
                                          "prev": prev_session_opens(o["lead"], o["open_ms"], self.p["rvol_sessions"])}
         for key in [k for k, w in self.windows.items()
                     if now - (w["open_ms"] + self.p["session_max_min"] * MIN) > KEEP_MS]:
@@ -2182,6 +2279,7 @@ class OpeningEngine:
                     run = w["runs"][coin] = ImpulseRun(coin, w["open_ms"], p)
                     pf = await self._portfolio() if pf is None else pf
                     self._restore(w, coin, run, pf or {}, now)
+                    self._restore_row(w, coin, run)
             conf = [f"volumen relativo ≥ {_n(p['rvol_min'])}" if p["rvol_min"] else "",
                     {"a_favor": "solo a favor de la tendencia de BTC",
                      "no_contra": "nunca contra la tendencia de BTC"}.get(p["btc_filter"], ""),
@@ -2257,6 +2355,162 @@ class OpeningEngine:
                                         "pending": not is_open, "open": is_open}
         log.info("Aperturas: %s en %s recuperada del paper (%d operaciones, estado %s)", coin, w["name"],
                  len(stories), run.state)
+
+    # ---- decisiones guardadas (decisiones_apertura, bot/decisiones.py)
+
+    def _dec_try(self, what: str, fn, *args, **kw):
+        """Llama al registro de decisiones sin que un fallo pare el motor (queda en bot.log, como mucho cada 5 min)."""
+        if self.dec is None or not self.impulso:
+            return None
+        try:
+            return fn(*args, **kw)
+        except Exception:
+            if time.monotonic() - self._dec_err_at > 300:
+                self._dec_err_at = time.monotonic()
+                log.exception("Aperturas: fallo al %s una decisión (el motor sigue)", what)
+            return None
+
+    def _dec(self, w: dict, coin: str, now: int, fase: str, decision: str, codigo: str, motivo: str,
+             datos: dict | None = None, story: str | None = None) -> dict | None:
+        """Una fila de decisiones_apertura para esta apertura×moneda, con el impulso y el lado de su ImpulseRun."""
+        if self.dec is None or not self.impulso:
+            return None
+        run = w["runs"].get(coin)
+        d = getattr(run, "dir", 0) or 0
+        mom = getattr(run, "mom", None)
+        return self._dec_try("apuntar", self.dec.add, w["key"], coin, fase, decision, codigo, motivo, ts=now,
+                             ventana=w["id"], apertura_ms=w["open_ms"],
+                             dia=datetime.fromtimestamp(w["open_ms"] / 1000, MAD).date().isoformat(),
+                             impulso_pct=round(mom, 4) if mom is not None else None,
+                             lado=("largo" if d > 0 else "corto") if d else None, preset=self.preset.get("preset"),
+                             estrategia=self.preset.get("nombre") or self.strategy, story=story, datos=datos)
+
+    def _flush_decs(self, w: dict, coin: str, now: int) -> None:
+        """Las decisiones que dejó ImpulseRun (fin de la medida, entrada que no llega…), en su orden."""
+        run = w["runs"].get(coin)
+        decs = getattr(run, "decs", None)
+        if not decs:
+            return
+        run.decs = []
+        for x in decs:
+            self._dec(w, coin, now, x["fase"], x["decision"], x["motivo_codigo"], x["motivo"], x.get("datos"))
+
+    def _no_entra(self, w: dict, coin: str, now: int, codigo: str, datos: dict | None = None) -> None:
+        """El motor descarta la entrada (cartera, paper detenido, moneda ocupada, reglas, límites del día): con el
+        motivo que enseña la moneda."""
+        self._dec(w, coin, now, "entrada", "no_entra", codigo, w["runs"][coin].last_why, datos)
+
+    def _sin_fila(self, w: dict, coin: str, now: int, story: str, fase: str, decision: str, motivo: str,
+                  datos: dict | None = None) -> None:
+        """Rechazo o cierre que el motor ve en la cartera sin que el gancho del bus lo apuntara (p. ej. sin gancho o
+        sin evento): se apunta una vez."""
+        last = self._dec_try("leer", self.dec.de_story, story) if self.dec is not None else None
+        if last and last.get("decision") == decision:
+            return
+        self._dec(w, coin, now, fase, decision, "otro", motivo, datos, story=story)
+
+    def _restore_row(self, w: dict, coin: str, run) -> None:
+        """Al reiniciar (o al armar una apertura ya empezada): la última decisión guardada de esta apertura×moneda manda.
+        Una decisión final (no entra, rechazada, perdida, cerrada) o una entrada ya enviada al paper que el paper no
+        enseña terminan la moneda con su motivo: nunca se repite una entrada. Con la medida ya hecha y la entrada por
+        llegar (E2: a +30 min), se vuelve a medir con las noticias de entonces (las de la fila), así que la decisión es
+        la misma y no se repite la fila. Lo que el paper ya recuperó (posición abierta o cerrada) no se toca."""
+        if self.dec is None or not self.impulso or run.done or run.entries:
+            return
+        r = self._dec_try("leer", self.dec.ultima, w["key"], coin)
+        if not r:
+            return
+        d, fase = r.get("decision"), r.get("fase")
+        if d in ("no_entra", "rechazada", "perdida", "cerrada", "abierta") or (d == "entra" and fase != "medida"):
+            if r.get("lado") in ("largo", "corto"):
+                run.dir = 1 if r["lado"] == "largo" else -1
+            if _f(r.get("impulso_pct")) is not None:
+                run.mom = _f(r["impulso_pct"])
+            run.end(r.get("motivo") or "Decidida antes de reiniciar el bot")
+            if r.get("story") and d in ("entra", "abierta"):   # se envió al paper: no se repite la story
+                pre = self._prefix(w, coin)
+                if str(r["story"]).startswith(pre) and str(r["story"])[len(pre):].isdigit():
+                    w["seq"][coin] = max(w["seq"].get(coin, 0), int(str(r["story"])[len(pre):]))
+            log.info("Aperturas: %s en %s ya decidida antes de reiniciar (%s/%s): no se repite", coin, w["name"],
+                     fase, d)
+        elif d == "entra" and fase == "medida":
+            sig = senal_de_fila(r)
+            if sig is not None:
+                run.news = w["signals"][coin] = sig
+
+    async def _from_rows(self, w: dict, now: int) -> bool:
+        """Apertura cuya sesión acabó con el bot parado pero que ya tenía decisiones guardadas: el estado de cada moneda
+        sale de su última fila (y del paper), no de «pasó con el bot parado». False si no hay ninguna fila."""
+        rows = self._dec_try("leer", self.dec.ventana, w["key"]) if self.dec is not None else None
+        if not rows:
+            return False
+        pf = await self._portfolio() or {}
+        end = w["open_ms"] + self.p["session_max_min"] * MIN
+        # ¿La siguió esta versión (filas del propio motor) o solo hay lo que apuntó el gancho del paper (una operación de
+        # antes de la tabla)? En el segundo caso, como en _perdidas, solo es «bot parado» si no guardó ningún evento.
+        seguida = bool((self._dec_try("leer", self.dec.fases, w["key"]) or set()) & {"medida", "entrada", "perdida"})
+        sin_bot = None
+        for coin in self.p["coins"]:
+            run = w["runs"].get(coin)
+            if run is None:
+                run = w["runs"][coin] = ImpulseRun(coin, w["open_ms"], self.p)
+                self._restore(w, coin, run, pf, now)
+                self._restore_row(w, coin, run)
+            if run.done or run.state == "en_posicion":
+                continue
+            r = rows.get(coin)
+            if r:   # se quedó midiendo o esperando la hora de entrada cuando se paró el bot, y la sesión acabó
+                why = (f"El bot se paró {'midiendo el impulso' if r.get('decision') == 'esperando' else 'antes de entrar'}"
+                       " y la sesión acabó antes de volver: no se pudo decidir")
+                run.end(why)
+                self._dec(w, coin, now, "perdida", "perdida", "bot_parado", why, {"arranque": now, "fin_sesion": end})
+            else:   # ninguna fila de esta moneda: perdida una vez si de verdad pasó con el bot parado
+                if sin_bot is None:
+                    sin_bot = seguida or not self._dec_try("leer", self.dec.hubo_actividad, w["open_ms"], end)
+                if not sin_bot:
+                    run.end("Esta moneda la siguió el bot antes del último reinicio sin guardar su decisión (versión "
+                            "anterior): no se repite")
+                    continue
+                why = ("El bot se paró antes de decidir esta moneda y la sesión acabó antes de volver: no se pudo decidir"
+                       if seguida else "La sesión de esta apertura pasó con el bot parado: no se midió el impulso ni se "
+                                       "pudo entrar")
+                run.end(why)
+                self._dec(w, coin, now, "perdida", "perdida", "bot_parado", why, {"arranque": now, "fin_sesion": end})
+        w["armed"], w["at_open"] = True, True
+        w["why"] = "Apertura decidida antes de reiniciar el bot: cada moneda sale de su última decisión guardada"
+        log.info("Aperturas: %s recuperada de las decisiones guardadas", w["name"])
+        return True
+
+    def _perdidas(self, w: dict, now: int, end: int) -> None:
+        """Apertura que pasó con el bot parado (al arrancar, sin ninguna fila suya): una «perdida»/bot_parado por moneda.
+        Si el bot sí guardó eventos durante la sesión, la siguió una versión que no guardaba decisiones: no se inventa
+        que estuviera parado."""
+        if self.dec is None or not self.impulso:
+            return
+        if self._dec_try("leer", self.dec.hubo_actividad, w["open_ms"], end):
+            w["why"] = ("Esta apertura la siguió el bot antes del último reinicio sin guardar su decisión (versión "
+                        "anterior): no se repite")
+            return
+        for coin in self.p["coins"]:
+            if self._dec_try("leer", self.dec.ultima, w["key"], coin) is None:
+                self._dec(w, coin, now, "perdida", "perdida", "bot_parado",
+                          "La sesión de esta apertura pasó con el bot parado: no se midió el impulso ni se pudo entrar",
+                          {"arranque": now, "fin_sesion": end})
+
+    def _dec_esperando(self, w: dict, now: int) -> None:
+        """Al abrir: «esperando» (midiendo el impulso) una vez por moneda, mientras la medida sigue en tiempo real."""
+        if self.dec is None or not self.impulso or now < w["open_ms"] \
+                or now >= w["open_ms"] + self.p["measure_min"] * MIN + self._lag_ms:
+            return
+        for coin, run in w["runs"].items():
+            if coin in w["dec_esp"] or run.done or run.state != "midiendo_impulso":
+                continue
+            w["dec_esp"].add(coin)
+            if self._dec_try("leer", self.dec.ultima, w["key"], coin) is not None:
+                continue   # ya apuntada antes de reiniciar (esperando, o la medida hecha): «esperando» una sola vez
+            self._dec(w, coin, now, "medida", "esperando", "otro",
+                      f"Midiendo el impulso de los {run.N} primeros min desde la apertura ({_hm(w['open_ms'])} Madrid): "
+                      f"decide a las {_hm(w['open_ms'] + run.N * MIN)} Madrid")
 
     @staticmethod
     def _coin_busy(pf: dict, coin: str) -> str | None:
@@ -2575,17 +2829,18 @@ class OpeningEngine:
         pf = await self._portfolio()
         if pf is None:
             run.on_rejected(now, "sin acceso a la cartera del paper para comprobar las posiciones")
-            return
-        if pf.get("halted") or (pf.get("limits") or {}).get("halted"):
+            return self._no_entra(w, coin, now, "otro")
+        day_halt = (pf.get("limits") or {}).get("halted")
+        if pf.get("halted") or day_halt:
             run.on_paused(now, "el paper está detenido")
-            return
+            return self._no_entra(w, coin, now, "otro" if pf.get("halted") else "perdida_dia")
         if self.paused:   # la evolución pausó el campeón: se mide la apertura pero no se entra
             run.on_paused(now, "el campeón está pausado por la evolución (solo paper)")
-            return
+            return self._no_entra(w, coin, now, "otro")
         busy = self._coin_busy(pf, coin)
         if busy:   # una sola posición por moneda (como el laboratorio: la apertura se salta)
             run.on_rejected(now, busy)
-            return
+            return self._no_entra(w, coin, now, "moneda_ocupada")
         d, tags = act["dir"], act["tags"]
         inst = impulse_instrument(d, self.p)
         entry = self._live_price(coin, now) or act["price"]
@@ -2593,14 +2848,22 @@ class OpeningEngine:
         w["plans"][coin] = {k: plan[k] for k in ("stopPct", "tp2R", "rr", "ok", "why", "instrument", "gross_pct",
                                                  "cost_pct", "funding_pct", "net_pct")}
         w["plans"][coin].update(entry=entry, stop=plan["stop_px"], target=plan["target_px"])
+        plan_d = {"entrada": entry, "stop": plan["stop_px"], "objetivo": plan["target_px"], "stop_pct": plan["stopPct"],
+                  "objetivo_R": plan["tp2R"], "bruto_pct": plan["gross_pct"], "neto_pct": plan["net_pct"],
+                  "coste_pct": plan["cost_pct"], "funding_pct": plan["funding_pct"],
+                  "instrumento": "perpetuo" if inst == "perp" else "contado", "riesgo_pct": self._risk_imp(),
+                  "tope_h": self.p["max_hold_h"]}
         if not plan["ok"]:
             run.on_rejected(now, plan["why"])
-            return
+            return self._no_entra(w, coin, now, "reglas" if plan["why"].startswith("Regla del usuario") else "otro",
+                                  {"plan": plan_d})
         day = self._day_ledger(pf, now)
+        lim_d = {"entradas": len(day["entries"]), "max_entradas": self.p.get("max_day_entries"),
+                 "riesgo_pct": round(sum(day["entries"].values()), 3), "max_riesgo_pct": self.p.get("max_day_risk_pct")}
         limit = day_limits(len(day["entries"]), sum(day["entries"].values()), self._risk_imp(), self.p)
         if limit:
             run.on_rejected(now, limit)
-            return
+            return self._no_entra(w, coin, now, _limit_code(limit), {"limites": lim_d})
         try:
             t = self._ticket_imp(w, coin, act, plan, now)
             n = w["seq"][coin] = w["seq"].get(coin, 0) + 1
@@ -2619,7 +2882,15 @@ class OpeningEngine:
         except Exception as e:
             log.exception("Aperturas: no pude preparar la orden de %s en %s: %s", coin, w["name"], e)
             run.on_rejected(now, "fallo interno al preparar la orden")
-            return
+            return self._no_entra(w, coin, now, "otro")
+        # Antes de submit: lo que digan el riesgo y el paper (que lo apunta su gancho del bus) va después
+        self._dec(w, coin, now, "entrada", "entra", "entra",
+                  f"Se envía al paper: {verb.lower()} {INST_TEXT[inst]} a {_px(entry)}, stop {_px(plan['stop_px'])} "
+                  f"(−{_n(plan['stopPct'])} %) y objetivo {_px(plan['target_px'])} ({_n(plan['tp2R'], 1)} R, "
+                  f"+{_n(plan['gross_pct'])} %, {_n(plan['net_pct'])} % neto), {hold_text(self.p)}",
+                  {"plan": plan_d, "limites": lim_d,
+                   "rvol": round(_f(act.get("rvol")), 3) if _f(act.get("rvol")) is not None else None,
+                   "rvol_min": self.p.get("rvol_min")}, story=story)
         try:
             ok = await _maybe(self.submit(t, story, hl, t["strategy"], f"Apertura {w['name']}"))
         except Exception as e:
@@ -2636,6 +2907,7 @@ class OpeningEngine:
             log.info("Aperturas: %s %s en %s (%s, %s)", verb, coin, w["name"], story, t["strategy"])
         else:
             run.on_rejected(now, "vetada por el control de riesgo del paper")
+            self._sin_fila(w, coin, now, story, "riesgo", "rechazada", run.last_why)
 
     async def _exits(self, w: dict, now: int) -> None:
         """Lee la cartera del paper: posiciones abiertas, cerradas y órdenes que no llegaron a ejecutarse."""
@@ -2673,11 +2945,14 @@ class OpeningEngine:
             elif x["open"]:   # estuvo abierta y salió de la cartera sin aparecer en cerradas
                 x["done"] = True
                 run.on_exit(now, 0.0, "cerrada (sin detalle en la cartera)")
+                self._sin_fila(w, x["coin"], now, s, "cierre", "cerrada",
+                               "Cerrada en el paper sin detalle en la cartera (resultado desconocido)")
             else:   # nunca llegó a abrirse: rechazada, caducada o bloqueada al ejecutarse
                 x["done"] = True
                 self._drop_entry(s)   # no cuenta como entrada del día
                 run.on_rejected(now, "el paper no llegó a ejecutarla (rechazada, caducada o bloqueada)"
                                 if x["pending"] else "el paper no llegó a ejecutarla (bloqueada o rechazada)")
+                self._sin_fila(w, x["coin"], now, s, "paper", "rechazada", run.last_why)
 
     # ---- ronda
 
@@ -2704,19 +2979,31 @@ class OpeningEngine:
             return
         end = w["open_ms"] + self.p["session_max_min"] * MIN
         if not w["armed"] and now >= end:   # terminó con el bot parado: no se arma con una señal de después
-            w["missed"] = True
-            w["why"] = "La sesión de esta apertura pasó con el bot parado: no se siguió"
-            return
+            if not (self.impulso and await self._from_rows(w, now)):   # salvo que ya estuviera decidida (filas)
+                w["missed"] = True
+                w["why"] = "La sesión de esta apertura pasó con el bot parado: no se siguió"
+                self._perdidas(w, now, end)
+                return
         if not w["armed"]:
             await self._arm(w, now >= w["open_ms"], now)
         elif not w["at_open"] and now >= w["open_ms"]:
             await self._arm(w, True, now)
+        self._dec_esperando(w, now)
         await self._exits(w, now)
         active = [c for c, r in w["runs"].items() if not r.done]
         if now >= end + 2 * MIN:   # sin velas nuevas (corte de datos) la sesión se cierra igual
             for c in active:
-                if w["runs"][c].state != "en_posicion":
-                    w["runs"][c].end("Fin de la sesión")
+                run = w["runs"][c]
+                if run.state == "en_posicion":
+                    continue
+                if not self.impulso:
+                    run.end("Fin de la sesión")
+                elif run.state == "midiendo_impulso":
+                    run.end("Fin de la sesión sin medir el impulso: no llegaron las velas de 1 min")
+                    self._dec(w, c, now, "medida", "no_entra", "sin_velas", run.last_why)
+                else:
+                    run.end("Fin de la sesión sin entrar")
+                    self._dec(w, c, now, "entrada", "no_entra", "otro", run.last_why)
             return
         if not active or now < w["open_ms"] + MIN or now < self._retry_at:
             return
@@ -2740,8 +3027,11 @@ class OpeningEngine:
                 continue
             if self.impulso:
                 await self._news_at_measure(w, coin, now)
-            for act in self._process(w, coin, now):
+            acts = self._process(w, coin, now)
+            self._flush_decs(w, coin, now)   # la medida antes que la entrada
+            for act in acts:
                 await (self._enter_imp if self.impulso else self._enter)(w, coin, act, now)
+                self._flush_decs(w, coin, now)
 
     async def run(self) -> None:
         while True:

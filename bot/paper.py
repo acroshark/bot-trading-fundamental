@@ -153,6 +153,30 @@ def funding_pay(side: str, notional: float, rate_pct: float) -> float:
     return -(1 if side == "long" else -1) * notional * rate_pct / 100
 
 
+def motivo_codigo(why: str | None, kind: str = "riskko") -> str:
+    """Código del catálogo cerrado de decisiones_apertura (docs/04, 2.17) para el motivo con que el paper veta
+    (riskko: el primer control que falla de _risk_checks), no ejecuta (blocked: _blockers, maxAgeMs, la parada manual,
+    una cancelación o una programada que caduca) o no aprueba (humanko) una orden. Los textos son los de este módulo."""
+    t = " ".join(str(why or "").split())
+    if t.startswith(HALT_WHY):
+        return "otro"
+    if kind == "humanko" or t.startswith("Cancelada"):
+        return "aprobacion"   # rechazada o cancelada por ti, o caducada sin respuesta
+    if t.startswith("Aprobada ") and "después de enviarla" in t:
+        return "aprobacion"   # aprobada tarde (maxAgeMs): el plan ya es viejo
+    if t.startswith("Regla del usuario"):
+        return "reglas"
+    if t.startswith(("Pérdida del día", "Operativa detenida")):
+        return "perdida_dia"
+    if t.startswith("Posiciones abiertas o en curso") or (t.startswith("Ya hay ") and "posiciones abiertas" in t):
+        return "max_posiciones"
+    if t.startswith(("Exposición total", "La exposición subiría", "Nominal en perpetuos", "El nominal en perpetuos")):
+        return "exposicion"
+    if t.startswith("Ya hay una operación en") and "para esta noticia" not in t:
+        return "moneda_ocupada"
+    return "otro"
+
+
 def market_of(window: str) -> str | None:
     """Bolsa a la que se refiere una ventana ("Apertura Londres" → "londres")."""
     w = (window or "").lower()
@@ -662,7 +686,8 @@ class PaperBroker:
         bad = next((c for c in checks if not c["ok"]), None)
         if bad:
             self._event("riskko", "risk", story, coin, title, f"Vetada: {bad['t']}",
-                        {"risk": {"checks": checks, "ok": False, "why": bad["t"]}}, now)
+                        {"risk": {"checks": checks, "ok": False, "why": bad["t"],
+                                  "motivo_codigo": motivo_codigo(bad["t"])}}, now)
             log.info("Paper: %s vetada por riesgo: %s", story, bad["t"])
             return False
         self._event("riskok", "risk", story, coin, title, f"{len(checks)} de {len(checks)} controles superados",
@@ -889,7 +914,8 @@ class PaperBroker:
             self._save_queue()
         t = item["ticket"]
         self._event("blocked", "exec", item["story"], t["coin"], f"{_verb(t['side'])} {t['coin']}", why,
-                    {"exec": {**(item.get("exec") or {}), "blocked": True, "why": why}}, now)
+                    {"exec": {**(item.get("exec") or {}), "blocked": True, "why": why,
+                              "motivo_codigo": motivo_codigo(why, "blocked")}}, now)
         log.info("Paper: %s bloqueada: %s", item["story"], why)
 
     def _step_scheduled(self, it: dict, now: int, prices: dict) -> None:
@@ -1013,7 +1039,7 @@ class PaperBroker:
         self._event("filled", "exec", story, coin, f"{'Comprado' if d > 0 else 'Vendido'} {_qty(coin, qty)} {coin} a {_px(px)}",
                     f"Deslizamiento {_n(slip, 1)} pb · latencia {_n(ex['ms'], 0)} ms · nominal {_n(notional, 0)} {config.QUOTE}"
                     f" · riesgo {_n(pos['riskUsd'])} {config.QUOTE} ({_n(stop_loss)} con costes) · stop {_px(sl)}" + plan,
-                    {"exec": dict(ex)}, now)
+                    {"exec": dict(ex), "trade_id": pos["id"]}, now)
         log.info("Paper: %s %s %.6f a %.4f (%s)", side, coin, qty, px, story)
         self._exec_status()
 
@@ -1160,8 +1186,8 @@ class PaperBroker:
         fund_t = (f" (con funding {_sg(fund)} {config.QUOTE} de {p.get('funding_n', 0)} liquidaciones)"
                   if p.get("instrument") == "perp" else "")
         self._event("closed", "exec", p["story"], p["coin"], f"{p['coin']} cerrada: {_sg(pnl)} {config.QUOTE}",
-                    f"{why} · {_sg(R)} R · comisiones {_n(fees)} {config.QUOTE}{fund_t}", {"result": result}, now,
-                    tone="good" if pnl >= 0 else "bad")
+                    f"{why} · {_sg(R)} R · comisiones {_n(fees)} {config.QUOTE}{fund_t}",
+                    {"result": result, "trade_id": trade["id"]}, now, tone="good" if pnl >= 0 else "bad")
         log.info("Paper: cerrada %s %s (%s): %.2f %s", p["coin"], p["story"], why, pnl, config.QUOTE)
         self._exec_status()
         return trade

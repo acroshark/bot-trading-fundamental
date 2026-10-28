@@ -253,9 +253,10 @@ async def test_fallos_de_datos_y_de_calculo_no_paran_nada(env, monkeypatch):
     assert bus.state["vigilancia"]["estado"] == "ok" and len(v.rows) == 3
 
 
-def test_variante_del_usuario_que_opera_el_paper(env):
+def test_variante_del_usuario_que_opera_el_paper(env, monkeypatch):
     """La congelada de «sig» sigue como prueba de la hipótesis; su variante de 7 días va aparte, marcada como la que
     opera el paper, con la cifra de la réplica aparte del laboratorio (no congelada)."""
+    monkeypatch.setattr(config, "DATA_DIR", env)   # sin estrategia_activa.json: no depende de la cartera paper real
     (env / "bt").mkdir()
     ref = apertura.LAB_REF
     frozen = {"date": "2026-10-26", "promising": [{"id": ref, "name": "Congelada", "class": "prometedora"}]}
@@ -446,10 +447,11 @@ async def test_aperturas_solo_se_reescriben_si_cambian(env):
     assert "ultimo_calculo" in keys and "aperturas" not in keys and "vigiladas" not in keys
 
 
-def test_seis_diarias_no_rompe_la_vigilancia(monkeypatch):
+def test_seis_diarias_no_rompe_la_vigilancia(tmp_path, monkeypatch):
     """«6 diarias» no es una estrategia del laboratorio (umbral 0, tope de 6 al día y veto de noticias no están en su
     rejilla): no se vigila, y con un preset sin lab ni 7 días el paper no reproduce ninguna vigilada."""
-    seis = "ap_mom:15:0|ninguna|todos|ninguno|todas|todas|todos|t:15|1,5|3|24h"
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)   # sin estrategia_activa.json: no depende de la cartera paper real
+    seis ="ap_mom:15:0|ninguna|todos|ninguno|todas|todas|todos|t:15|1,5|3|24h"
     assert V.parse_id(seis) is None
     assert V.paper_id() == "ap_mom:15:0,2|rvol:1,5|todos|a_favor|todas|todas|todos|t:30|3|3|7d"
     monkeypatch.setattr(apertura, "IMPULSO", dict(apertura.SEIS))

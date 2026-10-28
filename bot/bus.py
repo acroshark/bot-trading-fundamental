@@ -6,6 +6,10 @@ from . import config
 from .models import now_ms
 from .store import Store
 
+# Tipos que solo salen en el cable: no se guardan como último estado ni van en la foto inicial de una web que se conecta
+# (las decisiones de las aperturas las pide la web a GET /api/decisiones; docs/04, 2.17).
+NO_STATE = frozenset({"decision_apertura"})
+
 
 class Bus:
     def __init__(self, store: Store):
@@ -27,7 +31,7 @@ class Bus:
             prev = self.state.get(key, {"type": "agent", "agent": msg["agent"], "patch": {}})
             prev["patch"] = {**prev["patch"], **msg.get("patch", {})}
             self.state[key] = prev
-        else:
+        elif kind not in NO_STATE:
             self.state[kind] = msg
         data = json.dumps(msg, ensure_ascii=False)
         for q in list(self.clients):
