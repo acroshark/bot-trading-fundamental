@@ -9,11 +9,11 @@ puede ir corto) y un corto al contado explícito se acepta con el aviso de que n
 Un perpetuo cobra o paga el funding en cada liquidación (00:00, 08:00 y 16:00 UTC) con la tasa de
 market.flow[moneda].funding o, sin ella, la última conocida; entra en el resultado, en R y en las comisiones. Su
 nominal total no pasa de 2 veces el capital (2:1) y en la exposición cuenta su margen (la mitad del nominal).
-SUPUESTO del funding (funding_8h): market.flow[moneda].funding es el lastFundingRate de Binance USDT-M × 100, la tasa de
-UN periodo de liquidación, y se da por hecho que ese periodo es de 8 h (lo normal en BTC, ETH, SOL y XRP). Si Binance
-liquida esa moneda cada 4 h o 1 h, la tasa es por ese periodo y el paper cobraría de menos, salvo que la fila traiga
-«funding_h» (fundingIntervalHours de /fapi/v1/fundingInfo; hoy market.py no lo envía), con la que se escala a 8 h.
-Tampoco es la tasa de OKX X-Perps EU, donde se ejecutaría de verdad: es una aproximación.
+Funding (funding_8h): market.flow[moneda].funding es el lastFundingRate de Binance USDT-M × 100, la tasa de UN periodo de
+liquidación, y market.py publica «funding_h» (fundingIntervalHours de /fapi/v1/fundingInfo, leído cada 6 h; los símbolos
+que no lista liquidan cada 8 h), con la que se escala a % por 8 h. Sin funding_h (Binance sin responder) se supone 8 h.
+Una fila del flujo de más de 5 min no se usa (market.fresh_flow): se cobra con la última tasa conocida. No es la tasa de
+OKX X-Perps EU, donde se ejecutaría de verdad (pública y del orden del doble): es una aproximación (docs/05, sección 21).
 Mandos de la web (server.on_ws_message): decide, close, set_mode, halt / resume (parada manual, persistente) y cancel.
 HUECOS (hallazgo n.º 47): una posición abierta que pasa más de GAP_MIN_MS sin gestionarse (el bot parado o caído, o sin
 precios) no sigue como si nada. Cada posición guarda la última vez que se gestionó con precio («seen», cada 30 s como

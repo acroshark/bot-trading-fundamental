@@ -104,6 +104,10 @@ def closes_before_open(a, b, day) -> bool;  def ordered_by_close(day) -> list[Ma
 #   apuntar_cambios_codigo(store): CAMBIOS_CODIGO (cambios del código que alteran el paper), una sola vez al arrancar
 #   leer_estrategia_activa(), params_motor(activa), firma_motor(params): la estrategia que opera el motor (2.9)
 
+# bot/agenda.py  (publica "calendar": {"events": [{t, name, src ("BLS"|"Fed"), impact ("alto"|"medio")}], "updated", "aviso"})
+#   aviso: texto si el calendario FOMC escrito a mano se acaba en menos de 90 días (o ya se acabó), o null (n.º 33).
+#   La usan el paper (pausa de 10 min antes de un dato de alto impacto) y el briefing de la IA local
+
 # bot/local_ai.py (LocalAI: classify(title, src, tier, coins) -> dict; brief(window, when) -> str; puerto 8094, alias qwen-trading)
 ```
 
