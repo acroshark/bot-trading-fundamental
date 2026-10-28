@@ -1681,3 +1681,38 @@ def test_veto_de_las_fiables_falla_en_cerrado_sin_senal():
         assert ap.impulse_filters(1, {**tags, "btc": "a_favor"}, {}, e2) is None   # E2 no usa ese veto
     finally:
         fiables.usar(None)
+
+
+def test_v2_pasa_el_precio_de_okx_a_la_escala_de_binance():
+    """Hallazgo n.º 61: en el modo v2 («ruptura») el cierre y el stop salen de Binance en USDT y el precio de ahora es
+    de OKX EU en USDC (unos 10 pb por debajo). Con la base del momento (mediana de los cierres frente a OKX visto a la
+    vez, con 10 muestras como mínimo) el cruce del stop y la peor entrada se comparan en la misma escala."""
+    bus = FakeBus()
+    eng = ap.OpeningEngine(bus, None, lambda c, w: {}, lambda *a: True, lambda: {}, params={"range_min": 5})
+    assert not eng.impulso and eng.basis_of("BTC") is None
+    now = T0 + 10 * MIN + 3000
+    bar = lambda t, c: [t, c, c, c, c, 1.0, c, 0.5]
+    okx = [99.90, 99.91, 99.89] * 4 + [120.0]      # 120: un precio movido no cambia la mediana
+    for k, px in enumerate(okx):
+        t = now + k * MIN
+        bus.publish({"type": "market", "prices": {"BTC": px}, "updated": {"BTC": t - 1000}})
+        eng._basis_note("BTC", [bar(T0 + (9 + k) * MIN, 100.0)], t)
+        eng._basis_note("BTC", [bar(T0 + (9 + k) * MIN, 100.0)], t + 1000)   # la misma vela no cuenta dos veces
+        if k == 8:
+            assert eng.basis_of("BTC") is None                                 # 9 muestras: aún no se usa
+    t = now + len(okx) * MIN
+    bus.publish({"type": "market", "prices": {"BTC": 99.0}, "updated": {"BTC": t - 60_000}})   # viejo: no cuenta
+    eng._basis_note("BTC", [bar(T0 + (9 + len(okx)) * MIN, 100.0)], t)
+    assert len(eng.basis["BTC"]) == 13 and eng.basis_of("BTC") == pytest.approx(100 / 99.90)
+    k = eng.basis_of("BTC")
+    act = {"dir": 1, "price": 100.0, "stop_px": 99.95}
+    bus.publish({"type": "market", "prices": {"BTC": 99.92}, "updated": {"BTC": t}})
+    # Antes: 99,92 (USDC) < 99,95 (stop en USDT) y se daba por cruzado. En la escala de Binance es 100,02: no lo está.
+    assert eng._entry_price("BTC", act, t) == pytest.approx(99.92 * k) and 99.92 * k > 100.0
+    bus.publish({"type": "market", "prices": {"BTC": 99.80}, "updated": {"BTC": t}})
+    assert eng._entry_price("BTC", act, t) == pytest.approx(99.80 * k)          # cruzado de verdad: entry_plan lo rechaza
+    assert not ap.entry_plan(1, eng._entry_price("BTC", act, t), act, eng.p)["ok"]
+    eng.basis["BTC"] = type(eng.basis["BTC"])([(i, 1.02) for i in range(12)], maxlen=ap.BASIS_N)
+    assert eng.basis_of("BTC") is None                                           # un 2 % no es una base: no se usa
+    bus.publish({"type": "market", "prices": {"BTC": 99.96}, "updated": {"BTC": t}})
+    assert eng._entry_price("BTC", act, t) == 100.0                              # sin base: como antes

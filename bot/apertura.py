@@ -43,7 +43,9 @@ import logging
 import math
 import os
 import re
+import statistics
 import time
+from collections import deque
 from datetime import date, datetime, time as dtime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -61,6 +63,10 @@ MIN = 60_000
 H = 3600_000
 KLINES = "https://data-api.binance.vision/api/v3/klines"
 PAIRS = {c: f"{c}USDT" for c in config.COINS}
+BASIS_N = 30                 # base Binance (USDT) / OKX EU (USDC): mediana de los últimos 30 cierres de 1 min (modo v2)
+BASIS_FRESH_MS = 15_000      # ... con el cierre y el precio de OKX de hace menos de 15 s
+BASIS_MIN_N = 10             # sin 10 muestras no se usa (con pocas, la mediana se come el movimiento del momento)
+BASIS_MAX = 0.005            # la base USDC/USDT es de unos 10 pb: una de más del 0,5 % es un error y no se usa
 SRC = "Motor de aperturas"
 MODE = "Ruptura de apertura"          # uno de claude_agents.MODES
 STRATEGY = "motor-aperturas"
@@ -2055,6 +2061,7 @@ class OpeningEngine:
         self._activa_mt = self._mtime()
         self._activa_at = time.monotonic()
         self.windows: dict[str, dict] = {}
+        self.basis: dict[str, deque] = {}   # moneda → cocientes Binance / OKX (hallazgo n.º 61)
         if params is not None:
             params = {k: v for k, v in params.items() if k != "estrategia"}
         if self.impulso:
@@ -2349,6 +2356,32 @@ class OpeningEngine:
             return
         new = await self.fetch_klines(coin, start, (now - start) // MIN + 2)
         bars.extend(b for b in new if not bars or b[T] > bars[-1][T])
+        self._basis_note(coin, bars, now)
+
+    def _okx_live(self, coin: str, now: int) -> float | None:
+        """Precio de OKX EU de ahora (USDC) si es de hace menos de 15 s; si no, None."""
+        m = (getattr(self.bus, "state", None) or {}).get("market") or {}
+        live = _f((m.get("prices") or {}).get(coin))
+        upd = _f((m.get("updated") or {}).get(coin))
+        return live if live and (upd is None or now - upd <= BASIS_FRESH_MS) else None
+
+    def _basis_note(self, coin: str, bars: list, now: int) -> None:
+        """Apunta el cociente Binance (USDT) / OKX EU (USDC) con el último cierre de 1 min y el precio de OKX de ahora,
+        si los dos son de hace menos de 15 s. La mediana de los últimos BASIS_N quita el movimiento de esos segundos."""
+        live = self._okx_live(coin, now)
+        if bars and live and now - (bars[-1][T] + MIN) <= BASIS_FRESH_MS:
+            xs = self.basis.setdefault(coin, deque(maxlen=BASIS_N))
+            if not xs or xs[-1][0] != bars[-1][T]:   # una muestra por vela
+                xs.append((bars[-1][T], bars[-1][C] / live))
+
+    def basis_of(self, coin: str) -> float | None:
+        """Base Binance / OKX de la moneda (≈ 1,001 con USDC/USDT a 1,0010), o None con menos de BASIS_MIN_N muestras
+        o si se va más del 0,5 % de 1."""
+        xs = self.basis.get(coin)
+        if not xs or len(xs) < BASIS_MIN_N:
+            return None
+        k = statistics.median(x[1] for x in xs)
+        return k if abs(k - 1) <= BASIS_MAX else None
 
     # ---- decisiones
 
@@ -2404,12 +2437,13 @@ class OpeningEngine:
     def _entry_price(self, coin: str, act: dict, now: int) -> float:
         """Entrada con la que se mide el R:R: la peor entre el cierre que confirma y el precio actual de OKX EU (si es
         de hace menos de 15 s), para que un plan viejo no infravalore el riesgo. Si el precio actual ya ha cruzado el
-        stop, ese (y entry_plan rechaza la entrada)."""
+        stop, ese (y entry_plan rechaza la entrada). El cierre y el stop salen de Binance en USDT: el precio de OKX en
+        USDC se pasa a esa escala con la base del momento (basis_of; sin muestras, tal cual). Sin eso, con unos 10 pb
+        de base, el R:R de los largos salía más prudente y el cruce del stop se veía antes de tiempo (hallazgo n.º 61)."""
         px = act["price"]
-        m = (getattr(self.bus, "state", None) or {}).get("market") or {}
-        live = _f((m.get("prices") or {}).get(coin))
-        upd = _f((m.get("updated") or {}).get(coin))
-        if live and (upd is None or now - upd <= 15_000):
+        live = self._okx_live(coin, now)
+        if live:
+            live *= self.basis_of(coin) or 1.0
             if act["dir"] * (live - act["stop_px"]) <= 0:
                 return live
             px = max(px, live) if act["dir"] > 0 else min(px, live)
