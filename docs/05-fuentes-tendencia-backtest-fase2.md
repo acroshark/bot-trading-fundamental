@@ -499,8 +499,10 @@ hora, con lo que midió el aprendizaje (`news_outcomes`), sin mirar el futuro (s
   si además: el conjunto supera al azar que conserva la hora (p < 0,05); tiene ≥ 30 noticias distintas y una cota de
   Wilson ≥ 50 % contando un caso por bloque de 30 min; acierta ≥ 50 % en bruto (lo que cobra una operación sin cobertura)
   y la horquilla del usuario (1,5 %/4,5 % a 24 h, aproximada con el máximo a favor y en contra) da > 0 R en ≥ 30 noticias;
-  y **hacia delante**, en los días posteriores a su primera elección y con las noticias que usaría en vivo (`senal` = 1),
-  ≥ 30 noticias distintas con acierto ≥ 60 % y bruto ≥ 50 %. Cada grupo dice lo que le falta.
+  y **hacia delante**, en los días posteriores a su primera elección y con las noticias que usaría en vivo (`senal` 1
+  o 2: una macro cuenta aunque la cripto aún no la haya confirmado, porque quedarse con las confirmadas miraría el futuro;
+  corregido en la revisión del 28-10-2026, versión 3), ≥ 30 noticias distintas con acierto ≥ 60 % y bruto ≥ 50 %. Cada
+  grupo dice lo que le falta.
 - Cada cálculo nuevo se añade a la tabla `noticias_fiables` (no se borra).
 
 **2. Entrada por noticia confirmada (`bot/entrada_noticias.py`, eventos `entrada_noticia`).** Cuando se tría una noticia

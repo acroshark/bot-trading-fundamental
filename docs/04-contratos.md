@@ -597,9 +597,11 @@ Versión 2 (28-10-2026, tras la revisión estadística): azar que conserva la ho
   24 h (`n_horquilla`; la horquilla del usuario, stop 1,5 % y objetivo 4,5 % a 24 h, aproximada desde la captura con
   `max_sube`, `max_baja` y `r1440`: −1 si tocó el stop, también si tocó los dos; +3 si tocó el objetivo; si no, el cierre
   a 24 h; sin costes); y `adelante` (desde el primer día en que pasó el criterio con solo los días anteriores, con las
-  noticias que el bot usaría en vivo, `senal` = 1) con ≥ 30 noticias distintas, acierto ≥ 60 % y bruto ≥ 50 %.
-  `no_opera` dice lo que le falta (vacía si opera). `vivo` (exploración): el mismo grupo solo con `senal` = 1 en todos
-  los días. `base_sentido` (información): lo que acertaban todas las noticias del mismo sentido en esas monedas y días.
+  noticias que el bot usaría en vivo, `senal` 1 o 2) con ≥ 30 noticias distintas, acierto ≥ 60 % y bruto ≥ 50 %.
+  `no_opera` dice lo que le falta (vacía si opera). `vivo` (exploración): el mismo grupo solo con `senal` 1 o 2 en todos
+  los días. Desde la versión 3 (28-10-2026) la 2 (una macro que la cripto aún no confirmó) cuenta como la 1, como en el
+  aprendizaje: con solo las confirmadas se miraría el futuro, porque «confirmada» quiere decir que la cripto ya se movió
+  a su favor en los 60 min que también mide `acc240` (antes, `senal` = 1). `base_sentido` (información): lo que acertaban todas las noticias del mismo sentido en esas monedas y días.
 - **`fiable_para(medio, feed, tipo, dir)`** devuelve solo grupos con `opera: true`; un cálculo sin ese campo (de antes de
   la versión 2) no pone ninguno. `hay_fiables()` = hay alguno que opera.
 - Mismos datos de entrada (`firma_datos`: días, filas medidas y sus sumas, criterios, puerta, versión y permutaciones) =
