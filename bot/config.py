@@ -65,11 +65,13 @@ FEE_PCT = 0.10               # comisión por lado en los backtests y el paper tr
 
 # Paper trading (dinero ficticio con precios reales de OKX EU)
 PAPER_EQUITY = float(os.environ.get("BOT_PAPER_EQUITY", "10000"))
-# Reglas del usuario para TODA operación (26-10-2026): stop ≥ 1,5 %, objetivo ≥ 2R (ideal 3R) y sin break-even ni stop
-# dinámico: o se cobra el objetivo o se pierde 1R. BOT_USER_RULES=0 las desactiva (solo para las pruebas de la v1).
+# Reglas del usuario para TODA operación (26-10-2026): stop ≥ 1,5 %, objetivo ≥ 2R (ideal 3R) y ≥ 3 % neto de costes, y
+# sin break-even ni stop dinámico: o se cobra el objetivo o se pierde 1R. Una posición por moneda y límites diarios de
+# entradas y riesgo (paper.day_caps). BOT_USER_RULES=0 las desactiva (solo para las pruebas de la v1).
 USER_RULES = os.environ.get("BOT_USER_RULES", "1") != "0"
 RULE_MIN_STOP_PCT = 1.5
 RULE_MIN_RR = 2.0
+RULE_MIN_NET_PCT = 3.0       # el objetivo deja ≥ 3 % neto de costes (comisiones y deslizamiento de ida y vuelta)
 RULE_DEFAULT_RR = 3.0        # objetivo por defecto cuando el estratega no da uno
 RISK_PER_TRADE_PCT = float(os.environ.get("BOT_RISK_PER_TRADE_PCT", "0.5"))
 MAX_DAILY_LOSS_PCT = float(os.environ.get("BOT_MAX_DAILY_LOSS_PCT", "3"))

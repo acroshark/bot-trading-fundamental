@@ -200,6 +200,12 @@ Se publica como mucho cada 10 s y solo si ha cambiado. El detalle por feed sale 
   - cuenta su margen (la mitad del nominal) en la exposición, y el nominal total en perpetuos no pasa de 2 veces el capital (2:1);
   - la comisión supuesta es la misma que en contado (0,10 % por lado), la prudente.
 - `tags`: las etiquetas del ticket (2.6), tal cual.
+- **Reglas del usuario en el propio paper** (con `config.USER_RULES`, para TODOS los orígenes: motor, entrada por noticia
+  y fase 2): stop ≥ 1,5 %, objetivo ≥ 2R y objetivo ≥ 3 % neto de costes (`stopPct × tp2R − coste de ida y vuelta` ≥
+  `config.RULE_MIN_NET_PCT`; con 0,10 % de comisión y 2 pb por lado, el coste es 0,24 %: 1,5 % × 2R deja 2,76 % y se
+  rechaza; hallazgo n.º 23), y los topes del día de Madrid (`paper.day_caps`: los del preset del motor en marcha, E2 4
+  entradas y 2 %, «6 diarias» 6 y 3 %, nunca más de 6 y 3 %), contando todas las entradas del paper del día. Antes la
+  fase 2 podía saltárselos (revisión del 28-10-2026). Lo que no las cumple sale `riskko` con el motivo.
 - `cuenta`: la cartera de prueba con nombre que deja `scripts/nueva_cartera_paper.py` (`{nombre, eur, eur_usdc, usdc,
   desde, ficticia}`; su `usdc` manda sobre `BOT_PAPER_EQUITY`) o `null`. Va también en `GET /api/resultados` (3.2).
 - **Huecos** (hallazgo n.º 47): cada posición guarda la última vez que se gestionó con precio (`seen`, en la tabla

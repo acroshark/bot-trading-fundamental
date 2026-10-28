@@ -133,8 +133,9 @@ async def main() -> None:
             """Velas de 1 min de Binance de [a, b) para reconstruir el hueco de una posición paper (n.º 47)."""
             return await klines_1m(session, PAIRS[coin], a, b, now_ms())
 
+        # day_limits: los topes del día del preset del motor (se lee al enviar cada ticket; el motor se crea después)
         broker = PaperBroker(bus, store, lambda: state("market", {}), lambda: state("orderflow", {}),
-                             fetch_bars=velas_hueco)
+                             fetch_bars=velas_hueco, day_limits=lambda: getattr(openings, "p", None))
         phase2 = Phase2(bus, store, session, local, lambda: state("predictions"), lambda: state("trend"),
                         lambda: state("orderflow"), lambda: state("market"), bt, broker.portfolio, broker.submit)
         # Motor de aperturas en modo impulso (la operativa del usuario: seguir el impulso de los primeros minutos,

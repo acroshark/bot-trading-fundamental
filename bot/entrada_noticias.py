@@ -48,9 +48,9 @@ ENABLED = os.environ.get("BOT_ENTRADA_NOTICIAS", "1") != "0"
 TICK_S = 20
 VENTANA_MIN = 60                 # minutos tras el triaje para que el precio confirme
 LATE_MS = 3 * MIN                # una confirmación vista más tarde de esto ya no se persigue
-MAX_DIA = 6                      # entradas por día de Madrid como mucho, compartidas con el motor (todas las del paper)
-RIESGO_DIA_PCT = 3.0             # riesgo comprometido en stop por día de Madrid como mucho (0,5 % × 6), compartido
-MIN_NET_PCT = 3.0                # regla del usuario: el objetivo deja ≥ 3 % neto de costes
+MAX_DIA = paper.DAY_MAX_ENTRIES  # entradas por día de Madrid como mucho, compartidas con el motor (todas las del paper)
+RIESGO_DIA_PCT = paper.DAY_MAX_RISK_PCT   # riesgo comprometido en stop por día de Madrid como mucho (0,5 % × 6)
+MIN_NET_PCT = config.RULE_MIN_NET_PCT   # regla del usuario: el objetivo deja ≥ 3 % neto de costes
 PARAMS = {"sl_pct": 1.5, "target_r": 3.0, "max_hold_h": 24, "min_net_pct": MIN_NET_PCT, "avg_hold_h": 13,
           "long_instrument": "spot", "short_instrument": "perp"}
 SRC = "Entrada por noticia fiable"
@@ -145,11 +145,9 @@ def reglas_ko(plan: dict) -> str | None:
 
 def topes_dia(motor: dict | None) -> tuple[int, float]:
     """(entradas, riesgo en %) del día compartidos con el motor: los de su preset en marcha (max_day_entries y
-    max_day_risk_pct; E2 da 4 y 2 %, «6 diarias» 6 y 3 %) y nunca más de MAX_DIA y RIESGO_DIA_PCT. Sin dato, los de
-    siempre."""
-    m = motor if isinstance(motor, dict) else {}
-    n, r = _f(m.get("max_day_entries")), _f(m.get("max_day_risk_pct"))
-    return (min(MAX_DIA, int(n)) if n and n > 0 else MAX_DIA), (min(RIESGO_DIA_PCT, r) if r and r > 0 else RIESGO_DIA_PCT)
+    max_day_risk_pct; E2 da 4 y 2 %, «6 diarias» 6 y 3 %) y nunca más de MAX_DIA y RIESGO_DIA_PCT (paper.day_caps: el
+    paper los comprueba también para todos los orígenes). Sin dato, los de siempre."""
+    return paper.day_caps(motor)
 
 
 def limites_dia(entradas: dict[str, float], nuevo: float, max_dia: int = MAX_DIA,

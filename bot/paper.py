@@ -55,6 +55,8 @@ STEP_EVERY_S = 1.0
 PORTFOLIO_EVERY_S = 2.0
 ERR_LOG_EVERY_S = 300          # un fallo que se repite cada ronda se registra como mucho cada 5 min
 CLOSED_IN_PORTFOLIO = 50
+DAY_MAX_ENTRIES = 6            # reglas del usuario: entradas por día de Madrid como mucho, de TODOS los orígenes
+DAY_MAX_RISK_PCT = 3.0         # ... y riesgo comprometido en stop (0,5 % × 6); con un preset más estricto, el suyo
 GAP_MIN_MS = 2 * 60_000        # una posición sin gestionar más tiempo que esto (bot parado o sin precios) se reconstruye
 GAP_RETRY_S = 60               # reintento de las velas del hueco
 GAP_TRIES = 10                 # sin velas completas tras tantos intentos, se reconstruye con lo que haya y sigue en vivo
@@ -272,6 +274,16 @@ def replay_gap(side: str, sl: float, tp2: float | None, hold_until: float | None
     return out
 
 
+def day_caps(motor: dict | None = None) -> tuple[int, float]:
+    """(entradas, riesgo en %) del día de Madrid para todo el paper: los del preset en marcha del motor de aperturas
+    (max_day_entries y max_day_risk_pct; E2 da 4 y 2 %, «6 diarias» 6 y 3 %) y nunca más de DAY_MAX_ENTRIES y
+    DAY_MAX_RISK_PCT. Sin dato, esos."""
+    m = motor if isinstance(motor, dict) else {}
+    n, r = _f(m.get("max_day_entries")), _f(m.get("max_day_risk_pct"))
+    return ((min(DAY_MAX_ENTRIES, int(n)) if n and n > 0 else DAY_MAX_ENTRIES),
+            (min(DAY_MAX_RISK_PCT, r) if r and r > 0 else DAY_MAX_RISK_PCT))
+
+
 def gap_complete(bars, a: int, b: int) -> bool:
     """¿Las velas cubren el hueco [a, b) sin saltos de más de GAP_HOLE_MS?"""
     ts = [int(r[0]) for r in bars or [] if a <= int(r[0]) < b]
@@ -286,7 +298,7 @@ def gap_complete(bars, a: int, b: int) -> bool:
 
 class PaperBroker:
     def __init__(self, bus: Bus, store: Store, get_market, get_orderflow=None, clock=now_ms, slip_bps=None,
-                 fetch_bars=None):
+                 fetch_bars=None, day_limits=None):
         self.bus = bus
         self.store = store
         self.get_market = get_market                          # () -> último "market" (precios y diferencial OKX EU)
@@ -296,6 +308,7 @@ class PaperBroker:
         # async (moneda, desde_ms, hasta_ms) -> velas de 1 min [t, o, h, l, c, …] de Binance, para los huecos (None: no
         # se reconstruyen, como antes)
         self.fetch_bars = fetch_bars
+        self.day_limits = day_limits           # () -> parámetros del motor en marcha (sus topes del día), o None
         self._gaps: dict[str, dict] = {}       # posiciones con un hueco por reconstruir {desde, intentos, proximo}
         self.mode = config.APPROVAL_MODE if config.APPROVAL_MODE in MODES else "veto"
         if self.mode != config.APPROVAL_MODE:
@@ -762,6 +775,10 @@ class PaperBroker:
             if not rr or rr < config.RULE_MIN_RR - 1e-9:
                 return (f"Regla del usuario: objetivo de {_n(rr)} R por debajo del mínimo de {_n(config.RULE_MIN_RR)} R"
                         if rr else "Regla del usuario: sin objetivo fijo (hace falta al menos 2R)")
+            net = stop * rr - cost_rt_pct()   # objetivo bruto menos el coste de ida y vuelta (comisiones y deslizamiento)
+            if net < config.RULE_MIN_NET_PCT - 1e-9:
+                return (f"Regla del usuario: el objetivo (+{_n(stop * rr)} %) deja {_n(net)} % neto de costes, por debajo "
+                        f"del {_n(config.RULE_MIN_NET_PCT)} %")
         if t.get("timing") not in ("now", "window"):
             return f"Momento de entrada desconocido: {t.get('timing')}"
         if t.get("timing") == "window" and not _f(t.get("winAt")):
@@ -769,6 +786,41 @@ class PaperBroker:
         if story in self.positions or story in self.pending or story in self.scheduled:
             return "Ya hay una operación en curso para esta noticia"
         return None
+
+    def day_entries(self, now: int, eq: float | None = None) -> dict[str, float]:
+        """Entradas del día de Madrid de now, de todos los orígenes, con su riesgo en stop en % del capital: abiertas y
+        cerradas que se abrieron hoy (riesgo real) y pendientes o programadas (el riesgo de su ticket). Como
+        apertura.paper_day_entries, pero con el estado del propio paper."""
+        eq = self.equity() if eq is None else eq
+        start = day_start_ms(now)
+        out: dict[str, float] = {}
+        for x in [*self.positions.values(), *self.closed]:
+            if _f(x.get("opened"), 0) >= start:
+                r = _f(x.get("riskUsd"))
+                out[x["story"]] = round(r / eq * 100, 4) if r and eq else config.RISK_PER_TRADE_PCT
+        for it in [*self.pending.values(), *self.scheduled.values()]:
+            out.setdefault(it["story"], _f(it["ticket"].get("risk"), config.RISK_PER_TRADE_PCT))
+        return out
+
+    def _day_check(self, story: str, risk: float, now: int, eq: float) -> dict:
+        """Topes del día (reglas del usuario): entradas y riesgo del día de Madrid de todos los orígenes (motor, entrada
+        por noticia y fase 2), con los del preset en marcha del motor (day_caps)."""
+        try:
+            motor = self.day_limits() if self.day_limits is not None else None
+        except Exception:
+            motor = None
+        n_max, r_max = day_caps(motor)
+        ent = self.day_entries(now, eq)
+        ent.pop(story, None)
+        used = sum(ent.values())
+        if len(ent) >= n_max:
+            return {"ok": False, "t": f"Entradas del día: {len(ent)} de {n_max} (todas las del paper, día de Madrid): "
+                                      "no caben más"}
+        if used + risk > r_max + 1e-9:
+            return {"ok": False, "t": f"Riesgo del día {_n(used)} % + {_n(risk)} % > {_n(r_max)} % (todas las entradas "
+                                      "del paper, día de Madrid)"}
+        return {"ok": True, "t": f"Entradas del día {len(ent)} de {n_max} y riesgo {_n(used)} % + {_n(risk)} % ≤ "
+                                 f"{_n(r_max)} % (día de Madrid)"}
 
     def _risk_checks(self, t: dict, story: str, now: int, prices: dict) -> tuple[list[dict], float]:
         coin = t.get("coin")
@@ -835,6 +887,8 @@ class PaperBroker:
             {"ok": same is None, "t": f"Sin otra operación abierta o en curso en {coin}" if same is None
                 else f"Ya hay una operación en {coin} ({same}): una sola por moneda"},
         ]
+        if config.USER_RULES:   # límites diarios de entradas y riesgo, para todos los orígenes (también la fase 2)
+            checks.append(self._day_check(story, risk, now, eq))
         if inst == "perp":   # apalancamiento máximo para particulares en España
             perp = self._perp_notional() + notional
             ok = perp <= eq * PERP_MAX_LEVERAGE + 1e-6

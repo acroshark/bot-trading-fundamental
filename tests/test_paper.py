@@ -1453,3 +1453,40 @@ def test_sin_precios_un_rato_con_el_bot_en_marcha_tambien_es_un_hueco(env, monke
     assert "n1" in env.broker._gaps
     env.clock.t = T0 + 21 * MIN
     assert run(env.broker.reconcile()) == 1 and env.broker.closed[-1]["closed"] == T0 + 10 * MIN
+
+
+def test_topes_del_dia_para_todos_los_origenes_con_las_reglas(env, monkeypatch):
+    """Revisión del 28-10: el paper comprueba él mismo los topes del día (6 entradas y 3 %, o los del preset del motor),
+    así que un ticket de la fase 2 no se los salta aunque el motor ya haya hecho las suyas."""
+    monkeypatch.setattr(config, "USER_RULES", True)
+    for k, c in enumerate(["BTC", "ETH", "SOL", "XRP", "BTC", "ETH"]):
+        assert env.broker.submit(ticket(coin=c, stop=2.0, tp2=3.0), f"a{k}")
+        env.broker.close(f"a{k}")
+    assert len(env.broker.day_entries(T0)) == 6
+    assert not env.broker.submit(ticket(coin="SOL", stop=2.0, tp2=3.0), "fase2")
+    assert "Entradas del día: 6 de 6" in _why(env, "fase2")
+    # con el motor en E2 (4 entradas y 2 % al día), los suyos
+    env.broker.day_limits = lambda: {"max_day_entries": 4, "max_day_risk_pct": 2.0}
+    assert "Entradas del día: 6 de 4" in (env.broker.submit(ticket(coin="SOL", stop=2.0, tp2=3.0), "f2") or _why(env, "f2"))
+    # al día siguiente de Madrid se vuelve a empezar
+    env.clock.t = next_midnight_ms(T0) + MIN
+    env.broker.day_limits = None
+    assert env.broker.submit(ticket(coin="SOL", stop=2.0, tp2=3.0), "manana")
+    # el riesgo del día también cuenta: con un tope de 1 %, la tercera de 0,5 % no cabe
+    env.broker.day_limits = lambda: {"max_day_entries": 6, "max_day_risk_pct": 1.0}
+    assert env.broker.submit(ticket(coin="BTC", stop=2.0, tp2=3.0), "m2")
+    assert not env.broker.submit(ticket(coin="ETH", stop=2.0, tp2=3.0), "m3") and "Riesgo del día" in _why(env, "m3")
+    assert paper.day_caps({"max_day_entries": 10, "max_day_risk_pct": 9}) == (6, 3.0) and paper.day_caps(None) == (6, 3.0)
+
+
+def test_objetivo_3_por_ciento_neto_de_costes_con_las_reglas(env, monkeypatch):
+    """Hallazgo n.º 23: con las reglas del usuario, el paper exige objetivo ≥ 3 % neto de costes a TODA entrada (motor,
+    noticia y fase 2): stop 1,5 % × 2R son +3 % brutos y 2,76 % netos con 0,10 % de comisión y 2 pb por lado."""
+    monkeypatch.setattr(config, "USER_RULES", True)
+    assert not env.broker.submit(ticket(stop=1.5, tp2=2.0), "n1")
+    assert "deja 2,76 % neto de costes, por debajo del 3,00 %" in _why(env, "n1")
+    assert env.broker.submit(ticket(stop=1.5, tp2=3.0), "n2")   # +4,5 % brutos, 4,26 % netos
+    assert env.broker.submit(ticket(coin="ETH", stop=1.5, tp2=2.2), "n3")       # 3,3 − 0,24 = 3,06 % netos
+    monkeypatch.setattr(config, "FEE_PCT", 0.35)                 # sin cuenta X-Perps: 0,74 % de ida y vuelta
+    assert not env.broker.submit(ticket(coin="SOL", stop=1.5, tp2=2.2), "n4")   # 3,3 − 0,74 = 2,56 % netos
+    assert "deja 2,56 % neto" in _why(env, "n4")
