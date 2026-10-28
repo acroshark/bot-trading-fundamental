@@ -44,6 +44,7 @@ from .predict import Predictor, results_getter
 from .reaccion import Reaccion
 from .reflejo import Reflejo
 from .reloj import Reloj
+from .salud import Salud, proceso
 from .server import Services, make_app
 from .store import Store, copia_diaria, in_batches
 from .trend import Trend
@@ -321,7 +322,10 @@ async def main() -> None:
                     "local_ai": {"queue": local.q.qsize(), "done": local.done, "dropped": local.dropped},
                     "db": db_health(store.path, config.COPIAS_DIR),
                     "arranque": bus.started, "en_marcha_s": round((now_ms() - bus.started) / 1000),
-                    "hueco_al_arrancar": bus.hueco, "reloj": reloj.ultimo, "clients": len(bus.clients)}
+                    "hueco_al_arrancar": bus.hueco, "reloj": reloj.ultimo, "proceso": proceso(),
+                    "retraso_bucle": salud.retraso, "clients": len(bus.clients)}
+
+        salud = Salud(health, config.LOG_DIR / "salud.csv")   # cada 5 min, una fila para la prueba de 72 h (n.º 40)
 
         services = Services(feeds=feeds, predictor=predictor, broker=broker, phase2=phase2, backtest=bt, openings=openings,
                             vigilancia=vigil, aprendizaje=learn, evolucion=evo, fuentes_vivas=vivas, reaccion=react,
@@ -355,7 +359,8 @@ async def main() -> None:
                    ("El resumen de fuentes", report_sources), ("La tendencia", trend.run), ("Los feeds", feeds.run),
                    ("El backtest", backtester.run), ("Las predicciones", predictor.run), ("El paper", broker.run),
                    ("La fase 2", phase2.run), ("El motor de aperturas", openings.run),
-                   ("La limpieza de la base", lambda: maintenance(store)), ("El reloj", reloj.run)]
+                   ("La limpieza de la base", lambda: maintenance(store)), ("El reloj", reloj.run),
+                   ("La salud", salud.run)]
         tareas += [(nombre, mod.run) for nombre, mod in (
             ("La vigilancia", vigil), ("El aprendizaje", learn), ("Las fuentes vivas", vivas), ("La evolución", evo),
             ("El reflejo", refl), ("La reacción", react), ("Las noticias fiables", fiab),
