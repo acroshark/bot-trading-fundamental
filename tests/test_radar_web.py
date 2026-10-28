@@ -2023,8 +2023,9 @@ def test_balanza_con_el_peso_de_la_fuente_y_del_medio():
       story("n1", {srcState: "activa", srcWeight: 1}); story("n2", {srcState: "prueba", srcWeight: 0.5});
       story("n3", {srcState: "silenciada", srcWeight: 0}); story("n4", {outlet: "bueno.com"});
       H.recv({type: "aprendizaje", ts: now, estado: "ok", medios_mejores: [{medio: "bueno.com", peso: 1.25}]});
-      const w = id => { const t = newsTilt(S.stories.get(id), Date.now()); return t ? t.w : null; };
-      return {w1: w("n1"), w2: w("n2"), w3: w("n3"), w4: w("n4"), p2: newsTilt(S.stories.get("n2"), Date.now()).prueba};""")
+      const t0 = Date.now();   // un solo instante: el peso decae con la edad y cada Date.now() daba otro
+      const w = id => { const t = newsTilt(S.stories.get(id), t0); return t ? t.w : null; };
+      return {w1: w("n1"), w2: w("n2"), w3: w("n3"), w4: w("n4"), p2: newsTilt(S.stories.get("n2"), t0).prueba};""")
     assert r["w3"] is None and r["p2"] is True
     assert abs(r["w2"] / r["w1"] - 0.5) < 1e-9 and abs(r["w4"] / r["w1"] - 1.25) < 1e-9
 

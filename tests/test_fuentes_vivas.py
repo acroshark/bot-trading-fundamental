@@ -48,15 +48,17 @@ def make(tmp_path, specs, **kw):
 
 
 def poner(store, feed, n, veredicto, *, medio=None, dias=2, confirmada=0, nombre=None, host=None, tag="", paso=7 * H,
-          tier="T2"):
+          tier="T2", hasta=None):
     """n noticias ya medidas (cerradas) de un feed, desde hace unos días hacia atrás: cada una `paso` antes que la
-    anterior (por defecto 7 h: cada noticia es un caso independiente y 30 caen en más de 7 días)."""
-    now = now_ms()
+    anterior (por defecto 7 h: cada noticia es un caso independiente y 30 caen en más de 7 días). Con `hasta` (ms) se
+    cuentan hacia atrás desde ese instante fijo y no desde «ahora menos `dias`»: hace falta cuando la prueba depende
+    de en qué hora o en qué día UTC caen (las cifras agrupan por horas y días UTC)."""
+    ref = now_ms() - dias * DAY if hasta is None else hasta
     key = (str(store.path), feed)
     rows = []
     for i in range(n):
         _CURSOR[key] += paso
-        rows.append((f"s-{feed}-{medio}-{veredicto}-{tag}{_CURSOR[key]}", now - dias * DAY - _CURSOR[key], feed, medio,
+        rows.append((f"s-{feed}-{medio}-{veredicto}-{tag}{_CURSOR[key]}", ref - _CURSOR[key], feed, medio,
                      nombre, host, "jp", "ja", tier, 30.0, veredicto, confirmada, None))
     store.db.executemany(f"INSERT INTO fv_noticias ({COLS}) VALUES ({','.join('?' * 13)})", rows)
     store.db.commit()
@@ -504,16 +506,32 @@ async def test_auto_apagado_solo_sugiere(tmp_path):
 
 async def test_consulta_prolifica_en_un_mal_dia_no_silencia_al_medio(tmp_path):
     """El caso del informe: una consulta de Google News capta 30 noticias alcistas de un medio en un día de caída
-    (0 de 30). Comparten mercado: es un caso, no treinta, y nadie se silencia."""
+    (0 de 30). Comparten mercado: es un caso, no treinta, y nadie se silencia. La media hora va a una hora fija de un
+    día UTC (11:30-11:59 de anteayer): contada desde «ahora menos dos días», entre las 00:01 y las 00:30 UTC cruzaba la
+    medianoche y daba 2 días (ese caso lo fija la prueba siguiente)."""
     fv, poller, bus, store = make(tmp_path, [spec("jp-gn", GN_URL, kind="google_news")])
-    poner(store, "jp-gn", 30, "fallo", medio="prolifico.example", paso=60_000)   # media hora
+    anteayer = (now_ms() // DAY - 2) * DAY                                         # 00:00 UTC
+    poner(store, "jp-gn", 30, "fallo", medio="prolifico.example", paso=60_000, hasta=anteayer + 12 * H)  # media hora
     poner(store, "jp-gn", 40, "fallo", medio="dos-dias.example", paso=H, dias=5)  # 40 horas seguidas
     res = await fv.revisar()
     assert res["cambios"] == [] and poller.outlet_estados == {} and fv.sugerencias == {}
     c = fv.cifras["medio:prolifico.example"]
-    assert c.casos == 30 and c.indep <= 2 and c.dias == 1
+    assert c.casos == 30 and c.indep == 1 and c.dias == 1
     c2 = fv.cifras["medio:dos-dias.example"]
     assert c2.indep == 40 and c2.dias <= 3
+    store.close()
+
+
+async def test_media_hora_que_cruza_la_medianoche_utc_tampoco_silencia(tmp_path):
+    """Las horas y los días de las cifras son UTC de calendario (como mercado_base): la misma media hora de 23:45 a
+    00:14 UTC son 2 casos en 2 días distintos. Sigue lejos de los mínimos (30 casos en 7 días) y nadie se silencia."""
+    fv, poller, bus, store = make(tmp_path, [spec("jp-gn", GN_URL, kind="google_news")])
+    anteayer = (now_ms() // DAY - 2) * DAY                                         # 00:00 UTC
+    poner(store, "jp-gn", 30, "fallo", medio="prolifico.example", paso=60_000, hasta=anteayer + 15 * 60_000)
+    res = await fv.revisar()
+    assert res["cambios"] == [] and poller.outlet_estados == {} and fv.sugerencias == {}
+    c = fv.cifras["medio:prolifico.example"]
+    assert (c.casos, c.indep, c.dias, c.indep_dir, c.dias_dir) == (30, 2, 2, 2, 2)
     store.close()
 
 
