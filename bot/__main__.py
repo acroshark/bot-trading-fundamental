@@ -264,7 +264,8 @@ async def main() -> None:
                     "trend": {"ok": trend.ok, "err": trend.err}, "feeds": feeds.summary(),
                     "local_ai": {"queue": local.q.qsize(), "done": local.done, "dropped": local.dropped},
                     "db": db_health(store.path, config.COPIAS_DIR),
-                    "clients": len(bus.clients)}
+                    "arranque": bus.started, "en_marcha_s": round((now_ms() - bus.started) / 1000),
+                    "hueco_al_arrancar": bus.hueco, "clients": len(bus.clients)}
 
         services = Services(feeds=feeds, predictor=predictor, broker=broker, phase2=phase2, backtest=bt, openings=openings,
                             vigilancia=vigil, aprendizaje=learn, evolucion=evo, fuentes_vivas=vivas, reaccion=react,

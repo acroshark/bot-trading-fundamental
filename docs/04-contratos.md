@@ -115,7 +115,14 @@ Monedas operables: `config.COINS = ["BTC", "ETH", "SOL", "XRP"]`, cotizadas en U
 
 ## 2. Mensajes nuevos (bus → web)
 
-### 2.0 `conteo` (bus, al final de la foto inicial del WebSocket)
+### 2.0 `reset` y `conteo` (bus, al principio y al final de la foto inicial del WebSocket)
+```json
+{"type": "reset", "phase": 2, "started": 0, "hueco": {"desde": 0, "hasta": 0, "min": 1980}}
+```
+`reset` abre la foto: la web borra lo simulado. `hueco` (o null) es lo que estuvo parado el bot antes de este arranque: del
+último evento guardado a la hora de arranque, si pasan 5 min o más (`bus.HUECO_MIN_MS`; hallazgo n.º 0). La web lo enseña
+como aviso durante las 24 h siguientes.
+
 ```json
 {"type": "conteo", "desde": 0, "kinds": {"captured": 1420, "filtered": 2462, "corroborated": 310, "triaged": 302, "lowprio": 95}}
 ```
@@ -711,7 +718,7 @@ Estado (no evento) de `bot/backtest.py`: al arrancar (el último `resultados.jso
 
 | Ruta | Devuelve |
 |---|---|
-| `GET /health` | Salud del proceso: `phase`, `sources` (cazadores), `market {ok, err, prices}`, `trend {ok, err}`, `feeds` (2.1), `local_ai {queue, done, dropped}` (cola del triaje, triadas y sin triar por cola llena), `db {mb, wal_mb, copias, ultima_copia}` (tamaño de `bot.db` y su WAL y las copias diarias de `DATA_DIR/copias`, hallazgos n.º 39 y 51) y `clients`. La usa `scripts/vigilante-bot.ps1` |
+| `GET /health` | Salud del proceso: `phase`, `sources` (cazadores), `market {ok, err, prices}`, `trend {ok, err}`, `feeds` (2.1), `local_ai {queue, done, dropped}` (cola del triaje, triadas y sin triar por cola llena), `db {mb, wal_mb, copias, ultima_copia}` (tamaño de `bot.db` y su WAL y las copias diarias de `DATA_DIR/copias`, hallazgos n.º 39 y 51), `arranque` (ms), `en_marcha_s`, `hueco_al_arrancar` (el `hueco` de 2.0 o null; hallazgo n.º 0) y `clients`. La usa `scripts/vigilante-bot.ps1` |
 | `GET /api/estado` | Resumen para la IA local (precios, flujo, libro, agenda, fuentes, IA local y cartera). Desde el 28-10-2026, en lugar de `bolsas` (la variación de cada índice) lleva `aperturas_cripto`: por bolsa, `{nombre, estado, apertura (Madrid), minutos_desde_apertura, medida ("desde la apertura"\|"a las 4 h"\|"última apertura, a las 4 h"), cripto {moneda: {pct, rango_pct}} \| null, media_pct}` del último `cripto_aperturas` |
 | `GET /api/noticias?horas=&min=&bolsa=&limite=` | Las `limite` más recientes (60 por defecto, 500 como mucho; hallazgo n.º 11: con 60 fijas, `horas=48` devolvía solo el último minuto) de las `horas` últimas (3 por defecto, 48 como mucho) con importancia ≥ `min`. Noticias con su triaje. Cada una lleva además `medio`, `estado_fuente`, `peso_fuente`, `peso_medio`, `clase` (`cripto\|macro\|contexto`, del prefiltro) y `reflejo` (el último del evento `reflejo`, o `null`); `credibilidad_ajustada` = la del nivel y las confirmaciones × peso del medio × peso de la fuente (0 si está silenciada, y 0 si es macro o geopolítica sin reflejo confirmado en la cripto); `confirmaciones` no cuenta las de fuentes silenciadas |
 | `GET /api/fuentes?region=&estado=` | Lista de feeds (2.1) con `estado` y `peso` de su ciclo de vida (2.12); `estado=` filtra |

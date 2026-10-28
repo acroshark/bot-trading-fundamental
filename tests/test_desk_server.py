@@ -972,3 +972,20 @@ def test_foto_inicial_lleva_los_totales_reales(tmp_path):
                                                                "triaged": 0, "lowprio": 0}}
     assert bus.conteo(t + 30 * 3_600_000)["desde"] == t + 6 * 3_600_000   # 24 h como mucho
     store.close()
+
+
+def test_hueco_al_arrancar(tmp_path, monkeypatch):
+    """Hallazgo n.º 0: al arrancar, el bus mira el último evento guardado; si pasan 5 min o más, el «reset» de la foto
+    (y /health) dicen cuánto estuvo parado el bot."""
+    import bot.bus as busmod
+    store = Store(tmp_path / "t.db")
+    assert Bus(store).hueco is None                                   # base vacía: nada que decir
+    t = 1_800_000_000_000
+    store.add_event({"type": "event", "kind": "captured", "story": "a", "ts": t - 33 * 3_600_000, "id": "a"})
+    monkeypatch.setattr(busmod, "now_ms", lambda: t)
+    bus = Bus(store)
+    assert bus.hueco == {"desde": t - 33 * 3_600_000, "hasta": t, "min": 1980}
+    assert bus.snapshot()[0] == {"type": "reset", "phase": bus.snapshot()[0]["phase"], "started": t, "hueco": bus.hueco}
+    store.add_event({"type": "event", "kind": "filtered", "story": "b", "ts": t - 4 * 60_000, "id": "b"})
+    assert Bus(store).hueco is None                                   # 4 min: un reinicio normal
+    store.close()

@@ -2046,3 +2046,20 @@ def test_fijar_a_mano_el_peso_de_un_medio():
     assert r["t"] == "El peso tiene que ser un número de 0 a 1,5."
     assert [m for m in r["sent"] if m.get("type") == "peso_medio"] == [
         {"type": "peso_medio", "medio": "agencia.example", "peso": 1.2, "motivo": "Fijado a mano desde la web"}]
+
+
+def test_aviso_si_el_bot_estuvo_parado():
+    """Hallazgo n.º 0: si el bot estuvo parado antes de arrancar (hueco del «reset»), la web lo dice durante 24 h."""
+    r = run("""H.open();
+      const vista = () => ({hidden: H.el("#avisoParado").hidden, txt: H.el("#avisoParado").textContent});
+      H.recv({type: "reset", phase: 2, started: now, hueco: {desde: now - 33 * 3600e3, hasta: now - 60e3, min: 1979}});
+      const a = vista();
+      H.recv({type: "reset", phase: 2, started: now, hueco: {desde: now - 20 * 60e3, hasta: now - 60e3, min: 19}});
+      const b = vista();
+      H.recv({type: "reset", phase: 2, started: now, hueco: null});
+      const c = vista();
+      H.recv({type: "reset", phase: 2, started: now, hueco: {desde: now - 30 * 3600e3, hasta: now - 25 * 3600e3, min: 300}});
+      return {a, b, c, d: vista()};""")
+    assert r["a"]["hidden"] is False and "parado 33,0 h" in r["a"]["txt"] and "en Madrid" in r["a"]["txt"]
+    assert "velas de 1 min" in r["a"]["txt"] and r["b"]["hidden"] is False and "parado 19 min" in r["b"]["txt"]
+    assert r["c"]["hidden"] is True and r["d"]["hidden"] is True

@@ -8,6 +8,7 @@ from .store import Store
 
 
 CONTEO_KINDS = ("captured", "filtered", "corroborated", "triaged", "lowprio")   # los contadores del cazador y la IA
+HUECO_MIN_MS = 5 * 60_000    # con miles de feeds llegan eventos cada pocos segundos: 5 min sin ninguno es estar parado
 
 
 class Bus:
@@ -17,6 +18,17 @@ class Bus:
         self.state: dict[str, dict] = {}   # último mensaje de cada tipo (fuentes, mercado, agenda, agentes)
         self.started = now_ms()
         self._seq = 0
+        self.hueco = self._hueco()   # cuánto estuvo parado antes de este arranque (hallazgo n.º 0)
+
+    def _hueco(self) -> dict | None:
+        """{desde, hasta, min}: del último evento guardado a este arranque, si pasan de HUECO_MIN_MS; si no, None."""
+        try:
+            last = self.store.ultima_actividad(self.started)
+        except Exception:
+            return None
+        if last is None or self.started - last < HUECO_MIN_MS:
+            return None
+        return {"desde": last, "hasta": self.started, "min": round((self.started - last) / 60_000)}
 
     def publish(self, msg: dict) -> dict:
         kind = msg["type"]
@@ -53,7 +65,7 @@ class Bus:
 
     def snapshot(self) -> list[dict]:
         """Lo que recibe una web al conectarse: reinicio, estado actual e historial reciente."""
-        out = [{"type": "reset", "phase": config.PHASE, "started": self.started}]
+        out = [{"type": "reset", "phase": config.PHASE, "started": self.started, "hueco": self.hueco}]
         out += list(self.state.values())
         # Los descartes son la gran mayoría con miles de feeds: van aparte para no tapar el resto del historial.
         evs = self.store.recent_events(config.HISTORY_EVENTS, exclude=("filtered",))

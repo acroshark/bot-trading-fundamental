@@ -662,6 +662,7 @@ details.evo-more p{margin:6px 0 0}
     <button type="button" role="tab" data-tab="ai" aria-selected="false">Consumo de IA</button>
   </nav></div>
 </header>
+<div class="aviso-demo" id="avisoParado" role="status" hidden></div>
 <div class="aviso-demo" id="avisoDemo" hidden>Esto es una <b>copia de demostración con datos de ejemplo</b>: no puede ver tu PC. Lo real (noticias, precios y tu cartera de prueba de 100 €) está en el acceso directo «Radar Fundamental» de tu PC (http://127.0.0.1:8765).</div>
 
 <main class="wrap">
@@ -1408,7 +1409,19 @@ function resetLive(msg){
   for (const c of COINS) S.flow[c] = {};
   lastFeedSig = "";
   const tag = $("#modeTag"); tag.textContent = `En vivo · paper · fase ${msg.phase}`; tag.className = "mode live";
+  avisoParado(msg.hueco);
   liveControls();
+}
+// Hallazgo n.º 0: si el bot estuvo parado antes de este arranque (5 min o más sin ningún evento), que se vea durante
+// las 24 h siguientes.
+function avisoParado(h){
+  const el = $("#avisoParado");
+  const ok = isObj(h) && isNum(h.desde) && isNum(h.hasta) && h.hasta > h.desde && Date.now() - h.hasta < 24*3600e3;
+  el.hidden = !ok;
+  if (!ok) return;
+  const min = (h.hasta - h.desde) / 60e3, dur = min < 90 ? `${nf(min, 0)} min` : `${nf(min / 60, 1)} h`;
+  el.textContent = `El bot estuvo parado ${dur} (del ${madWhen(h.desde)} al ${madWhen(h.hasta)}): en ese tiempo no siguió ` +
+    `aperturas ni noticias. Las posiciones paper que estaban abiertas se reconcilian con las velas de 1 min del hueco.`;
 }
 function onEvent(e){
   e.id = e.id || "e"+(++S.seq); e.ts = e.ts || S.vnow;

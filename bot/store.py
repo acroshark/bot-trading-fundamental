@@ -95,6 +95,11 @@ class Store:
         )
         self.db.commit()
 
+    def ultima_actividad(self, antes: int) -> int | None:
+        """Hora del último evento guardado antes de `antes` (ms): al arrancar, cuándo dejó de funcionar el bot."""
+        row = self.db.execute("SELECT MAX(ts) FROM events WHERE ts < ?", (antes,)).fetchone()
+        return row[0] if row else None
+
     def recent_events(self, n: int, exclude: tuple[str, ...] = (), only: tuple[str, ...] = ()) -> list[dict]:
         where, args = "", []
         if exclude:
