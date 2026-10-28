@@ -229,7 +229,7 @@ Todos llevan `kind`, `agent`, `story` (salvo `flow` y `brief`), `title`, `text`,
 | `humanwait`, `humanok`, `humanko` | `human` | `human{mode, deadline?, by?, at?, no?}` |
 | `scheduled`, `order`, `filled`, `manage`, `blocked` | `exec` | `exec{scheduled?, sent?, px, slip (pb), ms, notional, sl, tp1?, tp2?, trail?, stopLossUsd?, blocked?, why?, instrument, funding?, funding_n?}` (un `manage` con `funding` es una liquidación de funding de un perpetuo) |
 | `closed` | `exec` | `result{coin, side, qty, entry, exit, why, pnl, pnl_pct, R, fees, opened, closedAt, riskUsd, notional, headline, strategy, window}`; el evento lleva `tone: "good"` o `"bad"` |
-| `reflejo` | `flow` | `reflejo{estado ("pendiente"\|"confirmada"\|"contraria"\|"sin_reflejo"), mov_pct, min, ref ("BTC"\|"media"), umbral_pct}` (ver abajo) |
+| `reflejo` | `flow` | `reflejo{estado ("pendiente"\|"confirmada"\|"contraria"\|"sin_reflejo"), mov_pct, min, ref ("BTC"\|"media"), umbral_pct, tarde?}` (ver abajo) |
 | `entrada_noticia` | `strat` | `entrada_noticia{estado ("esperando"\|"confirmada"\|"caducada"\|"vetada"), motivo, moneda (o null: toda la noticia), dir (±1), lado, grupo{clave, tipo, nombre, sentido, n, n_historias, dias, acierto, acierto_bruto, ic90_bajo, opera}, ta, expira?, ts_triaje?, umbral_pct?, mov_pct?, min?, paper_story?, entrada?, stop?, objetivo?, instrumento?, riesgo_pct?}`; `story` = la de la noticia (ver 2.16) |
 
 Prefiltro (`bot/filters.py`, 28-10-2026; `clase` en la captada y en la descartada relevante):
@@ -255,12 +255,16 @@ que no lo son); sin clase (historias de antes del 28-10-2026), solo el titular (
 **Nunca el tipo, los temas ni el resumen del triaje** (revisión del 28-10-2026, hallazgo n.º 1: la IA local pone el tema
 «cripto» o el tipo «seguridad» a noticias de la Fed o de guerra, y el 12 % de las macro con dirección se colaba sin
 confirmar). Se mide desde la captura, con el cierre de cada vela de 1 min frente al de la última vela cerrada antes de la
-captura, la media de las cuatro monedas (o BTC si falta alguna); manda el primer toque. El umbral (`umbral_pct`) es el
+captura, la media de las cuatro monedas (o BTC si falta alguna o si una se queda sin velas nuevas más de 2 min por
+detrás de BTC); manda el primer toque. El umbral (`umbral_pct`) es el
 mayor de 0,5 % y 2σ del movimiento de 60 min de esa misma referencia en las 24 h anteriores a la captura (sin 24 h de
 velas, 0,5 %):
 - `confirmada`: a favor de la dirección de la noticia, al menos el umbral, en los 60 min siguientes;
 - `contraria`: al menos el umbral en contra;
-- `sin_reflejo`: pasados 60 min, ninguna de las dos (y, sin velas en 3 h, `mov_pct: null`);
+- `sin_reflejo`: pasados 60 min con sus velas completas, ninguna de las dos; sin los 60 min completos (hueco de velas o
+  reinicio) sigue `pendiente` hasta 3 h después de la captura y entonces se cierra con lo que haya (sin velas,
+  `mov_pct: null`). Con `tarde: true`: se trió más de 60 min después de captarla y lo que hizo la cripto ya había pasado
+  cuando el bot pudo usarla (revisión del 28-10-2026);
 - `pendiente`: dentro de los 60 min (se publica una vez; luego el estado final, una vez). Puede llevar `ref` y
   `umbral_pct` nulos si aún no hay velas.
 `mov_pct` es el movimiento (con signo, + = sube) en el momento del estado y `min` los minutos desde la captura. Solo las
@@ -671,6 +675,7 @@ cola hasta que ya no se puedan confirmar a tiempo):
 | `GET /api/vigilancia` | Último `vigilancia` (2.8) y `operaciones`: las operaciones virtuales que cuentan, de la más reciente a la más antigua (filas de la tabla `vigilancia`, hasta 500) |
 | `GET /api/aperturas` | Último `openings` (2.9) |
 | `GET /api/cripto_aperturas` | Último `cripto_aperturas` (2.14), o `{"estado": "apagado"}` sin el módulo |
+| `GET /api/reflejo` | Reflejo de las macro desde el arranque (`bot/reflejo.py`): `{type: "reflejo", estado: "encendido\|apagado", pendientes, finales: {confirmada, contraria, sin_reflejo}, tasa_confirmada, azar_confirmada_pct}`; la tasa real frente a la del azar |
 | `GET /api/aprendizaje` | Último `aprendizaje` (2.10) más `medios` (ranking de 60), `postmortems` (20), `cambios` (30 cambios de peso) y `noticias` `{mejores, peores}` (las que mejor y peor funcionaron a 4 h, 20 de cada) |
 | `GET /api/aprendizaje/medios?orden=peso\|acierto\|casos\|ruido\|ops\|R&limit=&veredicto=&min_casos=&q=` | Ranking de medios del último cálculo |
 | `GET /api/aprendizaje/medio?id=dominio` | Todo lo medido de un medio (404 sin datos) |

@@ -383,6 +383,12 @@ casos):
 - *contraria*: al menos el umbral en contra;
 - *sin reflejo*: pasados 60 min, ninguna de las dos;
 - *pendiente*: mientras tanto. Manda lo que pase antes.
+
+Revisión del 28-10-2026 (tarde): si una moneda se queda sin velas nuevas se mide con BTC sola (antes anulaba la media y
+la noticia salía «sin reflejo» con +0,00 %); sin los 60 min de velas completos no se cierra hasta 3 h después de la
+captura (antes, a los 70 min con lo que hubiera, también tras un reinicio); una noticia triada más de 60 min después de
+captarla queda «sin reflejo» (`tarde`): el movimiento ya había pasado cuando el bot pudo usarla. `GET /api/reflejo`
+enseña la tasa de «confirmada» frente a la del azar.
 Solo las confirmadas cuentan en la señal del motor (y entonces valen para las cuatro monedas), en la balanza de la vista
 Mundo, en el contexto del estratega y en las predicciones; en `/api/noticias` las demás salen con credibilidad ajustada 0.
 Las de cripto cuentan como siempre.

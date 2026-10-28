@@ -410,7 +410,8 @@ class Predictor:
 
     def _news(self, since: int) -> list[tuple[int, dict]]:
         """Noticias triadas desde `since`, una por historia (la última). Las macro o geopolíticas (no de cripto, por la
-        clase del prefiltro de su captada) solo si la cripto las confirmó (evento «reflejo», bot/reflejo.py)."""
+        clase del prefiltro de su captada) solo si la cripto las confirmó (evento «reflejo», bot/reflejo.py); una macro
+        confirmada que no nombra monedas vale para las cuatro (como en el motor, apertura._news)."""
         by: dict[str, tuple[int, dict, str | None]] = {}
         refl: dict[str, dict] = {}
         for e in self.store.events_since(since, ("triaged", "reflejo")):
@@ -426,8 +427,17 @@ class Predictor:
         except Exception as e:   # sin clase se decide por el titular
             log.warning("Predicciones: no pude leer la clase de las noticias: %s", e)
             cls = {}
-        return [(ts, tr) for sid, (ts, tr, title) in by.items()
-                if reflejo.cuenta(title, tr, refl.get(sid), cls.get(sid))]
+        out = []
+        for sid, (ts, tr, title) in by.items():
+            if not reflejo.cuenta(title, tr, refl.get(sid), cls.get(sid)):
+                continue
+            rep = tr.get("repercusion") if isinstance(tr.get("repercusion"), dict) else {}
+            if (reflejo.macro_confirmada(title, tr, refl.get(sid), cls.get(sid))
+                    and not set(rep.get("activos") or []) & set(config.COINS)):
+                # macro confirmada con la media de las cuatro y sin monedas: vale para las cuatro, como en el motor
+                tr = {**tr, "repercusion": {**rep, "activos": list(config.COINS)}}
+            out.append((ts, tr))
+        return out
 
     def _context(self, now: datetime) -> dict:
         t = _ms(now)

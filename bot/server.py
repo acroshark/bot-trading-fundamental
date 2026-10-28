@@ -665,6 +665,14 @@ def make_app(bus: Bus, health, services: Services | None = None) -> web.Applicat
             return j(sv.reaccion.view())
         return j(bus.state.get("cripto_aperturas") or reaccion.apagado())
 
+    async def api_reflejo(_request: web.Request) -> web.Response:
+        """Reflejo de las noticias macro desde el arranque: cuántas pendientes y finales, la tasa de «confirmada» y la que
+        saldría por puro azar, para compararlas (docs/05, sección 18)."""
+        if sv.reflejo:
+            return j({"type": "reflejo", "estado": "encendido", **sv.reflejo.view()})
+        return j({"type": "reflejo", "estado": "apagado", "pendientes": 0, "finales": {}, "tasa_confirmada": None,
+                  "azar_confirmada_pct": reflejo.AZAR.get("umbral_2sigma_pct")})
+
     async def api_vigilancia(_request: web.Request) -> web.Response:
         if sv.vigilancia:
             return j(sv.vigilancia.view())
@@ -723,6 +731,7 @@ def make_app(bus: Bus, health, services: Services | None = None) -> web.Applicat
     app.router.add_get("/api/noticias_fiables", api_fiables)
     app.router.add_get("/api/vigilancia", api_vigilancia)
     app.router.add_get("/api/cripto_aperturas", api_cripto_aperturas)
+    app.router.add_get("/api/reflejo", api_reflejo)
     app.router.add_get("/api/fuentes_vivas", api_fv)
     app.router.add_get("/api/fuentes_vivas/lista", api_fv_lista)
     app.router.add_get("/api/fuentes_vivas/candidatos", api_fv_candidatos)

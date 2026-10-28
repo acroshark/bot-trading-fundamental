@@ -152,7 +152,8 @@ def medida(a, open_ms: int, end_ms: int, spark: bool = True, completa: bool = Fa
     """Velas de 1 min [t, o, h, l, c, …] que abren en [open_ms, end_ms) → rendimiento, rango, máximo y mínimo en %
     sobre la apertura (la de la primera vela, que tiene que abrir como mucho 5 min después) y la curva (≤ 60 puntos:
     [ms del cierre, % desde la apertura], empezando en [open_ms, 0]). None sin velas. completa: además, la última vela
-    tiene que cerrar como mucho 5 min antes de end_ms (un resultado «a las 4 h» de verdad, como _ret en la historia)."""
+    tiene que abrir como mucho 5 min antes de end_ms (como _ret en la historia) y hacen falta al menos COVER_PER_H velas
+    por hora, como _rango_pct (un hueco en medio daría un rango a medias): un resultado «a las 4 h» de verdad."""
     if a is None or not len(a):
         return None
     a = np.asarray(a, float)
@@ -160,7 +161,7 @@ def medida(a, open_ms: int, end_ms: int, spark: bool = True, completa: bool = Fa
     i, j = int(np.searchsorted(t, open_ms, "left")), int(np.searchsorted(t, end_ms, "left"))
     if j <= i or t[i] - open_ms > OPEN_TOL_MS:
         return None
-    if completa and t[j - 1] + MIN < end_ms - OPEN_TOL_MS:
+    if completa and (end_ms - t[j - 1] > OPEN_TOL_MS or j - i < (end_ms - open_ms) / H * COVER_PER_H):
         return None
     seg = a[i:j]
     ref = float(seg[0, 1])
@@ -526,7 +527,11 @@ class Reaccion:
         res = calcular_hist(lambda c: self.loader(c, start), start, end, idx, clock=lambda: now)
         if not res.get("total"):
             raise RuntimeError("sin velas de 1 min en la caché para la historia")
-        guardar_archivo(self.path(), res)
+        try:   # un fallo al guardar (disco, bloqueo de Windows) no tira los ~50 s de cálculo: se usa igual
+            guardar_archivo(self.path(), res)
+        except Exception as e:
+            log.warning("Reacción: no pude guardar la historia en %s (%s): se usa igual y se guarda en el próximo cálculo",
+                        self.path(), e)
         ch = res.get("chain") or {}
         log.info("Reacción: historia de %d aperturas (%s → %s) en %.0f s; tras subida la siguiente sube el %s (base %s)",
                  res["total"]["n"], res["desde"], res["hasta"], time.monotonic() - t0,

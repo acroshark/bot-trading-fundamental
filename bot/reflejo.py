@@ -27,8 +27,12 @@ de cripto. Nunca los temas ni el tipo del triaje: la IA local pone el tema «cri
 Fed o de guerra (el 12 % de las macro con dirección del 27-10-2026 se habría colado así).
 
 Velas: las de la vigilancia en memoria más la caché de HIST_DIR/1m (aprendizaje.CacheBars), como el aprendizaje; los
-precios son los de Binance al contado que también usa el motor. Si falta todo durante 3 h, la historia queda «sin_reflejo»
-sin medida. Al arrancar se recuperan las triadas de las últimas RESTORE_H horas (la señal del motor y la balanza de la web
+precios son los de Binance al contado que también usa el motor. Si una moneda se queda sin velas nuevas (se paró su
+descarga), se mide con BTC sola en vez de cortar la media. Sin velas de los 60 min completos no se da estado final hasta
+3 h después de la captura (un hueco de velas o un reinicio no deja «sin_reflejo» lo que aún se puede medir); si falta todo
+durante 3 h, la historia queda «sin_reflejo» sin medida. Una noticia triada más de 60 min después de captarla queda
+«sin_reflejo» («tarde»): lo que hizo la cripto en esos 60 min ya había pasado cuando el bot pudo usarla (revisión del
+28-10-2026). Al arrancar se recuperan las triadas de las últimas RESTORE_H horas (la señal del motor y la balanza de la web
 miran 6 h) que no tenían estado final: las que ya no se pueden medir quedan «sin_reflejo»."""
 import asyncio
 import logging
@@ -51,8 +55,10 @@ SIGMA_MIN_N = 600           # rendimientos de 1 min que hacen falta para estimar
 VENTANA_MIN = 60            # minutos que se mira desde la captura
 DIR_MIN = 15                # |dirección| del triaje que ya es alcista o bajista (local_ai.sentiment_of)
 P0_TOL_MS = 5 * MIN         # la vela de referencia tiene que cerrar como mucho 5 min antes de la captura
-LATE_MS = 10 * MIN          # pasados los 60 min, se espera hasta 10 min más a que lleguen las velas
-GIVE_UP_MS = 3 * H          # sin velas en 3 h: «sin_reflejo» sin medida
+LATE_MS = 10 * MIN          # pasados los 60 min, se espera hasta 10 min más a que lleguen las velas (sin los 60 min
+                            # completos, hasta GIVE_UP_MS)
+GIVE_UP_MS = 3 * H          # sin velas en 3 h: «sin_reflejo» con lo que haya (o sin medida)
+STALL_MS = 2 * MIN          # una moneda cuyas velas van más de esto por detrás de BTC está parada: se mide con BTC sola
 RESTORE_H = 7               # al arrancar, triadas de las últimas 7 h sin estado final (la señal y la web miran 6 h)
 TICK_S = 20
 KEEP_CAPTURED_MS = 6 * H
@@ -196,9 +202,10 @@ def medir(bars: dict, t0: int, d: int, now: int, umbral: float | None = None,
         sr = _serie(a, t0, end) if a is not None and len(a) else None
         if sr:
             series[c] = sr
-    if all(c in series for c in COINS):
+    lasts = {c: (float(sr[1][-1]) if len(sr[1]) else float(t0)) for c, sr in series.items()}
+    if all(c in series for c in COINS) and min(lasts.values()) >= lasts["BTC"] - STALL_MS:
         ref, use = "media", COINS
-    elif "BTC" in series:
+    elif "BTC" in series:   # falta alguna o se ha quedado sin velas nuevas: BTC sola (no se corta la media)
         ref, use = "BTC", ["BTC"]
     else:
         return None
@@ -211,8 +218,10 @@ def medir(bars: dict, t0: int, d: int, now: int, umbral: float | None = None,
     grid = np.unique(np.concatenate(times)) if times else np.array([])
     grid = grid[grid <= common]
     complete = common >= end // MIN * MIN
+    # sin los 60 min completos no se cierra hasta GIVE_UP_MS (las velas pueden llegar tarde: hueco o reinicio)
+    give_up = now >= t0 + GIVE_UP_MS
     if not len(grid):
-        if now >= end + LATE_MS:
+        if give_up:
             return {"estado": "sin_reflejo", "mov_pct": 0.0, "min": 0, **base}
         return {"estado": "pendiente", "mov_pct": 0.0, "min": 0, **base}
     moves = np.zeros(len(grid))
@@ -229,7 +238,7 @@ def medir(bars: dict, t0: int, d: int, now: int, umbral: float | None = None,
         estado = "confirmada" if fav[k] > 0 else "contraria"
         return {"estado": estado, "mov_pct": round(float(moves[k]), 3), "min": int(round((grid[k] - t0) / MIN)), **base}
     out = {"mov_pct": round(float(moves[-1]), 3), "min": min(ventana_min, int(round((grid[-1] - t0) / MIN))), **base}
-    return {"estado": "sin_reflejo" if complete or now >= end + LATE_MS else "pendiente", **out}
+    return {"estado": "sin_reflejo" if (complete and now >= end) or give_up else "pendiente", **out}
 
 
 def texto(r: dict, d: int) -> str:
@@ -243,6 +252,9 @@ def texto(r: dict, d: int) -> str:
     az = AZAR.get("umbral_2sigma_pct")
     azar = (f" Por puro azar se confirmaría alrededor del {_num(az, 0)} % de las noticias: no prueba que esta lo causara."
             if isinstance(az, (int, float)) else " Puede ser casualidad: no prueba que la noticia lo causara.")
+    if r.get("tarde"):
+        return (f"Noticia {sentido} que no es de cripto, triada más de {VENTANA_MIN} min después de captarla: lo que hizo "
+                "la cripto en esos minutos ya había pasado cuando el bot pudo usarla. No cuenta en la señal.")
     if est == "pendiente":
         return (f"Noticia {sentido} que no es de cripto: se mide si la cripto la refleja (el mayor de "
                 f"{_num(UMBRAL_PCT, 1)} % y 2σ de 60 min, en {VENTANA_MIN} min). Mientras, no cuenta en la señal.")
@@ -392,6 +404,8 @@ class Reflejo:
     def _publish(self, sid: str, p: dict, r: dict) -> None:
         rf = {"estado": r["estado"], "mov_pct": r.get("mov_pct"), "min": r.get("min"), "ref": r.get("ref"),
               "umbral_pct": r.get("umbral_pct")}
+        if r.get("tarde"):
+            rf["tarde"] = True
         self.bus.publish({"type": "event", "kind": "reflejo", "agent": "flow", "story": sid, "ts": self.clock(),
                           "title": p["title"],
                           "coins": [], "text": texto(rf, p["d"]), "patch": {"reflejo": rf}})
@@ -420,12 +434,20 @@ class Reflejo:
         self._resolve()
         if not self.pending:
             return 0
-        a = min(p["t0"] - (0 if p["umbral"] is not None else SIGMA_H * H) for p in self.pending.values()) - 2 * P0_TOL_MS
+        # la foto de las pendientes ANTES de pedir las velas: una triada que llegue mientras tanto se mide en la ronda
+        # siguiente (con estas velas no tendría sus 24 h previas y el umbral se quedaría en el 0,5 %)
+        items = list(self.pending.items())
+        a = min(p["t0"] - (0 if p["umbral"] is not None else SIGMA_H * H) for _, p in items) - 2 * P0_TOL_MS
         bars = await asyncio.to_thread(self._bars, a, now + MIN)
         closed = 0
-        for sid, p in list(self.pending.items()):
+        for sid, p in items:
+            if self.pending.get(sid) is not p:
+                continue
             try:
-                r = medir(bars, p["t0"], p["d"], now, umbral=p["umbral"])
+                if p["ts"] - p["t0"] > VENTANA_MIN * MIN:   # triada tarde: el reflejo ya había pasado
+                    r = {"estado": "sin_reflejo", "mov_pct": None, "min": 0, "ref": None, "tarde": True}
+                else:
+                    r = medir(bars, p["t0"], p["d"], now, umbral=p["umbral"])
                 if r is None:
                     if now - p["t0"] < GIVE_UP_MS:
                         if not p["sent"]:
@@ -433,7 +455,7 @@ class Reflejo:
                             p["sent"] = True
                         continue
                     r = {"estado": "sin_reflejo", "mov_pct": None, "min": 0, "ref": None}
-                elif p["umbral"] is None:
+                elif p["umbral"] is None and r.get("umbral_pct") is not None:
                     p["umbral"] = r["umbral_pct"]   # el de la primera medida: el de las 24 h antes de la captura
                 if r["estado"] in FINAL:
                     self._publish(sid, p, r)
