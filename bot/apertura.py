@@ -1273,11 +1273,6 @@ def load_recommendation() -> tuple[dict, str | None]:
     return {k: v for k, v in rec.items() if k in PARAMS}, None
 
 
-def recommended_params() -> dict:
-    """Parámetros recomendados por el backtest de 24 meses ({} si no hay una recomendación válida)."""
-    return load_recommendation()[0]
-
-
 # ---------------------------------------------------------------- modo impulso (operativa del usuario, 26-10-2026)
 # No se adivina la dirección: se mide el movimiento de los primeros minutos de la apertura y se sigue, con las mismas
 # reglas que la familia «Movimiento de los primeros minutos» del laboratorio (fuente ap_mom, entradas t:N, pb y brk,

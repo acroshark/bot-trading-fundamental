@@ -428,10 +428,6 @@ def adjusted_credibility(cred, outlet: str | None = None, weight: float | None =
     return int(max(0, min(100, round(c * w))))
 
 
-def pesos_actuales() -> dict[str, float]:
-    return dict(_PESOS)
-
-
 # ---------------------------------------------------------------- ventanas de apertura
 
 @functools.lru_cache(maxsize=128)
