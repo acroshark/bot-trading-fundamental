@@ -1261,3 +1261,195 @@ def test_reglas_del_usuario_aceptan_el_ticket_del_modo_impulso(env, monkeypatch)
     p = env.broker.positions["a-europa-2026-10-23-btc-1"]
     assert p["hold_until"] == T0 + 168 * 60 * MIN and p["hold_label"] == "7 días de seguridad" and p["be_r"] is None
     assert p["tp2"] == pytest.approx(91.0) and p["sl"] == pytest.approx(103.0) and p["trail_pct"] is None
+
+
+# ---------------------------------------------------------------- huecos: posiciones sin gestionar (hallazgo n.º 47)
+
+def velas(desde_min: int, hasta_min: int, px=100.0, at=None) -> list[list]:
+    """Velas de 1 min planas en px de T0 + desde_min a T0 + hasta_min; at = {minuto: (o, h, l, c)} las cambia."""
+    out = []
+    for k in range(desde_min, hasta_min):
+        o, h, l, c = (at or {}).get(k, (px, px, px, px))
+        out.append([T0 + k * MIN, o, h, l, c, 1.0])
+    return out
+
+
+def test_replay_gap_puro():
+    sl, tp = 98.0, 106.0
+    flat = velas(0, 10)
+    assert paper.replay_gap("long", sl, tp, None, flat)["salida"] is None
+    r = paper.replay_gap("long", sl, tp, None, velas(0, 10, at={3: (100, 100.5, 97.5, 99)}))
+    assert r["salida"] == "stop" and r["px"] == sl and r["at"] == T0 + 3 * MIN and r["n"] == 4
+    r = paper.replay_gap("long", sl, tp, None, velas(0, 10, at={5: (100, 107, 99, 105)}))
+    assert r["salida"] == "objetivo" and r["px"] == tp and r["at"] == T0 + 5 * MIN and r["best"] == 107
+    # toca los dos en la misma vela: el stop (el peor caso)
+    assert paper.replay_gap("long", sl, tp, None, velas(0, 10, at={2: (100, 107, 97, 100)}))["salida"] == "stop"
+    # la apertura salta el stop: sale a la apertura (peor que el stop)
+    r = paper.replay_gap("long", sl, tp, None, velas(0, 10, at={4: (96, 96.5, 95, 96)}))
+    assert r["salida"] == "stop" and r["px"] == 96
+    # tope de tiempo cumplido sin tocar nada: sale a la apertura de la vela de esa hora
+    r = paper.replay_gap("long", sl, tp, T0 + 6 * MIN + 30_000, velas(0, 10, px=101))
+    assert r["salida"] == "tiempo" and r["px"] == 101 and r["at"] == T0 + 7 * MIN
+    # corto: el stop está arriba
+    r = paper.replay_gap("short", 102.0, 94.0, None, velas(0, 10, at={1: (100, 102.5, 99, 100)}))
+    assert r["salida"] == "stop" and r["px"] == 102.0
+    # velas de Binance en USDT con un 0,1 % de base sobre OKX en USDC: se pasan a la escala de OKX
+    r = paper.replay_gap("long", sl, tp, None, velas(0, 5, px=100.1, at={2: (100.1, 100.1, 98.05, 100.1)}),
+                         factor=100 / 100.1)
+    assert r["salida"] == "stop"   # 98,05 USDT son 97,95 USDC: por debajo del stop de 98
+    r2 = paper.replay_gap("long", sl, tp, None, velas(0, 5, px=100.1, at={2: (100.1, 100.1, 98.15, 100.1)}),
+                          factor=100 / 100.1)
+    assert r2["salida"] is None
+    assert paper.gap_complete(velas(0, 60), T0, T0 + 60 * MIN)
+    assert not paper.gap_complete(velas(0, 30) + velas(40, 60), T0, T0 + 60 * MIN)
+    assert not paper.gap_complete([], T0, T0 + 60 * MIN)
+
+
+class Velas:
+    """fetch_bars de mentira: velas de 1 min por moneda; falla las primeras `fallos` veces."""
+
+    def __init__(self, series: dict, fallos: int = 0):
+        self.series, self.fallos, self.calls = series, fallos, []
+
+    async def __call__(self, coin, a, b):
+        self.calls.append((coin, a, b))
+        if self.fallos:
+            self.fallos -= 1
+            raise OSError("sin red")
+        return [r for r in self.series.get(coin, []) if a <= r[0] < b]
+
+
+def con_velas(env, fetch) -> PaperBroker:
+    return PaperBroker(env.bus, env.store, env.market, lambda: {"coins": {}}, clock=env.clock,
+                       slip_bps=lambda: env.slip, fetch_bars=fetch)
+
+
+def run(coro):
+    return asyncio.new_event_loop().run_until_complete(coro)
+
+
+def test_hueco_con_el_bot_parado_cierra_en_el_stop_y_a_su_hora(env, monkeypatch):
+    monkeypatch.setattr(config, "USER_RULES", True)
+    env.broker.submit(ticket(stop=2.0, tp2=3.0, winEnd=T0 + 24 * 60 * MIN), "n1", "Titular", "impulso", "Apertura Londres")
+    env.at(1, BTC=100.0)
+    p = env.broker.positions["n1"]
+    sl, entry = p["sl"], p["entry"]
+    assert p["seen"] == T0 + MIN
+    # el bot se para en el minuto 1 y vuelve en el 180: en el 95 el precio tocó el stop
+    fetch = Velas({"BTC": velas(-5, 180, at={95: (99, 99, 97.5, 98)})})
+    env.clock.t = T0 + 180 * MIN
+    env.broker = con_velas(env, fetch)
+    env.broker.step()   # el hueco se ve, pero no se gestiona: ni se cierra al precio de ahora
+    assert "n1" in env.broker.positions and env.broker.portfolio()["positions"][0]["reconstruyendo"] is True
+    env.prices["BTC"] = 120.0   # aunque ahora el precio esté por encima del objetivo, lo que pasó antes manda
+    env.broker.step()
+    assert "n1" in env.broker.positions
+    assert run(env.broker.reconcile()) == 1 and not env.broker.positions
+    t = env.broker.closed[-1]
+    assert t["closed"] == T0 + 95 * MIN and t["exit"] == pytest.approx(sl) and t["R"] < -1
+    assert "Stop de pérdida con el bot sin gestionarla" in t["reason"] and "Binance" in t["reason"]
+    assert t["hueco"]["desde"] == T0 + MIN and t["hueco"]["hasta"] == T0 + 180 * MIN and t["hueco"]["completo"]
+    [c] = env.evs("closed", "n1")
+    assert c["ts"] == T0 + 180 * MIN and c["patch"]["result"]["closedAt"] == T0 + 95 * MIN
+    row = env.store.db.execute("SELECT closed FROM trades WHERE story='n1'").fetchone()
+    assert row[0] == T0 + 95 * MIN and entry == pytest.approx(100.0)
+
+
+def test_hueco_con_el_objetivo_y_con_el_tope_de_tiempo(env, monkeypatch):
+    monkeypatch.setattr(config, "USER_RULES", True)
+    env.broker.submit(ticket(stop=1.5, tp2=3.0, winEnd=T0 + 24 * 60 * MIN), "n1")
+    env.broker.submit(ticket(coin="ETH", side="short", stop=1.5, tp2=3.0, instrument="perp",
+                             winEnd=T0 + 120 * MIN), "n2")
+    env.at(1)
+    tp = env.broker.positions["n1"]["tp2"]
+    subida = {k: (100.4, 100.4, 100.4, 100.4) for k in range(100, 300)}
+    fetch = Velas({"BTC": velas(-5, 300, at={60: (100, 104.6, 99.9, 104)}), "ETH": velas(-5, 300, at=subida)})
+    env.clock.t = T0 + 300 * MIN
+    env.broker = con_velas(env, fetch)
+    env.broker.step()
+    assert run(env.broker.reconcile()) == 2
+    by = {t["story"]: t for t in env.broker.closed}
+    assert by["n1"]["closed"] == T0 + 60 * MIN and by["n1"]["exit"] == pytest.approx(tp) and "Objetivo" in by["n1"]["reason"]
+    assert by["n2"]["closed"] == T0 + 120 * MIN and "Cierre por tiempo" in by["n2"]["reason"]
+    assert by["n2"]["exit"] == pytest.approx(100.4)
+
+
+def test_hueco_sin_salida_sigue_en_vivo_y_lo_apunta(env, monkeypatch):
+    monkeypatch.setattr(config, "USER_RULES", True)
+    env.broker.submit(ticket(stop=2.0, tp2=3.0, winEnd=T0 + 24 * 60 * MIN), "n1")
+    env.at(1)
+    fetch = Velas({"BTC": velas(-5, 60, at={30: (101, 103, 100.5, 102)})})
+    env.clock.t = T0 + 60 * MIN
+    env.broker = con_velas(env, fetch)
+    env.broker.step()
+    assert run(env.broker.reconcile()) == 0
+    p = env.broker.positions["n1"]
+    assert p["high_water"] == pytest.approx(103) and p["huecos"][0]["velas"] == 59 and p["seen"] == T0 + 60 * MIN
+    assert any("hueco revisado" in e["title"] for e in env.evs("manage", "n1"))
+    env.at(61, BTC=97.0)   # y sigue gestionándose en vivo: el stop salta
+    assert not env.broker.positions and env.broker.closed[-1]["reason"] == "Stop de pérdida"
+    assert env.broker.closed[-1]["huecos"][0]["desde"] == T0 + MIN
+
+
+def test_hueco_sin_velas_reintenta_y_al_final_sigue_marcado(env, monkeypatch):
+    monkeypatch.setattr(config, "USER_RULES", True)
+    env.broker.submit(ticket(stop=2.0, tp2=3.0, winEnd=T0 + 24 * 60 * MIN), "n1")
+    env.at(1)
+    fetch = Velas({"BTC": velas(-5, 60)}, fallos=99)
+    env.clock.t = T0 + 60 * MIN
+    env.broker = con_velas(env, fetch)
+    env.broker.step()
+    for k in range(paper.GAP_TRIES):
+        assert run(env.broker.reconcile()) == 0
+        assert ("n1" in env.broker._gaps) == (k < paper.GAP_TRIES - 1)
+        env.clock.t += paper.GAP_RETRY_S * 1000
+    assert len(fetch.calls) == paper.GAP_TRIES
+    p = env.broker.positions["n1"]
+    assert p["huecos"][0]["completo"] is False and p["huecos"][0]["velas"] == 0
+
+
+def test_posicion_guardada_sin_seen_usa_la_ultima_actividad(env, monkeypatch):
+    monkeypatch.setattr(config, "USER_RULES", True)
+    env.broker.submit(ticket(stop=2.0, tp2=3.0, winEnd=T0 + 24 * 60 * MIN), "n1")
+    env.at(1)
+    body = json.loads(env.store.db.execute("SELECT body FROM trades WHERE story='n1'").fetchone()[0])
+    body.pop("seen")
+    env.store.db.execute("UPDATE trades SET body=? WHERE story='n1'", (json.dumps(body),))
+    env.bus.publish({"type": "event", "ts": T0 + 40 * MIN, "kind": "triaged", "agent": "local", "story": "x",
+                     "title": "t", "patch": {}})
+    env.clock.t = T0 + 100 * MIN
+    b = con_velas(env, Velas({"BTC": velas(-5, 100)}))
+    assert b.positions["n1"]["seen"] == T0 + 40 * MIN
+
+
+def test_perpetuo_cobra_el_funding_del_hueco_antes_de_cerrar(env, monkeypatch):
+    monkeypatch.setattr(config, "USER_RULES", True)
+    t16 = int(datetime(2026, 10, 23, 16, 0, tzinfo=UTC).timestamp() * 1000)   # liquidación de las 16:00 UTC
+    k16 = (t16 - T0) // MIN
+    env.broker.submit(ticket(side="short", stop=2.0, tp2=3.0, instrument="perp", winEnd=T0 + 24 * 60 * MIN), "n1")
+    env.at(1)
+    env.broker.positions["n1"]["funding_rate"] = 0.01
+    fetch = Velas({"BTC": velas(-5, k16 + 30, at={k16 + 10: (100, 102.5, 100, 102)})})
+    env.clock.t = T0 + (k16 + 30) * MIN
+    env.broker = con_velas(env, fetch)
+    env.broker.positions["n1"]["funding_rate"] = 0.01
+    env.broker.step()
+    assert run(env.broker.reconcile()) == 1
+    t = env.broker.closed[-1]
+    assert t["closed"] == t16 + 10 * MIN and t["funding"] > 0   # el corto cobra la liquidación de las 16:00
+    assert len([e for e in env.evs("manage", "n1") if "funding" in e["title"]]) == 1
+
+
+def test_sin_precios_un_rato_con_el_bot_en_marcha_tambien_es_un_hueco(env, monkeypatch):
+    monkeypatch.setattr(config, "USER_RULES", True)
+    fetch = Velas({"BTC": velas(-5, 30, at={10: (100, 100, 97, 98)})})
+    env.broker = con_velas(env, fetch)
+    env.updated = {c: T0 for c in config.COINS}
+    env.broker.submit(ticket(stop=2.0, tp2=3.0, winEnd=T0 + 24 * 60 * MIN), "n1")
+    env.at(20)   # precios de hace 20 min: sin gestionar
+    assert "n1" in env.broker.positions and not env.broker._gaps
+    env.updated = {c: T0 + 20 * MIN for c in config.COINS}
+    env.at(20)   # vuelven los precios: hueco de 19 min
+    assert "n1" in env.broker._gaps
+    env.clock.t = T0 + 21 * MIN
+    assert run(env.broker.reconcile()) == 1 and env.broker.closed[-1]["closed"] == T0 + 10 * MIN

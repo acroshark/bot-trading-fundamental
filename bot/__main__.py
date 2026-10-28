@@ -19,9 +19,10 @@ import truststore
 from aiohttp import web
 
 from . import agenda, config
-from .apertura import OpeningEngine, pick_strategy, signal_getter
+from .apertura import PAIRS, OpeningEngine, pick_strategy, signal_getter
 from .aprendizaje import Aprendizaje, CacheBars
 from .backtest import Backtester
+from .backtest_aperturas import fetch_api as klines_1m
 from .bus import Bus
 from .claude_agents import Phase2
 from .desk import NewsDesk
@@ -128,7 +129,12 @@ async def main() -> None:
         state = bus.state.get
         predictor = Predictor(bus, store, lambda: state("trend"), lambda: state("orderflow"), lambda: state("market"), bt,
                               get_reaccion=lambda: state("cripto_aperturas"))
-        broker = PaperBroker(bus, store, lambda: state("market", {}), lambda: state("orderflow", {}))
+        async def velas_hueco(coin: str, a: int, b: int) -> list[list]:
+            """Velas de 1 min de Binance de [a, b) para reconstruir el hueco de una posición paper (n.º 47)."""
+            return await klines_1m(session, PAIRS[coin], a, b, now_ms())
+
+        broker = PaperBroker(bus, store, lambda: state("market", {}), lambda: state("orderflow", {}),
+                             fetch_bars=velas_hueco)
         phase2 = Phase2(bus, store, session, local, lambda: state("predictions"), lambda: state("trend"),
                         lambda: state("orderflow"), lambda: state("market"), bt, broker.portfolio, broker.submit)
         # Motor de aperturas en modo impulso (la operativa del usuario: seguir el impulso de los primeros minutos,

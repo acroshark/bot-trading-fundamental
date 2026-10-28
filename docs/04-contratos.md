@@ -179,13 +179,13 @@ Se publica como mucho cada 10 s y solo si ha cambiado. El detalle por feed sale 
  "positions": [{"story": "n…", "coin": "SOL", "side": "long|short", "qty": 3.1, "entry": 104.9, "sl": 103.2,
                 "trail_pct": 1.2, "high_water": 105.6, "opened": 0, "riskUsd": 50, "notional": 3250,
                 "headline": "…", "strategy": "seguir-bolsa-anterior", "window": "Apertura Londres",
-                "instrument": "spot|perp", "funding": 0.0, "tags": {}}],
+                "instrument": "spot|perp", "funding": 0.0, "tags": {}, "reconstruyendo": false, "huecos": null}],
  "pending": [{"story": "n…", "deadline": 0, "mode": "veto|manual", "coin": "SOL", "side": "long|short"}],
  "scheduled": [{"story": "n…", "at": 0, "expires": 0, "coin": "SOL", "side": "long|short"}],
  "closed": [ /* últimas 50 operaciones, formato de 3.2 */ ],
  "limits": {"risk_per_trade_pct": 0.5, "max_daily_loss_pct": 3, "max_positions": 4, "day_loss_pct": 0.4,
             "halted": false, "halt_until": null},
- "mode": "auto|veto|manual", "halted": false, "caps": ["halt", "cancel"]}
+ "mode": "auto|veto|manual", "halted": false, "caps": ["halt", "cancel"], "cuenta": null}
 ```
 - `mode`: modo de aprobación actual. Lo cambia la web con `{"type": "mode"}` (3.3).
 - `halted`: parada manual del paper, puesta y quitada desde la web con `halt` y `resume` (3.3). No es lo mismo que `limits.halted`, que es la pausa automática por la pérdida máxima del día y dura hasta `limits.halt_until` (medianoche de Madrid).
@@ -200,6 +200,17 @@ Se publica como mucho cada 10 s y solo si ha cambiado. El detalle por feed sale 
   - cuenta su margen (la mitad del nominal) en la exposición, y el nominal total en perpetuos no pasa de 2 veces el capital (2:1);
   - la comisión supuesta es la misma que en contado (0,10 % por lado), la prudente.
 - `tags`: las etiquetas del ticket (2.6), tal cual.
+- `cuenta`: la cartera de prueba con nombre que deja `scripts/nueva_cartera_paper.py` (`{nombre, eur, eur_usdc, usdc,
+  desde, ficticia}`; su `usdc` manda sobre `BOT_PAPER_EQUITY`) o `null`. Va también en `GET /api/resultados` (3.2).
+- **Huecos** (hallazgo n.º 47): cada posición guarda la última vez que se gestionó con precio (`seen`, en la tabla
+  `trades`; las guardadas antes, la hora del último evento de la base). Si pasa más de 2 min sin gestionarse (el bot
+  parado o caído, o sin precios), no se gestiona (`reconstruyendo: true`) hasta reconstruir el hueco con las velas de
+  1 min de Binance al contado (pasadas a la escala de OKX EU con el cociente de los dos precios al empezar el hueco):
+  si tocó el stop, el objetivo o el tope de tiempo, se cierra a ese nivel y a esa hora (el stop con su deslizamiento y,
+  si la vela abre más allá, a su apertura; si toca stop y objetivo en la misma vela, el stop), con el funding de las
+  liquidaciones de por medio al precio de su hora. Si no, sigue en vivo y lo apunta en `huecos`
+  `[{desde, hasta, velas, factor, completo, fuente}]` (y un `manage` «hueco revisado»). Sin velas completas tras 10
+  intentos (uno por minuto), sigue en vivo con `completo: false`.
 
 ### 2.6 Eventos nuevos o ampliados (`"type": "event"`)
 
@@ -701,7 +712,7 @@ Las órdenes de la web al bot (aprobar, cerrar, cambiar el modo, detener, reanud
 
 ### 3.2 Resultados (`GET /api/resultados`)
 ```json
-{"start_equity": 10000, "equity": 10012.3,
+{"start_equity": 10000, "equity": 10012.3, "cuenta": null,
  "trades": [{"id": "t…", "story": "n…", "strategy": "…", "window": "Apertura Londres", "market": "londres", "coin": "SOL",
              "side": "long", "qty": 3.1, "entry": 104.9, "exit": 106.0, "sl_initial": 103.2, "trail_pct": 1.2,
              "opened": 0, "closed": 0, "reason": "Stop dinámico", "pnl": 3.4, "pnl_pct": 1.05, "R": 0.7, "fees": 0.65,
@@ -712,6 +723,10 @@ Las órdenes de la web al bot (aprobar, cerrar, cambiar el modo, detener, reanud
  "equity_curve": [[0, 10000.0]], "daily": [{"date": "2026-10-23", "pnl": 0, "pnl_pct": 0, "n": 0}]}
 ```
 
+- `cuenta` (2.5). Una operación cerrada al reconstruir un hueco (2.5, «Huecos») lleva `hueco` `{desde, hasta, velas,
+  factor, completo, fuente}`, su `closed` es la hora de la salida reconstruida (el evento `closed` sale al reconstruirla,
+  con `result.closedAt` = esa hora) y `reason` termina en «con el bot sin gestionarla (a las HH:MM Madrid, reconstruido
+  con velas de 1 min de Binance)»; una que pasó huecos sin salir lleva `huecos`.
 - `instrument`, `funding` (USDC; + cobrado, − pagado) y `commissions` (las comisiones de entrada y salida). `fees` = `commissions` − `funding`: el funding entra en el resultado, en `pnl` y en R. Las operaciones del motor de aperturas llevan `tags` (2.6, con `origen: "motor_aperturas"`) y su estrategia es `impulso-<largo|corto>-<noticia-a-favor|noticia-en-contra|sin-noticia>` (también con «6 diarias»: la versión la dice `tags.estrategia_firma` y el preset `tags.preset`). Las de la entrada por noticia (2.16) llevan `tags.origen: "noticia_fiable"` y `tags.story` (la de la noticia), ventana «Noticia fiable» y estrategia `noticia-fiable-<largo|corto>`. El evento `closed` mantiene sus campos de siempre.
 
 ### 3.3 Órdenes de la web al bot (WebSocket `/events`)
