@@ -208,7 +208,9 @@ se reprograman repartidos (antes tardaban hasta 30 min en volver).
   - cobra o paga el **funding** en cada liquidación (00:00, 08:00 y 16:00 UTC), con la tasa de `market.flow[moneda].funding` escalada a 8 h con `funding_h` o, sin dato, la última conocida. Con tasa positiva los largos pagan y los cortos cobran;
   - `funding` (USDC, + cobrado, − pagado) es el acumulado de la posición; cada liquidación publica un `manage` con `exec.funding` y `exec.funding_n`;
   - cuenta su margen (la mitad del nominal) en la exposición, y el nominal total en perpetuos no pasa de 2 veces el capital (2:1);
-  - la comisión supuesta es la misma que en contado (0,10 % por lado), la prudente.
+  - la comisión es `config.FEE_PERP_PCT`: por defecto la misma que en contado (0,10 % por lado), la prudente; la real
+    de X-Perps es 0,05 % (`BOT_FEE_PERP_PCT=0.05`). El contado usa `config.FEE_PCT`: 0,10 % con cuenta X-Perps (por
+    defecto) o 0,35 % sin ella (`BOT_OKX_XPERPS=0`); docs/05, sección 21.
 - `tags`: las etiquetas del ticket (2.6), tal cual.
 - **Reglas del usuario en el propio paper** (con `config.USER_RULES`, para TODOS los orígenes: motor, entrada por noticia
   y fase 2): stop ≥ 1,5 %, objetivo ≥ 2R y objetivo ≥ 3 % neto de costes (`stopPct × tp2R − coste de ida y vuelta` ≥
