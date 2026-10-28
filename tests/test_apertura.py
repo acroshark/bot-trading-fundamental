@@ -1523,6 +1523,7 @@ async def test_motor_pausado_por_la_evolucion_mide_pero_no_entra(tmp_path, live_
     eng, sent, _ = evo_engine(tmp_path, now, {"BTC": (1, 0.3)})
     assert eng.paused and eng.notice.startswith("Campeón pausado por la evolución (solo paper)")
     assert "Pierde -0,6 R" in eng.notice and eng.view()["estrategia_cargada"]["pausada"] is True
+    assert eng.view()["estrategia_cargada"]["motivo"] == "Pierde -0,6 R en 30 operaciones"   # n.º 20: la web lo enseña
     await eng.step()
     run = _rimp(eng, "BTC")
     assert not sent and run.done and "pausado por la evolución" in run.end_why

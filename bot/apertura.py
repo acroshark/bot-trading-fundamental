@@ -2133,6 +2133,8 @@ class OpeningEngine:
         self.preset = preset_info(self.p, self.activa)   # {preset: «impulso» | «seis» | None, nombre, descripcion}
         self.loaded = {"firma": self.firma, "ts": now, "pausada": self.paused, "fuente": self.source,
                        "registro": (self.activa or {}).get("registro"), "preset": self.preset["preset"]}
+        if self.paused:   # el motivo real de la pausa, para el aviso de la web (hallazgo n.º 20)
+            self.loaded["motivo"] = _cut((self.activa or {}).get("motivo") or "sin motivo", 300)
 
     def _session_busy(self, now: int) -> bool:
         """¿Hay alguna apertura armándose o en su sesión de entrada? Entonces no se cambian los parámetros."""
