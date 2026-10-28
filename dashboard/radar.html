@@ -2783,7 +2783,7 @@ function evoMedRow(r, fvOn, P){
   return `<tr${S.evoSel===String(m.medio) ? ' class="sel"' : ""}>
     <td class="wrapc"><button type="button" class="chip" data-evo-medio="${esc(m.medio)}" title="Ver su acierto por horizonte">${esc(short(m.nombre || m.medio, 44))}</button>${sub.length ? `<br><span class="note">${esc(sub.join(" · "))}</span>` : ""}</td>
     <td>${est ? `<span class="estchip ${esc(est)}">${esc(FV_EST[est] || est)}</span>` : '<span class="estchip sin">sin estado</span>'}${f && f.manual ? `<br><span class="note">a mano${okT(f.manual_hasta) ? " hasta el " + madDM(f.manual_hasta) : ""}</span>` : ""}${f && isObj(f.sugerencia) ? `<br><span class="note" title="${esc(f.sugerencia.motivo || "")}">sugerido: ${esc((FV_EST[f.sugerencia.estado] || f.sugerencia.estado || "").toString().toLowerCase())}</span>` : ""}</td>
-    <td class="r mono">${isNum(m.peso) ? "×" + nf(m.peso,2) : "–"}${isNum(m.peso_manual) ? `<br><span class="note">fijado a mano</span><br><button type="button" class="btn" data-apr-auto="${esc(m.medio)}" title="Deja que el aprendizaje vuelva a decidir su peso">Volver al automático</button>` : ""}</td>
+    <td class="r mono">${isNum(m.peso) ? "×" + nf(m.peso,2) : "–"}${isNum(m.peso_manual) ? `<br><span class="note">fijado a mano</span><br><button type="button" class="btn" data-apr-auto="${esc(m.medio)}" title="Deja que el aprendizaje vuelva a decidir su peso">Volver al automático</button>` : ""}${m.medio!=null ? `<br><button type="button" class="btn" data-apr-fijar="${esc(m.medio)}" title="Fija a mano cuánto cuentan sus noticias (0 a 1,5; 1 = neutro)">Fijar peso</button>` : ""}</td>
     <td class="mono">${bar}${p01(m.acierto)}${isNum(m.bruto) || isNum(m.base) ? `<br><span class="note">bruto ${p01(m.bruto)} · base ${p01(m.base)}</span>` : ""}</td>
     <td class="r mono">${isNum(m.independientes) ? `${vigN(m.independientes)}/${vigN(minC)} bloques<br><span class="note">${vigN(m.dias)}/${vigN(minD)} días · ${vigN(m.casos)} noticias</span>` : '<span class="note">sin medir</span>'}</td>
     <td class="r mono">${isNum(m.ventanas) ? `${p01(m.ventanas)}<br><span class="note">${vigN(m.ventanas_casos)} casos</span>` : "–"}</td>
@@ -3119,6 +3119,22 @@ function aprAuto(medio){
     confirmLater(() => S.aprPend!==p, "El bot no ha confirmado el cambio de peso: mira el historial de cambios o vuelve a intentarlo.");
   }
 }
+// Peso de un medio fijado a mano (n.º 22): de 0 a 1,5 (1 = neutro), con confirmación. Aprendizaje.fijar_peso; se puede
+// revertir o volver al automático. Solo cambia cuánto cuentan sus noticias en la señal, nunca las reglas de operación.
+function aprFijar(medio){
+  if (typeof medio!=="string" || !medio || medio.length > 200) return;
+  if (!S.live){ toast("Ejemplo: en la demostración no se envía nada al bot.", 5000); return; }
+  const raw = typeof prompt==="function" ? prompt(`Peso de «${medio}» de 0 a 1,5 (1 = neutro, 0 = sus noticias no cuentan):`, "1") : null;
+  if (raw==null) return;
+  const v = Number(String(raw).trim().replace(",", "."));
+  if (!isFinite(v) || v < 0 || v > 1.5){ toast("El peso tiene que ser un número de 0 a 1,5.", 5000); return; }
+  if (!confirm(`¿Fijar el peso de «${medio}» en ×${nf(v,2)}? Queda en el historial y se puede revertir; tus reglas de operación no se tocan. Solo paper.`)) return;
+  if (sendBot({type:"peso_medio", medio, peso:v, motivo:"Fijado a mano desde la web"})){
+    const p = S.aprPend = {id:medio, t:Date.now(), txt:`Hecho: «${medio}» con peso ×${nf(v,2)} fijado a mano`};
+    toast("Orden enviada al bot. Pendiente de que la confirme.", 5000);
+    confirmLater(() => S.aprPend!==p, "El bot no ha confirmado el cambio de peso: mira el historial de cambios o vuelve a intentarlo.");
+  }
+}
 // «orden_web» (server.order_done): resultado de una orden de la web sobre fuentes o pesos. Solo avisa de la pendiente.
 function onOrden(m){
   const ok = m.ok!==false, why = typeof m.why==="string" && m.why ? m.why : "sin motivo", reciente = p => !isNum(m.ts) || m.ts >= p.t - 60000;
@@ -3157,6 +3173,7 @@ function evoClick(t){   // true si el clic era de la pestaña Evolución
     evoSend({type:"evolucion", accion:"revertir", id:rv.dataset.evoRevertir}); return true; }
   const fa = t.closest("[data-fv-acc]"); if (fa){ fvAction(fa.dataset.fvAcc, fa.dataset.fvId); return true; }
   const aa = t.closest("[data-apr-auto]"); if (aa){ aprAuto(aa.dataset.aprAuto); return true; }
+  const af = t.closest("[data-apr-fijar]"); if (af){ aprFijar(af.dataset.aprFijar); return true; }
   const mm = t.closest("[data-evo-medio]");
   if (mm){ const o = mm.dataset.evoMedio || ""; S.evoSel = o && o!==S.evoSel ? o : null; if (S.evoSel) loadMedio(S.evoSel); evoBump(); return true; }
   const dd = t.closest("[data-evo-dias]"); if (dd){ S.evoF.dias = +dd.dataset.evoDias || 0; loadEvo("hist"); evoBump(); return true; }
@@ -4008,8 +4025,22 @@ function simOrderflow(){
 const BAL_HOURS = 6;
 // Una noticia macro o geopolítica (con «reflejo») solo cuenta si la cripto la confirma; anyReflejo la mide igualmente
 // para enseñarla aparte en la balanza como «no cuenta».
+// Peso aprendido de cada medio (aprendizaje: 0 a 1,5; 1 = neutro), de los rankings del último «aprendizaje».
+let _pesoMedios = {apr:null, map:new Map()};
+function medioPeso(outlet){
+  if (_pesoMedios.apr !== S.apr){ const map = new Map();
+    for (const r of evoMedios()) if (isNum(r.m.peso)) map.set(String(r.m.medio).toLowerCase(), r.m.peso);
+    _pesoMedios = {apr:S.apr, map}; }
+  const p = outlet ? _pesoMedios.map.get(String(outlet).toLowerCase()) : null;
+  return isNum(p) ? Math.max(0, Math.min(1.5, p)) : 1;
+}
 function newsTilt(st, now, anyReflejo){
   if (!st || !st.t0 || now - st.t0 > BAL_HOURS*3600e3) return null;
+  // Como el motor (contrato 2.9 y 2.6, n.º 19): las de fuentes silenciadas o retiradas no cuentan y el resto pesa por el
+  // peso de su fuente (activa 1, prueba 0,5) y el aprendido de su medio.
+  if (st.srcState==="silenciada" || st.srcState==="retirada") return null;
+  const sw = isNum(st.srcWeight) ? Math.max(0, Math.min(1, st.srcWeight)) : 1, mw = medioPeso(st.outlet);
+  if (sw <= 0 || mw <= 0) return null;
   if (!anyReflejo && !reflejoOk(st)) return null;
   if (st.final==="unverified" || st.final==="lowprio" || (st.verify && st.verify.score < 0.7)) return null;
   if (st.final==="noimpact" || (st.impact && st.impact.drop)) return null;   // archivada por el analista: no vale su triaje
@@ -4025,8 +4056,9 @@ function newsTilt(st, now, anyReflejo){
   else return null;
   if (!dir || mag <= 0) return null;
   const imp = tr && tr.importancia != null ? tr.importancia/10 : 0.6, conf = Math.min(3, (st.corrob||[]).length);
-  const w = mag/100 * cred/100 * imp * Math.exp(-(now-st.t0)/3600e3/3) * (1 + 0.15*conf) * (im ? 1.3 : 1);
-  return {dir, w, coins: coins && coins.length ? coins : null, why, cred, credLbl: im ? "conf." : "cred.", imp: tr ? tr.importancia : null};
+  const w = mag/100 * cred/100 * imp * Math.exp(-(now-st.t0)/3600e3/3) * (1 + 0.15*conf) * (im ? 1.3 : 1) * sw * mw;
+  return {dir, w, coins: coins && coins.length ? coins : null, why, cred, credLbl: im ? "conf." : "cred.", imp: tr ? tr.importancia : null,
+          prueba: st.srcState==="prueba", pesoMedio: mw};
 }
 function newsBalance(now){
   const by = Object.fromEntries(COINS.map(c => [c, {buy:0, sell:0, n:0}])), items = [], waiting = [];
@@ -4428,7 +4460,8 @@ const World = (() => {
   function newsLi(x, now, wmax){
     const st = x.st, tr = st.triage || {}, rf = reflejoShown(st), head = tr.resumen && tr.resumen !== st.headline ? tr.resumen : st.headline;
     const meta = [st.src, "hace " + dur(now - st.t0), tr.importancia!=null ? `imp. ${tr.importancia}/10` : null, x.cred!=null ? `${x.credLbl} ${nf(x.cred,0)} %` : null,
-      x.coins ? x.coins.join(", ") : "todas", (st.corrob||[]).length ? `+${st.corrob.length} medios` : null].filter(Boolean).join(" · ");
+      x.coins ? x.coins.join(", ") : "todas", (st.corrob||[]).length ? `+${st.corrob.length} medios` : null,
+      x.prueba ? "fuente en prueba (pesa la mitad)" : null, isNum(x.pesoMedio) && x.pesoMedio !== 1 ? `peso del medio ×${nf(x.pesoMedio,2)}` : null].filter(Boolean).join(" · ");
     const tag = rf ? `<span class="rft ${reflejoInfo(rf)[0]}">${esc(reflejoInfo(rf)[1])}${isNum(rf.mov_pct) ? ` · ${pct(rf.mov_pct,2)}` : ""}</span>` : "";
     return `<li data-story="${esc(st.id)}"><span class="ar ${x.dir>0?"w-pos":"w-neg"}">${x.dir>0?"▲":"▼"}</span><div><div class="nt">${esc(head || "")}</div><div class="nm">${esc(meta)}</div>${tag}
       ${wmax ? `<div class="wt" style="width:${Math.max(6, x.w/wmax*100)}%;background:${x.dir>0?"#3be3a0":"#ff6b6b"}"></div>` : ""}</div></li>`;

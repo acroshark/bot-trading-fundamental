@@ -2010,3 +2010,38 @@ def test_evolucion_ensena_postmortems_y_acierto_por_dimension():
     assert "Ganó porque el impulso siguió." in r["pm"] and "Explicado" in r["pm"] and "virtual (vigilancia)" in r["pm"]
     assert 'data-story="a-europa-btc-1"' in r["pm"] and 'data-story="v9"' not in r["pm"]
     _sin_null(r["nivel"], r["pm"], r["moneda"])
+
+
+def test_balanza_con_el_peso_de_la_fuente_y_del_medio():
+    """Hallazgo n.º 19: la balanza de la web cuenta como el motor: las de fuentes silenciadas o retiradas no cuentan; una
+    en prueba pesa la mitad; y el peso aprendido del medio (aprendizaje) multiplica."""
+    r = run("""H.open(); reset();
+      const tr = {tipo: "exchange", importancia: 7, credibilidad: 80, sentimiento: "alcista",
+                  repercusion: {direccion: 60, magnitud: 70, activos: ["BTC"]}, monedas: ["BTC"]};
+      const story = (id, extra) => H.recv(ev("captured", id, {headline: "h " + id, src: "s", tier: "T1", t0: now, coins: ["BTC"],
+                                                              clase: "cripto", outlet: "a.com", ...extra}), ev("triaged", id, {triage: tr}));
+      story("n1", {srcState: "activa", srcWeight: 1}); story("n2", {srcState: "prueba", srcWeight: 0.5});
+      story("n3", {srcState: "silenciada", srcWeight: 0}); story("n4", {outlet: "bueno.com"});
+      H.recv({type: "aprendizaje", ts: now, estado: "ok", medios_mejores: [{medio: "bueno.com", peso: 1.25}]});
+      const w = id => { const t = newsTilt(S.stories.get(id), Date.now()); return t ? t.w : null; };
+      return {w1: w("n1"), w2: w("n2"), w3: w("n3"), w4: w("n4"), p2: newsTilt(S.stories.get("n2"), Date.now()).prueba};""")
+    assert r["w3"] is None and r["p2"] is True
+    assert abs(r["w2"] / r["w1"] - 0.5) < 1e-9 and abs(r["w4"] / r["w1"] - 1.25) < 1e-9
+
+
+def test_fijar_a_mano_el_peso_de_un_medio():
+    """Hallazgo n.º 22: desde la web se puede fijar a mano el peso de un medio (0 a 1,5), con confirmación; un valor
+    fuera de rango no se envía."""
+    r = run(EVO + MEDIOS + """H.open(); reset();
+      H.recv(evo(), apr({medios_mejores: [M("agencia.example", {peso: 1.0, veredicto: "neutro"})]}), fvMsg());
+      S.fvList = LISTA; S.tab = "evo"; evoBump(); renderAll(true);
+      const html = H.el("#evoMedia").innerHTML, asked = []; confirm = m => (asked.push(m), true);
+      prompt = () => "1,2"; H.fire("click", {"data-apr-fijar": "agencia.example"});
+      prompt = () => "7"; H.fire("click", {"data-apr-fijar": "agencia.example"}); const t = H.el("#toast").textContent;
+      prompt = () => null; H.fire("click", {"data-apr-fijar": "agencia.example"});
+      return {html, asked, t, sent: H.sent()};""")
+    assert 'data-apr-fijar="agencia.example"' in r["html"] and "Fijar peso" in r["html"]
+    assert len(r["asked"]) == 1 and "×1,20" in r["asked"][0] and "se puede revertir" in r["asked"][0]
+    assert r["t"] == "El peso tiene que ser un número de 0 a 1,5."
+    assert [m for m in r["sent"] if m.get("type") == "peso_medio"] == [
+        {"type": "peso_medio", "medio": "agencia.example", "peso": 1.2, "motivo": "Fijado a mano desde la web"}]
