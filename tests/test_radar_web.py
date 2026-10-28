@@ -2063,3 +2063,18 @@ def test_aviso_si_el_bot_estuvo_parado():
     assert r["a"]["hidden"] is False and "parado 33,0 h" in r["a"]["txt"] and "en Madrid" in r["a"]["txt"]
     assert "velas de 1 min" in r["a"]["txt"] and r["b"]["hidden"] is False and "parado 19 min" in r["b"]["txt"]
     assert r["c"]["hidden"] is True and r["d"]["hidden"] is True
+
+
+def test_aviso_si_el_reloj_se_desvia():
+    """Hallazgo n.º 53: si el reloj del PC se desvía más de 2 s de OKX, la web lo dice; al corregirse, desaparece."""
+    r = run("""H.open(); reset();
+      const vista = () => ({hidden: H.el("#avisoReloj").hidden, txt: H.el("#avisoReloj").textContent});
+      const a0 = vista();
+      H.recv({type: "reloj", ts: now, fuente: "OKX", desfase_ms: 3000, ok: false, aviso: "El reloj de este PC va 3,0 s adelantado <b>"});
+      const a = vista();
+      H.recv({type: "reloj", ts: now, fuente: "OKX", desfase_ms: 200, ok: true, aviso: null});
+      const b = vista();
+      H.recv({type: "reloj", ts: now, fuente: null, desfase_ms: null, ok: null, aviso: null, error: "OKX: sin red"});
+      return {a0, a, b, c: vista()};""")
+    assert r["a0"]["hidden"] is True and r["a"]["hidden"] is False and r["a"]["txt"].startswith("El reloj de este PC va 3,0 s")
+    assert r["b"]["hidden"] is True and r["c"]["hidden"] is True

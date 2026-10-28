@@ -663,6 +663,7 @@ details.evo-more p{margin:6px 0 0}
   </nav></div>
 </header>
 <div class="aviso-demo" id="avisoParado" role="status" hidden></div>
+<div class="aviso-demo" id="avisoReloj" role="status" hidden></div>
 <div class="aviso-demo" id="avisoDemo" hidden>Esto es una <b>copia de demostración con datos de ejemplo</b>: no puede ver tu PC. Lo real (noticias, precios y tu cartera de prueba de 100 €) está en el acceso directo «Radar Fundamental» de tu PC (http://127.0.0.1:8765).</div>
 
 <main class="wrap">
@@ -1273,6 +1274,8 @@ function ingest(msg){
   if (msg.type==="calendar") { S.calendar = msg.events; S.dirty=true; }
   if (msg.type==="sources_summary") { S.srcSummary = msg; S.dirty=true; }
   // Totales reales desde el arranque (al final de la foto): sustituyen lo contado con los eventos de la foto (n.º 8)
+  if (msg.type==="reloj") { const el = $("#avisoReloj"), a = typeof msg.aviso === "string" && msg.aviso ? msg.aviso : "";
+    el.hidden = !(msg.ok === false && a); if (!el.hidden) el.textContent = a; }   // hallazgo n.º 53: el reloj del PC se desvía
   if (msg.type==="conteo" && isObj(msg.kinds)) { for (const [k, n] of Object.entries(msg.kinds)) if (isNum(n) && k in S.counts) S.counts[k] = n; S.dirty=true; }
   if (msg.type==="trend") { S.trend = msg.markets; S.dirty=true; }   // índices: ya no se pintan (solo interesa la cripto)
   if (msg.type==="cripto_aperturas") { S.criptoAp = msg; S.dirty=true; }
@@ -1410,6 +1413,7 @@ function resetLive(msg){
   lastFeedSig = "";
   const tag = $("#modeTag"); tag.textContent = `En vivo · paper · fase ${msg.phase}`; tag.className = "mode live";
   avisoParado(msg.hueco);
+  $("#avisoReloj").hidden = true;   // la foto trae después el último «reloj»
   liveControls();
 }
 // Hallazgo n.º 0: si el bot estuvo parado antes de este arranque (5 min o más sin ningún evento), que se vea durante
