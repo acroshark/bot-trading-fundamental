@@ -496,7 +496,8 @@ def make_app(bus: Bus, health, services: Services | None = None) -> web.Applicat
     # ---- fuentes vivas (estado de cada fuente y descubrimiento)
 
     async def api_fv(request: web.Request) -> web.Response:
-        """Estado «fuentes_vivas» con la lista filtrada (?region=&estado=&tipo=feed|medio&limite=) y los candidatos."""
+        """Estado «fuentes_vivas» con la lista filtrada (?region=&estado=&tipo=feed|medio&limite=) y los candidatos (la
+        lista; sus contadores, en candidatos_cuenta: hallazgo n.º 29)."""
         fv = sv.fuentes_vivas
         if not fv:
             return j(bus.state.get("fuentes_vivas") or {"type": "fuentes_vivas", "estado": "apagado", "lista": [],
@@ -507,6 +508,8 @@ def make_app(bus: Bus, health, services: Services | None = None) -> web.Applicat
             raise web.HTTPBadRequest(text="tipo debe ser feed o medio")
         out = {**fv.estado(), "ts": now_ms()}
         out["lista"] = fv.lista(q.get("region") or None, q.get("estado") or None, tipo, q_int(request, "limite", 300, 1, 10_000))
+        # Aquí «candidatos» es la lista (como siempre); los contadores del mensaje del bus van en candidatos_cuenta.
+        out["candidatos_cuenta"] = out["candidatos"]
         out["candidatos"] = fv.candidatos(50)
         return j(out)
 

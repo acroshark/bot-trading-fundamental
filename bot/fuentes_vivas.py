@@ -161,6 +161,7 @@ FEED_RECIENTE_DIAS = 7
 DESCARGA_MAX = 3_000_000
 TIMEOUT = aiohttp.ClientTimeout(total=20)
 ACCEPT = "text/html, application/rss+xml, application/atom+xml, application/xml;q=0.9, */*;q=0.5"
+PRUEBA_TLD = ".invalid"      # dominio reservado (RFC 2606): un medio así es un resto de prueba, no cuenta ni sale
 RELAYS = ("tree",)           # cazadores que reenvían a otros medios (su enlace dice el medio)
 # Redes sociales y plataformas: no tienen un RSS de medio que añadir.
 NO_RSS = {"x.com", "twitter.com", "t.me", "telegram.org", "reddit.com", "youtube.com", "youtu.be", "facebook.com",
@@ -1388,7 +1389,7 @@ class FuentesVivas:
     def estado(self) -> dict:
         """Mensaje «fuentes_vivas» del bus (sin ts)."""
         feeds = Counter(st.estado for st in self.poller.states.values()) if self.poller else Counter()
-        medios = Counter(f.estado for f in self.filas.values() if f.origen == "medio")
+        medios = Counter(f.estado if (f := self.filas.get(k)) else "activa" for k in self._medios(todos=True))
         cand = Counter(r[0] for r in self.store.db.execute("SELECT estado FROM fv_candidatos").fetchall())
         return {"type": "fuentes_vivas", "auto": self.auto, "descubrir": self.descubrir,
                 "feeds": {e: feeds.get(e, 0) for e in ESTADOS}, "medios": {e: medios.get(e, 0) for e in ESTADOS},
@@ -1430,6 +1431,15 @@ class FuentesVivas:
                                     "horas_fallando": round(self.salud.get(clave, 0.0), 1)}})
         return out
 
+    def _medios(self, todos: bool = False) -> set[str]:
+        """Medios conocidos: los que tienen fila (algún cambio de estado) y los medidos; un medio sin fila está activo.
+        La lista enseña solo los medidos con muestra (`CAND_MIN_CASOS`); los contadores, todos (hallazgo n.º 9: daba
+        «0 medios activos» con miles medidos). Los dominios .invalid (RFC 2606, nunca existen) son restos de pruebas
+        y no cuentan ni salen (hallazgo n.º 34); su fila y el historial se quedan como están."""
+        claves = {k for k in self.filas if k.startswith(MEDIO)}
+        claves |= {k for k, c in self.cifras.items() if k.startswith(MEDIO) and (todos or c.indep >= CAND_MIN_CASOS)}
+        return {k for k in claves if not k.endswith(PRUEBA_TLD)}
+
     def lista(self, region: str | None = None, estado: str | None = None, tipo: str | None = None,
               limite: int = 10_000) -> list[dict]:
         """Fuentes con estado, peso, motivo, cifras, protección a mano y nota: primero las retiradas y silenciadas,
@@ -1439,9 +1449,7 @@ class FuentesVivas:
             out += [self._vista(fid, st) for fid, st in self.poller.states.items()
                     if (not region or st.spec.region == region) and (not estado or st.estado == estado)]
         if tipo in (None, "medio") and not region:
-            claves = {k for k in self.filas if k.startswith(MEDIO)}
-            claves |= {k for k, c in self.cifras.items() if k.startswith(MEDIO) and c.indep >= CAND_MIN_CASOS}
-            out += [v for v in (self._vista(k) for k in claves) if not estado or v["estado"] == estado]
+            out += [v for v in (self._vista(k) for k in self._medios()) if not estado or v["estado"] == estado]
         out.sort(key=lambda v: (-ESTADOS.index(v["estado"]), v["nombre"].casefold(), v["id"]))
         return out[:max(1, int(limite))]
 

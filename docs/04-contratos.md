@@ -326,7 +326,7 @@ Estado de la fuente (`srcState`, `srcWeight`; lo decide `bot/fuentes_vivas.py` y
 
 Campos del ticket para el paper:
 - `instrument`: `spot` o `perp` (2.5). La fase 2 lo pone siempre (`perp` en los cortos); el motor de aperturas, según `long_instrument` y `short_instrument`.
-- `tags` (motor de aperturas): `lado`, `instrumento`, `noticia` (`a_favor|en_contra|sin_noticia`), `noticia_fuerza`, `noticia_fiable` (`a_favor|en_contra|ninguna`: noticias de un grupo fiable de las 6 h previas, 2.15) y `noticia_fiable_grupo` (nombre del grupo o null), `apertura_anterior`, `apertura_anterior_pct`, `btc`, `volatilidad_pct`, `impulso_pct`, `medida_min`, `rvol`, `estrategia_firma` (la versión de la estrategia que la abrió, `evolucion.firma_motor`), `origen: "motor_aperturas"` y `preset` (`impulso|seis|null`). El paper las copia en la posición y en la operación de 3.2.
+- `tags` (motor de aperturas): `lado`, `instrumento`, `noticia` (`a_favor|en_contra|neutral`: neutral sin señal clara, fuerza < `min_strength`), `noticia_fuerza`, `noticia_fiable` (`a_favor|en_contra|ninguna`: noticias de un grupo fiable de las 6 h previas, 2.15) y `noticia_fiable_grupo` (nombre del grupo o null), `apertura_anterior`, `apertura_anterior_pct`, `btc`, `volatilidad_pct`, `impulso_pct`, `medida_min`, `rvol`, `estrategia_firma` (la versión de la estrategia que la abrió, `evolucion.firma_motor`), `origen: "motor_aperturas"` y `preset` (`impulso|seis|null`). El paper las copia en la posición y en la operación de 3.2.
 - **Origen de las operaciones** (`origen` en el ticket y en sus `tags`, desde el 28-10-2026): `motor_aperturas` (motor de aperturas, story `a-<ventana>-<fecha>-<moneda>-<n>`, estrategia `impulso-…`) o `noticia_fiable` (entrada por noticia confirmada, 2.16: story `nf-<story de la noticia>-<moneda>`, estrategia `noticia-fiable-largo|noticia-fiable-corto`, ventana «Noticia fiable», `noticia` = la story de la noticia). Sin `origen`: la fase 2 o lo anterior al 28-10-2026.
 - `tags` (entrada por noticia): `origen`, `story` (la de la noticia), `grupo` (clave), `grupo_nombre`, `grupo_tipo`, `acierto`, `ic90_bajo`, `umbral_pct`, `mov_pct`, `min_confirmacion`, `lado` e `instrumento`.
 
@@ -423,7 +423,7 @@ Estado (no evento) de `bot/apertura.py`, cada 3 s como mucho y solo si cambia. D
               "state": "esperando_entrada", "why": "Se sigue el impulso de los 15 primeros min…",
               "coins": {"BTC": {"state": "esperando_entrada", "step": "hora|retroceso|reanudacion|ruptura|null", "signal": 1,
                                 "why": "…", "instrument": "spot|perp|null", "rvol": 3.0, "range": {"hi": 0, "lo": 0},
-                                "news": {"dir": 0, "strength": 0.0, "why": "…", "label": "a_favor|en_contra|sin_noticia"},
+                                "news": {"dir": 0, "strength": 0.0, "why": "…", "label": "a_favor|en_contra|neutral"},
                                 "tags": {}, "levels": {"apertura": 0, "impulso_pct": 0.3, "maximo": 0, "minimo": 0, "extremo": 0,
                                                        "retroceso": null, "ruptura": null, "hora_entrada": 0, "rvol": 3.0,
                                                        "entrada": 0, "stop": 0, "objetivo": 0},
@@ -509,7 +509,7 @@ Estado (no evento) de `bot/evolucion.py`, solo si cambia. Todo solo paper.
 Estado (no evento) de `bot/fuentes_vivas.py`: tras cada revisión (cada hora) y al momento tras cada acción, solo si cambia.
 ```json
 {"type": "fuentes_vivas", "ts": 0, "auto": true, "descubrir": true,
- "feeds": {"activa": 5600, "prueba": 3, "silenciada": 100, "retirada": 11}, "medios": {"activa": 0, "prueba": 0, "silenciada": 2, "retirada": 0},
+ "feeds": {"activa": 5600, "prueba": 3, "silenciada": 100, "retirada": 11}, "medios": {"activa": 5100, "prueba": 0, "silenciada": 2, "retirada": 0},
  "candidatos": {"pendiente": 0, "verificado": 0, "anadido": 0, "sin_rss": 0, "bloqueado": 0, "en_registro": 0, "error": 0},
  "ruido_medio": 0.6, "sugerencias": 0, "revision": {"ultima": 0, "s": 2.1, "medidas": 0, "cambios": 0, "anadidas": 0, "nota": null},
  "cambios": [{"ts": 0, "id": "jp-nhk-…|medio:dominio", "nombre": "…", "accion": "anadir|silenciar|retirar|restaurar|activar|a_prueba",
@@ -521,6 +521,7 @@ Estado (no evento) de `bot/fuentes_vivas.py`: tras cada revisión (cada hora) y 
 - **Reglas** (cada hora, con casos independientes = horas distintas en ≥ 7 días, acierto ajustado al mercado y contraído): silenciar con ≥ 30 casos y acierto claramente bajo lo neutro, o ruido ≥ 90 %, o caída técnica de ≥ 72 h; restaurar con ≥ 20 casos sin malos resultados; retirar tras ≥ 30 días silenciada solo si se confirma otra vez. Como mucho 3 bajadas por revisión y 10 en 24 h; las oficiales (T0) solo por caída técnica o a mano; lo que decides a mano se respeta 30 días. `BOT_FUENTES_AUTO=0`: las reglas solo sugieren.
 - **Descubrimiento:** medios que llegan por agregadores con ≥ 10 casos medidos que dan las noticias antes que nadie o aciertan; se busca y verifica su RSS (robots.txt, como mucho 12 peticiones por hora) y se añade en `prueba`. `BOT_FUENTES_DESCUBRIR=0`: sin peticiones.
 - Cada cambio queda en `source_status_log` y en `evolution_log` con su motivo y sus cifras, y se deshace volviendo exactamente al estado de antes. No toca las reglas de operación: solo decide qué noticias cuentan.
+- **Contadores:** `feeds`, los canales del registro por estado; `medios`, los medios conocidos (los medidos en la ventana y los que tienen fila por algún cambio): uno sin cambio de estado cuenta como `activa`. Los dominios `.invalid` (reservados, RFC 2606: restos de pruebas) no cuentan ni salen en la lista; su fila y su historial se quedan como están.
 - Una orden a mano solo vale para una fuente conocida: un feed del registro, una fila guardada o un `medio:<dominio>` con dominio válido y ya visto (con cifras, con feed propio, con estado en los feeds, en `fv_noticias`, en `medios_info` o candidato). Si no, `orden_web` con `ok: false` y «No conozco esa fuente».
 
 ### 2.13 `orden_web` (resultado de una orden de la web sobre fuentes o pesos)
@@ -694,6 +695,18 @@ cola hasta que ya no se puedan confirmar a tiempo):
 - Al arrancar recupera las triadas, reflejos y eventos `entrada_noticia` de los últimos 75 min: lo final no se repite y lo
   que ya no se puede confirmar a tiempo no se reabre.
 
+### 2.17 `backtest` (resumen del backtest general)
+
+Estado (no evento) de `bot/backtest.py`: al arrancar (el último `resultados.json`), tras cada cálculo y si otro proceso regenera el archivo.
+```json
+{"type": "backtest", "generated": 0, "n": 690,
+ "counts": {"funciona": 0, "dudosa": 0, "solo_correlacion": 0, "no_funciona": 0, "pocos_datos": 0},
+ "counts_operables": {"funciona": 0, "…": 0},
+ "best": [{"id": "…", "family": "…", "name": "…", "n": 0, "hit_rate": 0.0, "base_rate": 0.0, "lift_pp": 0.0, "avg_ret_pct": 0.0, "verdict": "dudosa"}]}
+```
+- `best`: hasta 5 operables con veredicto `funciona` o `dudosa`. El detalle sale por `GET /api/backtest` (3.1).
+- La web no lo procesa: relee `/api/backtest` cada 30 min.
+
 ## 3. API de solo lectura (servidor en 127.0.0.1:8765)
 
 | Ruta | Devuelve |
@@ -727,7 +740,7 @@ cola hasta que ya no se puedan confirmar a tiempo):
 | `GET /api/evolucion/historial?tipo=a,b&sujeto=&origen=&desde=&hasta=&limite=` | `{cambios, tipos}`: la línea de tiempo de `evolution_log`, de la más reciente a la más antigua |
 | `GET /api/evolucion/informes?semana=AAAA-Wss&limite=12` | `{informes}`: los informes semanales completos |
 | `GET /api/evolucion/propuestas?estado=pendiente\|aplicada\|descartada\|caducada\|revertida&limite=` | `{propuestas}` |
-| `GET /api/fuentes_vivas?region=&estado=&tipo=feed\|medio&limite=300` | Último `fuentes_vivas` (2.12) más `lista` (las fuentes filtradas: silenciadas y retiradas primero) y `candidatos` (50) |
+| `GET /api/fuentes_vivas?region=&estado=&tipo=feed\|medio&limite=300` | Último `fuentes_vivas` (2.12) más `lista` (las fuentes filtradas: silenciadas y retiradas primero) y `candidatos`: aquí es la **lista** de los 50 últimos (como en `/candidatos`), no los contadores del mensaje del bus, que van en `candidatos_cuenta` |
 | `GET /api/fuentes_vivas/lista?region=&estado=&tipo=&limite=` | Fuentes con `id, tipo, nombre, estado, peso, motivo, cambio, desde, manual, manual_hasta, origen, cifras, nota, sugerencia, acciones[]` y, los feeds, `region, tier, url, medio, estado_medio, tecnico` |
 | `GET /api/fuentes_vivas/candidatos?limite=` | Medios candidatos a feed propio con `estado_texto`, `nota`, `rss`, `cifras` y `acciones` |
 | `GET /api/fuentes_vivas/historial?id=&n=` | Cambios de estado con `deshacer {accion, id}` |

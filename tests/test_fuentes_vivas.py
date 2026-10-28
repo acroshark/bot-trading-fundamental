@@ -600,6 +600,26 @@ def test_orden_a_mano_solo_para_fuentes_conocidas(tmp_path):
     store.close()
 
 
+async def test_contadores_de_medios_con_los_medidos_y_sin_el_resto_de_prueba(tmp_path):
+    """Hallazgos n.º 9 y 34: un medio medido sin ningún cambio de estado cuenta como activo (la web daba «0 medios
+    activos» con miles medidos) y un dominio .invalid (el resto de una prueba) no cuenta ni sale en la lista, aunque su
+    fila y su historial siguen ahí."""
+    fv, poller, bus, store = make(tmp_path, [spec("jp-a", "https://www.a.jp/r")])
+    for medio in ("uno.example", "dos.example", "tres.example"):
+        poner(store, "jp-a", 3, "util", medio=medio)
+    await fv.revisar()
+    assert fv.estado()["medios"] == {"activa": 3, "prueba": 0, "silenciada": 0, "retirada": 0}
+    fv._cambiar("medio:tres.example", "silenciada", "manual", "a mano", auto=False, por="tú, desde la web")
+    fv._cambiar("medio:no-existe-prueba.invalid", "silenciada", "manual", "Silenciada a mano: prueba", auto=False,
+                por="tú, desde la web")
+    assert fv.estado()["medios"] == {"activa": 2, "prueba": 0, "silenciada": 1, "retirada": 0}
+    ids = [v["id"] for v in fv.lista(tipo="medio")]
+    assert "medio:tres.example" in ids and not any(i.endswith(".invalid") for i in ids)
+    assert "medio:no-existe-prueba.invalid" in fv.filas
+    assert store.db.execute("SELECT COUNT(*) FROM source_status_log WHERE id LIKE '%.invalid'").fetchone()[0] == 1
+    store.close()
+
+
 async def test_prueba_con_material_sin_triar_sigue_en_prueba(tmp_path):
     specs = [spec("jp-n", "https://n.jp/rss", tier="T3"), spec("jp-p", "https://p.jp/rss", tier="T3")]
     fv, poller, bus, store = make(tmp_path, specs)

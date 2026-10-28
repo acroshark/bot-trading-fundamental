@@ -646,6 +646,8 @@ async def test_api_aprendizaje_evolucion_y_fuentes_con_los_modulos_reales(tmp_pa
         r = await get("/api/fuentes_vivas")
         assert r["type"] == "fuentes_vivas" and r["feeds"]["silenciada"] == 1 and r["aviso"]
         assert r["lista"][0]["id"] == "jp-b" and r["candidatos"] == []
+        assert r["candidatos_cuenta"]["pendiente"] == 0 and set(r["candidatos_cuenta"]) == set(fv.estado()["candidatos"])
+        assert r["medios"]["activa"] == 0 and r["feeds"]["activa"] == 1   # n.º 9: sin medios medidos, 0 de verdad
         assert [x["id"] for x in await get("/api/fuentes?estado=silenciada")] == ["jp-b"]
         assert [x["id"] for x in await get("/api/fuentes_vivas/lista?estado=activa&tipo=feed")] == ["jp-a"]
         hist = await get("/api/fuentes_vivas/historial?id=jp-b")
