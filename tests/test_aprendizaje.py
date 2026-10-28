@@ -381,6 +381,47 @@ async def test_directo_y_google_news_del_mismo_medio_se_juntan(env):
     assert A.source_weight("bloomberg") == 1.3 == A.source_weight("bloomberg.com") and apr.weight_of_story("g1") == 1.3
 
 
+async def test_la_ficha_del_medio_es_la_de_su_feed_directo_o_la_de_mas_nivel(env):
+    """Hallazgo n.º 10: la ficha (nivel, región, idioma) era la del último Google News que trajo el medio (CoinDesk
+    salía como T3 de Corea). Manda el feed directo y, luego, el nivel más alto; a igualdad, la que ya estaba. Vale en un
+    mismo lote y entre lotes (ON CONFLICT)."""
+    store, bus = env
+    gn = "https://news.google.com/rss/articles/"
+
+    def gnews(story, t, tier, region, lang, via="coindesk.com"):
+        return captured(story, t, url=gn + story, src=f"GNews {region} · CoinDesk", src_id=f"{region}-gnews", via=via,
+                        tier=tier, region=region, lang=lang)
+
+    ficha = lambda o: store.db.execute("SELECT nivel, region, idioma, directo FROM medios_info WHERE outlet = ?",
+                                       (o,)).fetchone()
+    bus.publish(gnews("k1", T, "T3", "kr", "ko"))
+    now = T + DAY
+    apr = make(bus, store, FakeBars({"BTC": flat()}), now)
+    await apr.step(now, force=True)
+    assert ficha("coindesk.com") == ("T3", "kr", "ko", 0)
+    t = T + 2 * DAY   # después del cursor del primer cálculo
+    for ev in (gnews("j1", t + H, "T3", "jp", "ja"),                                       # mismo nivel: no cambia
+               captured("c1", t + 2 * H, url="https://www.coindesk.com/a", src="CoinDesk", src_id="cripto-coindesk",
+                        tier="T2", region="cripto", lang="en"),
+               gnews("u1", t + 3 * H, "T1", "us", "en"),                                    # más nivel, pero no directo
+               gnews("o1", t + H, "T3", "kr", "ko", via="otro.example"),                   # en un mismo lote:
+               gnews("o2", t + 2 * H, "T2", "jp", "ja", via="otro.example"),               # sube el nivel
+               gnews("o3", t + 3 * H, "T3", "de", "de", via="otro.example")):              # y no baja
+        bus.publish(ev)
+    now = T + 3 * DAY
+    apr = make(bus, store, FakeBars({"BTC": flat()}), now)
+    await apr.step(now, force=True)
+    assert ficha("coindesk.com") == ("T2", "cripto", "en", 1)
+    assert ficha("otro.example") == ("T2", "jp", "ja", 0)
+    assert apr.stats["medios"]["coindesk.com"]["directo"]
+    bus.publish(gnews("k2", T + 4 * DAY, "T3", "kr", "ko"))
+    now = T + 5 * DAY
+    apr = make(bus, store, FakeBars({"BTC": flat()}), now)
+    await apr.step(now, force=True)
+    assert ficha("coindesk.com") == ("T2", "cripto", "en", 1)
+    assert A.ficha_mejor(1, "T3", 0, "T0") and not A.ficha_mejor(0, "T0", 1, "T3") and A.ficha_mejor(0, "T2", 0, None)
+
+
 async def test_solo_cuenta_lo_que_usaria_la_senal(env):
     store, bus = env
 

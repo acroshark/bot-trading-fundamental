@@ -329,6 +329,19 @@ def outlet_info(patch: dict | None) -> tuple[str, str, int]:
     return norm_outlet(p.get("srcId") or p.get("src") or ""), "feed", 0
 
 
+def ficha_mejor(directo: int, nivel: str | None, directo_antes: int | None, nivel_antes: str | None) -> bool:
+    """¿Manda la ficha nueva (nombre, nivel, región, idioma) sobre la guardada? Primero la fuente directa (el feed del
+    propio medio) y luego el nivel más alto (T0 > T3; sin nivel, lo último). A igualdad se queda la guardada: si no, la
+    ficha de un medio era la del último Google News que lo trajo (CoinDesk como T3 de Corea: hallazgo n.º 10)."""
+    d, d0 = int(directo or 0), int(directo_antes or 0)
+    return d > d0 or (d == d0 and (nivel or "T9") < (nivel_antes or "T9"))
+
+
+# La misma regla en el ON CONFLICT de medios_info (los niveles «T0»…«T3» se ordenan como texto).
+_FICHA_MEJOR = ("(excluded.directo > COALESCE(directo, 0) OR (excluded.directo = COALESCE(directo, 0) AND "
+                "COALESCE(excluded.nivel, 'T9') < COALESCE(nivel, 'T9')))")
+
+
 def outlet_from_patch(patch: dict | None) -> str:
     """Medio que firma una captada (ver outlet_info)."""
     return outlet_info(patch)[0]
@@ -851,7 +864,9 @@ def ingest_chunk(db, cursor: int, upto: int, limit: int, p: dict) -> dict:
         if x is None:
             info[o] = [nombre, nivel, region, idioma, directo, ts, ts, tipo]
             return
-        x[:4] = [nombre or x[0], nivel or x[1], region or x[2], idioma or x[3]]
+        nuevo = [nombre, nivel, region, idioma]
+        a, b = (nuevo, x[:4]) if ficha_mejor(directo, nivel, x[4], x[1]) else (x[:4], nuevo)
+        x[:4] = [a[i] or b[i] for i in range(4)]
         x[4] = max(x[4], directo)
         x[5], x[6] = min(x[5], ts), max(x[6], ts)
         x[7] = x[7] or tipo
@@ -1827,9 +1842,9 @@ class Aprendizaje:
                        "confirmaciones = confirmaciones + excluded.confirmaciones", res["counts"])
         db.executemany("INSERT INTO medios_info (outlet, nombre, nivel, region, idioma, directo, primera_vez, ultima_vez, "
                        "tipo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(outlet) DO UPDATE SET "
-                       "nombre = COALESCE(excluded.nombre, nombre), nivel = COALESCE(excluded.nivel, nivel), "
-                       "region = COALESCE(excluded.region, region), idioma = COALESCE(excluded.idioma, idioma), "
-                       "directo = MAX(directo, excluded.directo), primera_vez = MIN(primera_vez, excluded.primera_vez), "
+                       + ", ".join(f"{c} = CASE WHEN {_FICHA_MEJOR} THEN COALESCE(excluded.{c}, {c}) "
+                                   f"ELSE COALESCE({c}, excluded.{c}) END" for c in ("nombre", "nivel", "region", "idioma"))
+                       + ", directo = MAX(directo, excluded.directo), primera_vez = MIN(primera_vez, excluded.primera_vez), "
                        "ultima_vez = MAX(ultima_vez, excluded.ultima_vez), tipo = COALESCE(tipo, excluded.tipo)",
                        res["info"])
         db.executemany("INSERT OR IGNORE INTO medio_fuente VALUES (?, ?)", res["pairs"])
