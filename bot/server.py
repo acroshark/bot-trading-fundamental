@@ -21,7 +21,8 @@ log = logging.getLogger("server")
 LIVE_FLAG = '<script>window.RADAR_LIVE = {ws: "/events"};</script>'
 MAD = ZoneInfo("Europe/Madrid")
 TIER_ADJ = {"T0": 5, "T1": 2, "T2": 0, "T3": -5}   # suave: la IA local ya ve el nivel de la fuente
-NEWS_MAX = 60
+NEWS_MAX = 60               # noticias de /api/noticias por defecto
+NEWS_LIMIT_MAX = 500        # ?limite= como mucho (hallazgo n.º 11: con 60, ?horas=48 devolvía solo el último minuto)
 NEWS_KINDS = ("captured", "triaged", "lowprio", "corroborated", "srcstate", "reflejo")
 STORY_MAX = 128             # ids de historia: «n…», «w-…», «a-…»
 LOOPBACK = ("127.0.0.1", "::1")
@@ -84,9 +85,9 @@ def news_credibility(cred: float | None, tier: str | None, confirmations: int, o
     return aprendizaje.adjusted_credibility(base, outlet, weight=aprendizaje.source_weight(outlet) * src_weight)
 
 
-def _pick_stories(db, since: int, min_imp: int, bolsa: str | None) -> list[str]:
+def _pick_stories(db, since: int, min_imp: int, bolsa: str | None, limit: int = NEWS_MAX) -> list[str]:
     """Las historias que devolverá /api/noticias, sin leer los cuerpos enteros: el último triaje de cada una (importancia
-    y bolsas, con json_extract) y las captadas de la más nueva a la más vieja hasta tener NEWS_MAX que pasen el filtro."""
+    y bolsas, con json_extract) y las captadas de la más nueva a la más vieja hasta tener limit que pasen el filtro."""
     tri: dict[str, tuple] = {}
     if min_imp > 0 or bolsa:
         bolsas = "json_extract(body, '$.patch.triage.repercusion.bolsas')" if bolsa else "NULL"
@@ -107,19 +108,19 @@ def _pick_stories(db, since: int, min_imp: int, bolsa: str | None) -> list[str]:
         if bolsa and bolsa != REGIONS.get(reg or "", (None, None))[1] and bolsa not in listed:
             continue
         out.append(story)
-        if len(out) == NEWS_MAX:
+        if len(out) == limit:
             break
     return out
 
 
-def recent_news(bus: Bus, hours: float, min_imp: int, bolsa: str | None = None) -> list[dict]:
+def recent_news(bus: Bus, hours: float, min_imp: int, bolsa: str | None = None, limit: int = NEWS_MAX) -> list[dict]:
     """Noticias relevantes recientes con su triaje local, en el formato que leen las skills de OpenClaw.
     Usa su propia conexión de solo lectura: se puede (y se debe) llamar desde un hilo, fuera del bucle.
     Cada una lleva «clase» (cripto, macro o contexto, del prefiltro) y «reflejo» (el último estado del evento «reflejo»,
     o null): una macro o geopolítica que la cripto no ha confirmado sale con credibilidad_ajustada 0."""
     since = now_ms() - int(hours * 3600_000)
     with bus.store.reader() as db:
-        pick = _pick_stories(db, since, min_imp, bolsa)
+        pick = _pick_stories(db, since, min_imp, bolsa, limit)
         if not pick:
             return []
         rows = db.execute(f"SELECT body FROM events WHERE story IN ({','.join('?' * len(pick))}) AND ts >= ? "
@@ -162,7 +163,7 @@ def recent_news(bus: Bus, hours: float, min_imp: int, bolsa: str | None = None) 
         if s["credibilidad_ajustada"] is not None and not reflejo.cuenta(s.get("titular"), tri, s["reflejo"], s.get("clase")):
             s["credibilidad_ajustada"] = 0   # macro o geopolítica sin reflejo confirmado en la cripto: no cuenta
         out.append(s)
-    return sorted(out, key=lambda s: -s["ts"])[:NEWS_MAX]
+    return sorted(out, key=lambda s: -s["ts"])[:limit]
 
 
 def ws_origins() -> set[str]:
@@ -461,12 +462,13 @@ def make_app(bus: Bus, health, services: Services | None = None) -> web.Applicat
         try:
             hours = max(0.0, min(48.0, float(request.query.get("horas", "3"))))
             min_imp = int(request.query.get("min", "0"))
+            limit = max(1, min(NEWS_LIMIT_MAX, int(request.query.get("limite", str(NEWS_MAX)))))
         except ValueError:
-            raise web.HTTPBadRequest(text="horas y min deben ser números")
+            raise web.HTTPBadRequest(text="horas, min y limite deben ser números")
         bolsa = request.query.get("bolsa")
         if bolsa and bolsa not in MARKETS:
             raise web.HTTPBadRequest(text=f"bolsa desconocida; usa una de: {', '.join(MARKETS)}")
-        return j(await asyncio.to_thread(recent_news, bus, hours, min_imp, bolsa))   # en un hilo: 48 h son miles de filas
+        return j(await asyncio.to_thread(recent_news, bus, hours, min_imp, bolsa, limit))   # en un hilo: miles de filas
 
     async def api_sources(request: web.Request) -> web.Response:
         """Feeds con su estado de ciclo de vida (estado y peso, de fuentes_vivas); ?estado= filtra por él."""

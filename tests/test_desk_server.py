@@ -229,6 +229,18 @@ def test_noticias_eligen_lo_mismo_que_antes(tmp_path):
                 assert _ids(got) == _old_recent_news(bus, hours, min_imp, bolsa), (hours, min_imp, bolsa)
     got = recent_news(bus, 48, 0)
     assert len(got) == 60 and all("credibilidad_ajustada" in n for n in got)
+    assert len(recent_news(bus, 48, 0, limit=75)) == 75   # hallazgo n.º 11: ?limite= (hasta 500)
+    store.close()
+
+
+async def test_api_noticias_acepta_limite(tmp_path):
+    store, bus, _, _ = setup(tmp_path)
+    _fill_news(bus, n=80)
+    async with TestClient(TestServer(make_app(bus, lambda: {}))) as client:
+        assert len(await (await client.get("/api/noticias?horas=48")).json()) == 60
+        assert len(await (await client.get("/api/noticias?horas=48&limite=70")).json()) == 70
+        assert len(await (await client.get("/api/noticias?horas=48&limite=9999")).json()) == 80   # tope 500
+        assert (await client.get("/api/noticias?limite=x")).status == 400
     store.close()
 
 
