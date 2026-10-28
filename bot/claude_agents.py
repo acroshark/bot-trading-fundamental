@@ -12,6 +12,7 @@ import asyncio
 import inspect
 import json
 import logging
+import math
 import time
 import unicodedata
 from collections import OrderedDict, deque
@@ -20,7 +21,7 @@ from zoneinfo import ZoneInfo
 
 import aiohttp
 
-from . import aprendizaje, config, history, reflejo
+from . import aprendizaje, config, history, paper, reflejo
 from .market import fresh_flow
 from .models import now_ms
 from .local_ai import upcoming_windows
@@ -470,9 +471,13 @@ def make_ticket(coin: str, side: str, mode: str, risk: float, stop: float, trail
     tp1R = round(_clamp(tp1R or 1.5, 0.5, 10.0), 2)
     tp2R = round(max(tp1R, _clamp(tp2R or 3.0, 1.0, 20.0)), 2)
     rules = {}
-    if config.USER_RULES:   # reglas del usuario: stop ≥ 1,5 %, objetivo ≥ 2R y horquilla pura (sin break-even ni dinámico)
+    inst = "perp" if side == "short" else "spot"
+    if config.USER_RULES:   # reglas del usuario: stop ≥ 1,5 %, objetivo ≥ 2R y ≥ 3 % neto, y horquilla pura
         stop = round(max(stop, config.RULE_MIN_STOP_PCT), 2)
         tp2R = round(max(tp2R if tp2R >= config.RULE_MIN_RR else config.RULE_DEFAULT_RR, config.RULE_MIN_RR), 2)
+        # El paper rechaza un objetivo que deje menos del 3 % neto de costes (1,5 % × 2R = 2,76 % neto): se sube lo
+        # justo, redondeando hacia arriba.
+        tp2R = max(tp2R, math.ceil((config.RULE_MIN_NET_PCT + paper.cost_rt_pct(inst)) / stop * 100 - 1e-9) / 100)
         tp1R, trail = tp2R, None
         rules = {"beR": None, "tp1Frac": 0.0}
     return {"coin": coin, "side": side, "mode": mode,
@@ -483,7 +488,7 @@ def make_ticket(coin: str, side: str, mode: str, risk: float, stop: float, trail
             "tp1R": tp1R, "tp2R": tp2R, **rules,
             "valid": "60 min" if now_t else f"{window}, {when.astimezone(MAD):%H:%M} Madrid",
             "inval": _cut(inval, 160), "why": _cut(why, 300), "llm": llm,
-            "instrument": "perp" if side == "short" else "spot"}
+            "instrument": inst}
 
 
 def muted(story: dict) -> bool:
@@ -1353,7 +1358,10 @@ class Phase2:
             hl = headline or f"{name} · {verb} {t['coin']} · {t['mode']}"
             when_txt = ("Entrada ya" if t["timing"] == "now" else
                         f"Programada para {name} ({when.astimezone(MAD):%H:%M} Madrid) · {t['entryType'].lower()}")
-            text = f"{when_txt} · stop {_pct(t['stopPct'])} % · trailing {_pct(t['trailPct'])} % · riesgo {_pct(t['risk'])} %"
+            # Con las reglas del usuario no hay trailing (trailPct None): horquilla pura con su objetivo (hallazgo n.º 24).
+            salida = (f"trailing {_pct(t['trailPct'])} %" if t.get("trailPct") is not None
+                      else f"objetivo {_pct(t['tp2R'])}R, sin stop dinámico")
+            text = f"{when_txt} · stop {_pct(t['stopPct'])} % · {salida} · riesgo {_pct(t['risk'])} %"
             patch = {"strat": t} if story else {"headline": hl, "src": src, "tier": "Plan", "t0": now, "coins": [t["coin"]], "strat": t}
             ev = {"type": "event", "ts": now, "kind": "strategy", "agent": "strat", "story": sid,
                   "title": f"{verb} {t['coin']} · {t['mode']}", "coins": [t["coin"]], "text": text, "patch": patch}

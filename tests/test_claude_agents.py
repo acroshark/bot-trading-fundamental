@@ -583,6 +583,45 @@ async def test_estratega_opus_tickets_con_limites(tmp_path):
     assert p.view()["planes"][0]["motor"] == "Opus 5.5"
 
 
+def _cumple_reglas(t: dict) -> bool:
+    """Lo que exige el paper con las reglas del usuario (paper._invalid): stop ≥ 1,5 %, ≥ 2R, ≥ 3 % neto de costes y
+    horquilla pura."""
+    from bot import paper
+    net = t["stopPct"] * t["tp2R"] - paper.cost_rt_pct(t["instrument"])
+    return (t["stopPct"] >= config.RULE_MIN_STOP_PCT and t["tp2R"] >= config.RULE_MIN_RR
+            and net >= config.RULE_MIN_NET_PCT - 1e-9 and t["trailPct"] is None and t["beR"] is None
+            and t["tp1Frac"] == 0 and t["tp1R"] == t["tp2R"])
+
+
+async def test_estratega_con_las_reglas_del_usuario(tmp_path, monkeypatch):
+    """Hallazgo n.º 24: la fase 2 con las reglas encendidas (la configuración real; las pruebas las apagan por
+    defecto). Los tickets de Opus y los de reglas salen con stop ≥ 1,5 %, ≥ 2R, horquilla pura y ≥ 3 % neto: con
+    1,5 % y 2R quedaba un 2,76 % neto y el paper lo rechazaba."""
+    monkeypatch.setattr(config, "USER_RULES", True)
+    client = FakeClient(by_model())
+    p, bus, store, calls = make_phase2(tmp_path, client)
+    res = await p.check_windows(PRE_LONDON)
+    tickets = [r["ticket"] for r in res]
+    assert len(tickets) == 3 and all(_cumple_reglas(t) for t in tickets), tickets
+    texts = [e["text"] for e in store.recent_events(50) if e.get("kind") == "strategy"]
+    assert len(texts) == 3 and all("sin stop dinámico" in x and "trailing" not in x for x in texts)
+    assert all(t["stopPct"] >= 1.5 for t in tickets) and {t["instrument"] for t in tickets} == {"spot", "perp"}
+    ctx = {"predictions": PREDICTIONS, "ranges": {"BTC": 0.6, "ETH": 0.9}, "timing": "window",
+           "limits": {"riesgo_max_pct": 0.5, "max_tickets": 3}}
+    plan = ca.RulesStrategist().plan("Apertura Londres", LONDON, ctx)
+    assert plan and all(_cumple_reglas(t) for t in plan)
+    args = ("Predicción de la ventana", 0.5, 1.5, None, 2.0, 2.0, "inval", "why", "now", "Apertura Londres", LONDON,
+            None, 0.5)
+    t = ca.make_ticket("BTC", "long", *args)
+    assert (t["stopPct"], t["tp2R"]) == (1.5, 2.16) and _cumple_reglas(t)   # (3 % + 0,24 %) / 1,5 % = 2,16R
+    monkeypatch.setattr(config, "FEE_PERP_PCT", 0.05)
+    t = ca.make_ticket("BTC", "short", *args)
+    assert (t["stopPct"], t["tp2R"]) == (1.5, 2.1) and _cumple_reglas(t)    # (3 % + 0,14 %) / 1,5 % = 2,0933 → 2,10R
+    t = ca.make_ticket("BTC", "long", "x", 0.5, 3.0, None, 3.0, 3.0, "", "", "now", "Apertura Londres", LONDON, None, 0.5)
+    assert (t["stopPct"], t["tp2R"]) == (3.0, 3.0)                          # el preset (3 % y 3R) no se toca
+    store.close()
+
+
 async def test_estratega_sin_ventaja_publica_nostrategy(tmp_path):
     client = FakeClient(by_model(strat={"why": "Señales mezcladas", "tickets": []}))
     p, bus, store, calls = make_phase2(tmp_path, client)
