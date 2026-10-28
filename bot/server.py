@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 
 from aiohttp import WSCloseCode, WSMsgType, web
 
-from . import aprendizaje, config
+from . import aprendizaje, config, resumen_backtest
 from .backtest import filter_results
 from .bus import Bus
 from .market import bias_of, funding_8h
@@ -191,7 +191,7 @@ def state_summary(bus: Bus) -> dict:
                               "posiciones": len(cartera.get("positions", []))} if cartera else None}
 
 
-BT_BLOCK = re.compile(r'<script type="application/json" id="bt(?:Open)?Data">.*?</script>', re.S)
+BT_BLOCK = re.compile(r'<script type="application/json" id="(?:bt(?:Open)?Data|impulsoData)">.*?</script>', re.S)
 
 
 def make_app(bus: Bus, health, services: Services | None = None) -> web.Application:
@@ -639,6 +639,13 @@ def make_app(bus: Bus, health, services: Services | None = None) -> web.Applicat
             raise web.HTTPNotFound(text="Aún no hay backtest de aperturas: python -m bot.backtest_aperturas")
         return j(res)
 
+    async def api_bt_impulso(_request: web.Request) -> web.Response:
+        """La estrategia que opera el motor en vivo (variante de 7 días) y el resumen del laboratorio."""
+        res = await asyncio.to_thread(resumen_backtest.load)
+        if res["impulso"] is None and res["lab"] is None:
+            raise web.HTTPNotFound(text="Aún no hay backtest del motor: python -m bot.laboratorio y controles/compara_impulso.py")
+        return j(res)
+
     app = web.Application()
     app.on_shutdown.append(close_ws)
     app.router.add_get("/", index)
@@ -656,6 +663,7 @@ def make_app(bus: Bus, health, services: Services | None = None) -> web.Applicat
     app.router.add_get("/api/fase2", api_phase2)
     app.router.add_get("/api/aperturas", api_openings)
     app.router.add_get("/api/backtest/aperturas", api_bt_openings)
+    app.router.add_get("/api/backtest/impulso", api_bt_impulso)
     app.router.add_get("/api/vigilancia", api_vigilancia)
     app.router.add_get("/api/fuentes_vivas", api_fv)
     app.router.add_get("/api/fuentes_vivas/lista", api_fv_lista)

@@ -241,6 +241,7 @@ class PaperBroker:
         if self.mode != config.APPROVAL_MODE:
             log.warning("Modo de aprobación desconocido «%s»: se usa veto", config.APPROVAL_MODE)
         self.start_equity = float(config.PAPER_EQUITY)
+        self.cuenta: dict | None = None        # cartera de prueba con nombre {nombre, eur, eur_usdc, usdc, desde, ficticia}
         self.positions: dict[str, dict] = {}   # abiertas, por noticia
         self.pending: dict[str, dict] = {}     # esperando aprobación
         self.scheduled: dict[str, dict] = {}   # aprobadas, esperando su ventana
@@ -324,6 +325,10 @@ class PaperBroker:
                 log.warning("Paper: BOT_APPROVAL_MODE ha cambiado desde que elegiste «%s» en la web: se usa «%s»",
                             saved["mode"], self.mode)
             self._set_state("mode", {"mode": self.mode, "config": config.APPROVAL_MODE})
+        cuenta = self._get_state("cuenta")   # la deja scripts/nueva_cartera_paper.py: su capital manda sobre BOT_PAPER_EQUITY
+        self.cuenta = cuenta if isinstance(cuenta, dict) and (_f(cuenta.get("usdc")) or 0) > 0 else None
+        if self.cuenta:
+            self.start_equity = float(self.cuenta["usdc"])
         start = _f(self._get_state("start_equity"))
         if start and (self.closed or self.positions):   # con operaciones hechas, el capital inicial ya no se mueve
             if abs(start - self.start_equity) > 1e-9:
@@ -1298,7 +1303,7 @@ class PaperBroker:
                            "halted": bool(self.halt_until), "halt_until": self.halt_until or None},
                 "mode": self.mode,
                 # Parada manual (halt / resume desde la web); limits.halted es la pausa por pérdida diaria.
-                "halted": bool(self.halted), "caps": list(CAPS)}
+                "halted": bool(self.halted), "caps": list(CAPS), "cuenta": self.cuenta}
 
     def publish_portfolio(self, now: int | None = None, force: bool = False) -> bool:
         """Publica «portfolio» solo si ha cambiado algo además de la hora."""
@@ -1344,6 +1349,6 @@ class PaperBroker:
             daily.append({"date": d, "pnl": round(x["pnl"], 2), "pnl_pct": round(x["pnl"] / base * 100, 3) if base else 0.0,
                           "n": x["n"]})
             base += x["pnl"]
-        return {"start_equity": start, "equity": round(self.equity(), 2), "trades": list(reversed(trades)),
+        return {"start_equity": start, "cuenta": self.cuenta, "equity": round(self.equity(), 2), "trades": list(reversed(trades)),
                 "by_strategy": agg("strategy"), "by_window": agg("window"), "by_coin": agg("coin"),
                 "equity_curve": curve, "daily": daily}

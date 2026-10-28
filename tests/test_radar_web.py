@@ -1228,3 +1228,51 @@ def test_resumen_del_laboratorio_ligero_y_el_ejemplo_lo_usa():
     assert "El laboratorio real probó 2000 estrategias y dejó 2 prometedoras y 0 robustas" in r["head"]
     assert "Prometedora &lt;b&gt;" in r["asp"] and "backtest del laboratorio: 34 op. fuera de muestra, R medio +0,20 R, 56 % ganadoras" in r["asp"]
     _sin_null(r["head"], r["asp"])
+
+
+def test_backtest_muestra_la_estrategia_en_marcha_y_el_laboratorio():
+    """La pestaña Backtest abre con lo que opera el motor (E2, 7 días) y el laboratorio, con sus advertencias; el motor v2
+    queda rotulado como anterior. En la demostración usa los datos reales incrustados (impulsoData y labData)."""
+    page = HTML.read_text(encoding="utf-8")
+    assert "Motor anterior (v2 «ruptura»): ya no opera" in page
+    imp = {"generated": 1793150000000, "split": 1755295200000, "nota": "Variante elegida <b>después</b>",
+           "fuera": {"n": 202, "mean_R": 0.3459, "win_rate": 0.41, "salidas": {"stop": 113, "objetivo": 60, "tiempo": 29},
+                     "horas_media": 64.9, "largos": {"n": 85, "mean_R": 0.098}, "cortos": {"n": 117, "mean_R": 0.526},
+                     "desde": 1755655200000, "hasta": 1790778780000, "total_R": 69.88, "max_dd_R": 12.3,
+                     "curva_R": [[1755655200000, 0.5], [1790778780000, 69.88]]},
+           "dentro": {"n": 469, "mean_R": 0.1297, "win_rate": 0.33, "desde": 1698845400000, "total_R": 60.8,
+                      "curva_R": [[1698845400000, -1], [1755481500000, 60.8]]}}
+    lab = {"summary": {"tested": 2000, "promising": 2, "robust": 0, "expected_by_chance": 9, "beat_base": 68, "base_tested": 1358,
+                       "expected_by_chance_all": 68}, "frozen": "2026-10-26",
+           "period": {"from": "2023-11-01", "to": "2026-10-23"},
+           "promising": [{"id": "ap_mom:15:0,2|x", "name": "E2 <i>", "class": "prometedora", "is": {"trades": 557, "mean_R": 0.0436, "win_rate": 0.41},
+                          "oos": {"trades": 278, "mean_R": 0.1402, "win_rate": 0.52}}],
+           "avance": {"days": 668, "trades": 1356, "total_pct": -61.17, "max_dd_pct": 65.28, "top": 10}}
+    r = run(f"""S.btImp = {{impulso: {json.dumps(imp)}, lab: {json.dumps(lab)}}}; S.tab = "bt"; renderAll(true);
+      const a = {{live: H.el("#btLive").innerHTML + H.el("#btLiveKpis").innerHTML, lab: H.el("#btLab").innerHTML + H.el("#btLabKpis").innerHTML}};
+      S.btImp = {{impulso: null, lab: null}}; renderBtLive();
+      return {{...a, vacio: H.el("#btLive").innerHTML, vacioLab: H.el("#btLab").innerHTML}};""", live=False)
+    live, lb = r["live"], r["lab"]
+    assert "+0,35 R" in live and "202 op." in live and "+69,88 R" in live and "≈ +34,9 % de la cuenta" in live
+    assert "No es una ventaja demostrada" in live and "+0,14 R en 278 operaciones" in live
+    assert "La cuenta honesta en avance pierde" in live and "-61,2 %" in live and "65,3 %" in live
+    assert "+0,53 R" in live and "+0,10 R" in live and "Variante elegida &lt;b&gt;después&lt;/b&gt;" in live
+    assert "E2 &lt;i&gt;" in lb and "la opera el motor" in lb and "<small>Probadas</small><b>2000" in lb and "lista congelada el 2026-10-26" in lb
+    assert "<b>68 de 1358</b><span>por puro azar se esperan unas 68" in lb
+    assert "no trae el backtest del motor" in r["vacio"] and "no trae el laboratorio" in r["vacioLab"]
+    _sin_null(live, lb)
+    if 'id="impulsoData"' in page and 'id="labData"' in page:   # el incrustado real también se pinta sin huecos
+        blob = lambda i: page.split(f'<script type="application/json" id="{i}">', 1)[1].split("</script>", 1)[0]
+        r2 = run(f"""S.btImp = {{impulso: {blob("impulsoData")}, lab: {blob("labData")}}}; S.tab = "bt"; renderAll(true);
+          return {{live: H.el("#btLive").innerHTML + H.el("#btLiveKpis").innerHTML, lab: H.el("#btLab").innerHTML + H.el("#btLabKpis").innerHTML}};""", live=False)
+        assert "Fuera de muestra" in r2["live"] and "Probadas" in r2["lab"]
+        _sin_null(r2["live"], r2["lab"])
+
+
+def test_resultados_muestran_la_cartera_de_prueba_en_euros():
+    """La cartera de prueba (scripts/nueva_cartera_paper.py) se ve con su nombre y su equivalente en euros."""
+    r = run("""H.open(); reset();
+      H.recv(pf({equity: 111.37, start_equity: 111.37, cuenta: {nombre: "Cartera de prueba de 100 € <x>", eur: 100, eur_usdc: 1.1137, usdc: 111.37}}));
+      S.tab = "results"; renderAll(true); renderResults(); return {k: H.el("#resKpis").innerHTML};""")
+    assert "≈ 100,00 €" in r["k"] and "Cartera de prueba de 100 € &lt;x&gt; (ficticia)" in r["k"]
+    _sin_null(r["k"])

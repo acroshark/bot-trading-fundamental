@@ -393,6 +393,8 @@ Estado (no evento) con el resultado de la última orden de 3.3 sobre fuentes o p
 | `GET /api/tendencia` | Último `trend` y `orderflow` |
 | `GET /api/predicciones` | Último `predictions` |
 | `GET /api/backtest` | Contenido de `BACKTEST_DIR/resultados.json` (3.1) |
+| `GET /api/backtest/aperturas` | `BACKTEST_DIR/aperturas.json`: el motor anterior (v2 «ruptura»), solo como referencia (404 sin archivo) |
+| `GET /api/backtest/impulso` | `{impulso, lab}` (`bot/resumen_backtest.py`): `impulso` = `BACKTEST_DIR/impulso_7d.json` (lo escribe `controles/compara_impulso.py`), la variante de 7 días que opera el motor, con `fuera` y `dentro` = `{n, mean_R, win_rate, salidas, horas_media, largos, cortos, desde, hasta, total_R, max_dd_R, curva_R [[ms, R acumulado]] (≤ 151 puntos)}` y `nota`; `lab` = resumen de `laboratorio.json` (`summary`, `promising`, `robust`, `avance` = cuenta honesta en avance trimestral con 0,5 % de riesgo). Lo que falte va como `null`; 404 si faltan los dos |
 | `GET /api/resultados` | Operaciones paper y agregados (3.2) |
 | `GET /api/vigilancia` | Último `vigilancia` (2.8) y `operaciones`: las operaciones virtuales que cuentan, de la más reciente a la más antigua (filas de la tabla `vigilancia`, hasta 500) |
 | `GET /api/aperturas` | Último `openings` (2.9) |

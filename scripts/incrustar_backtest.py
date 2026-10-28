@@ -13,13 +13,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from bot import config  # noqa: E402
+from bot.resumen_backtest import impulso_summary, lab_summary  # noqa: E402,F401  (lab_summary: lo usan las pruebas)
 
 PAGE = ROOT / "dashboard" / "radar.html"
 BLOCK = re.compile(r'<script type="application/json" id="btData">.*?</script>', re.S)
 BLOCK_OPEN = re.compile(r'<script type="application/json" id="btOpenData">.*?</script>', re.S)
 BLOCK_LAB = re.compile(r'<script type="application/json" id="labData">.*?</script>', re.S)
+BLOCK_IMP = re.compile(r'<script type="application/json" id="impulsoData">.*?</script>', re.S)
 POINTS = 40
-LAB_MAX = 10   # estrategias prometedoras o robustas como mucho
 
 
 def compact(res: dict) -> dict:
@@ -35,23 +36,6 @@ def compact(res: dict) -> dict:
         strategies.append(s)
     out["strategies"] = strategies
     return out
-
-
-def lab_summary(lab: dict) -> dict:
-    """Lo justo de laboratorio.json para la demostración: periodo, recuento y las prometedoras y robustas con sus cifras
-    dentro y fuera de muestra (sin operaciones, rejillas ni vecinos: unos pocos KB)."""
-    def strat(s: dict) -> dict:
-        out = {k: s[k] for k in ("id", "name", "family", "class", "rules") if k in s}
-        for part in ("is", "oos"):
-            x = s.get(part) or {}
-            out[part] = {k: x[k] for k in ("trades", "mean_R", "win_rate") if k in x}
-        return out
-
-    sm = lab.get("summary") or {}
-    return {"generated": lab.get("generated"), "period": lab.get("period"), "frozen": (lab.get("frozen") or {}).get("date"),
-            "summary": {k: sm[k] for k in ("tested", "promising", "robust", "expected_by_chance") if k in sm},
-            "promising": [strat(s) for s in (lab.get("promising") or [])[:LAB_MAX] if isinstance(s, dict)],
-            "robust": [strat(s) for s in (lab.get("robust") or [])[:LAB_MAX] if isinstance(s, dict)]}
 
 
 def _tag(id_: str, data: dict) -> str:
@@ -91,6 +75,15 @@ def main() -> None:
             m = BLOCK_OPEN.search(html) or BLOCK.search(html)
             html = html[:m.end()] + "\n" + tag3 + html[m.end():]
         print(f"Incrustado el resumen del laboratorio ({len(tag3) / 1024:.1f} KB)")
+    src_imp = config.BACKTEST_DIR / "impulso_7d.json"
+    if src_imp.exists():   # la estrategia que opera el motor en vivo (pestaña Backtest)
+        tag4 = _tag("impulsoData", impulso_summary(json.loads(src_imp.read_text(encoding="utf-8"))))
+        if BLOCK_IMP.search(html):
+            html = BLOCK_IMP.sub(lambda _: tag4, html)
+        else:
+            m = BLOCK_LAB.search(html) or BLOCK_OPEN.search(html) or BLOCK.search(html)
+            html = html[:m.end()] + "\n" + tag4 + html[m.end():]
+        print(f"Incrustado el backtest del motor en vivo ({len(tag4) / 1024:.1f} KB)")
     PAGE.write_text(html, encoding="utf-8")
 
 

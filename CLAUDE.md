@@ -17,6 +17,8 @@ El usuario habla español: código, comentarios, textos de la web y documentaci�
 - El laboratorio de 2.000 estrategias (3 años) dejó 2 prometedoras y 0 robustas.
 - No se promete rentabilidad: se mide en paper y se enseñan las cifras. Lo único sin medir es la señal en vivo de las noticias.
 - Las expectativas del usuario (≥ 3 % por apertura) se contrastan con datos, sin discutir por discutir.
+- La estrategia en marcha (E2, impulso): +0,14 R por operación fuera de muestra con la salida del laboratorio y +0,35 R con la de 7 días, pero esta segunda se eligió después de ver los datos y no está validada. Con 0,5 % de riesgo son unos +0,09 % al día, no +2 %.
+- Nunca se maquillan resultados ni se cambia el riesgo para llegar a un objetivo. La cartera paper de prueba (100 € ficticios desde el 28-10-2026) se mide tal cual.
 
 ## Estructura
 - `bot/`: el bot (Python 3.11, asyncio). Arranque y cableado en `bot/__main__.py`; configuración en `bot/config.py` (todo con variables `BOT_*`).
@@ -40,6 +42,7 @@ El usuario habla español: código, comentarios, textos de la web y documentaci�
 - Cada cambio lleva sus pruebas.
 
 ## Entornos
+- **Arranque sin nadie delante:** `scripts/vigilante-bot.ps1` relanza el bot si cae. `scripts/nueva_cartera_paper.py` empieza otra cartera paper y archiva la anterior.
 - **PC del usuario (Windows):** datos en `M:\BotFundamental-datos` (bot.db, backtests, velas) y entorno en `M:\BotFundamental-runtime\venv`. Los datos van siempre a M:, nunca a C:. Para 24/7 se arranca con el acceso directo «Radar Fundamental» (`abrir-radar.ps1`).
 - **Claude en la nube (Linux):** no están los datos, ni la IA local, ni las claves. Se puede trabajar en el código y las pruebas. `BOT_DATA_DIR` va por defecto a `~/BotFundamental-datos`. Los resultados reales (backtests, paper, aprendizaje) solo existen en el PC del usuario.
 - Nunca subas secretos: claves de API, tokens de Telegram ni tokens del gateway de OpenClaw. Las claves las pone el usuario en su PC.

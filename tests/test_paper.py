@@ -788,6 +788,22 @@ def test_modo_y_capital_inicial_se_recuerdan_tras_reiniciar(env, monkeypatch):
     assert b.start_equity == 12000 and b.portfolio()["start_equity"] == 12000   # con operaciones, no se reescribe
 
 
+def test_cartera_de_prueba_manda_sobre_la_configuracion(env, monkeypatch):
+    """scripts/nueva_cartera_paper.py deja paper_state.cuenta: su capital vale aunque BOT_PAPER_EQUITY diga otra cosa
+    (el acceso directo arranca sin esa variable) y la cuenta sale en la cartera y en los resultados."""
+    cuenta = {"nombre": "Cartera de prueba de 100 €", "eur": 100.0, "eur_usdc": 1.1137, "usdc": 111.37, "desde": T0, "ficticia": True}
+    env.store.db.execute("INSERT OR REPLACE INTO paper_state VALUES ('cuenta', ?)", (json.dumps(cuenta),))
+    env.store.db.commit()
+    monkeypatch.setattr(config, "PAPER_EQUITY", 10000.0)
+    b = env.new()
+    assert b.start_equity == 111.37 and b.equity() == 111.37
+    assert b.portfolio()["cuenta"] == cuenta and b.results()["cuenta"] == cuenta
+    assert env.new().start_equity == 111.37   # y se queda guardado en start_equity
+    env.store.db.execute("DELETE FROM paper_state WHERE key='cuenta'")
+    env.store.db.commit()
+    assert env.new().portfolio()["cuenta"] is None
+
+
 # ---------------------------------------------------------------- formato
 
 def test_formato_de_eventos_cartera_y_resultados(env):
