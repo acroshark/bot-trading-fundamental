@@ -646,8 +646,10 @@ async def test_caida_tecnica_y_red_caida(tmp_path):
     for _ in range(12):
         caido.on_error("HTTP 503")
     t = now_ms()
-    for k in range(37):   # cada revisión suma lo que pasó desde la anterior (como mucho 2 h)
-        assert fv._salud(t + k * 2 * H) is False
+    assert fv._salud(t) is False and fv.salud == {"jp-0": 0.0}          # primer fallo visto de la racha
+    assert fv._salud(t + 10 * H) is False and fv.salud == {"jp-0": pytest.approx(10)}
+    # Hallazgo n.º 5: el tiempo es real. Con el bot parado 62 h entre medias, al volver (y si sigue fallando) cuenta todo.
+    assert fv._salud(t + 72 * H) is False
     assert fv.salud == {"jp-0": pytest.approx(72)}
     assert store.db.execute("SELECT horas FROM source_health WHERE id='jp-0'").fetchone()[0] == pytest.approx(72)
     [c] = fv.aplicar_reglas(t)
@@ -662,6 +664,31 @@ async def test_caida_tecnica_y_red_caida(tmp_path):
     for st in list(poller.states.values())[:3]:
         st.on_error("Sin conexión con el servidor")
     assert fv._salud(t + 77 * H) is True and fv.salud == {}
+    store.close()
+
+
+async def test_caida_tecnica_cuenta_el_tiempo_real_tras_reiniciar(tmp_path):
+    """Hallazgo n.º 5: la racha sobrevive a un reinicio (source_health) y cuenta el tiempo real desde su primer fallo
+    visto; un feed que funcionaba al parar empieza de cero aunque falle al volver. Las filas de antes (horas de bot en
+    marcha) dan un inicio más tardío: se cuenta de menos, nunca de más."""
+    fv, poller, bus, store = make(tmp_path, [spec(f"jp-{i}", f"https://h{i}.jp/rss") for i in range(10)])
+    for st in poller.states.values():
+        st.on_success(1)
+    for _ in range(12):
+        poller.states["jp-0"].on_error("HTTP 503")
+    t = now_ms()
+    fv._salud(t - 30 * H)
+    store.db.execute("INSERT INTO source_health VALUES ('jp-9', 20.0, ?)", (t - 10 * H,))   # fila de antes
+    store.db.commit()
+    fv2 = FuentesVivas(bus, store, None, registro_dir=tmp_path / "fuentes")   # el bot se reinicia 40 h después
+    fv2.attach(poller)
+    assert fv2.salud_inicio == {"jp-0": t - 30 * H, "jp-9": t - 30 * H}
+    for _ in range(12):
+        poller.states["jp-1"].on_error("HTTP 500")                               # funcionaba al parar
+    assert fv2._salud(t + 42 * H) is False
+    assert fv2.salud["jp-0"] == pytest.approx(72) and fv2.salud["jp-1"] == 0.0 and "jp-9" not in fv2.salud
+    [c] = fv2.aplicar_reglas(t + 42 * H)
+    assert (c["id"], c["despues"], c["tipo"]) == ("jp-0", "silenciada", "tecnico") and "3,0 días" in c["motivo"]
     store.close()
 
 

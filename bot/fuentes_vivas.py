@@ -311,7 +311,7 @@ class Cifras:
 @dataclass
 class Tecnico:
     fallos: int              # fallos seguidos (feed_state)
-    horas: float             # horas de bot en marcha seguidas fallando (source_health)
+    horas: float             # horas reales seguidas fallando, desde el primer fallo visto (source_health)
     ok: bool | None
     err: str = ""
 
@@ -526,7 +526,8 @@ class FuentesVivas:
         self.descubrir = DESCUBRIR if descubrir is None else descubrir
         self.poller = None
         self.filas: dict[str, Fila] = {}
-        self.salud: dict[str, float] = {}       # id → horas seguidas fallando
+        self.salud: dict[str, float] = {}       # id → horas seguidas fallando (reales, desde el primer fallo visto)
+        self.salud_inicio: dict[str, int] = {}  # id → ms del primer fallo visto de la racha
         self.cifras: dict[str, Cifras] = {}
         self.q0 = NEUTRO                        # ruido medio de todas las fuentes
         self.sugerencias: dict[str, tuple[str, str, str]] = {}   # con auto apagado (o por el tope): lo que se haría
@@ -537,7 +538,6 @@ class FuentesVivas:
         self._buf: list[tuple] = []
         self._robots: dict[str, tuple[float, RobotFileParser | None]] = {}
         self._ultima_peticion = 0.0
-        self._ultima_salud: int | None = None
         self._scan_ts = 0
         self._last_pub: str | None = None
         self._ext_errors = 0
@@ -586,7 +586,11 @@ class FuentesVivas:
             self.filas[r[0]] = Fila(r[0], r[1], r[2] or 0, r[3] or "", r[4] or "", bool(r[5]), r[6] or "registro",
                                     r[7] if r[7] in ("activa", "prueba") else "activa", r[8] or "",
                                     _loads(r[9]), _loads(r[10]))
-        self.salud = {i: float(h) for i, h in db.execute("SELECT id, horas FROM source_health").fetchall()}
+        # source_health guarda (id, horas, hora de la última revisión): el inicio de la racha es esa hora menos las
+        # horas. Las filas de antes (horas de bot en marcha) dan un inicio más tardío: se cuenta de menos, nunca de más.
+        for i, h, ts in db.execute("SELECT id, horas, desde FROM source_health").fetchall():
+            self.salud[i] = float(h)
+            self.salud_inicio[i] = int(ts - float(h) * H)
         row = db.execute(f"SELECT MAX(ts) FROM fv_noticias WHERE feed IN ({','.join('?' * len(RELAYS))})", RELAYS).fetchone()
         self._scan_ts = row[0] or now_ms() - 6 * H
 
@@ -866,14 +870,15 @@ class FuentesVivas:
 
     # ----- salud técnica (en el bucle: es poco trabajo)
     def _salud(self, ahora: int) -> bool:
-        """Suma las horas seguidas que falla cada feed (solo cuenta el tiempo con el bot en marcha, entre revisiones).
-        Devuelve True si parece caída nuestra red (falla más del 30 % de lo sondeado): entonces no se cuenta nada."""
+        """Horas seguidas que falla cada feed: tiempo REAL desde el primer fallo visto de la racha, también con el bot
+        parado entre medias (hallazgo n.º 5: contando solo las horas en marcha, con el bot parado el 90 % del tiempo, las
+        72 h no llegaban nunca). Un feed que funcionaba al parar el bot empieza de cero si falla al volver; uno que
+        fallaba al parar y sigue fallando al volver lleva todo el tiempo. Devuelve True si parece caída nuestra red
+        (falla más del 30 % de lo sondeado): entonces no se cuenta nada."""
         if self.poller is None:
             return False
         polled = [st for st in self.poller.states.values() if st.estado != "retirada" and st.ok is not None]
         failing = [st for st in polled if st.ok is False]
-        inc = 0.0 if self._ultima_salud is None else min((ahora - self._ultima_salud) / H, 2.0)
-        self._ultima_salud = ahora
         if polled and len(failing) > TEC_MAX_RED * len(polled):
             log.warning("Fallan %d de %d feeds: parece un problema de nuestra red, no se cuenta como caída de nadie",
                         len(failing), len(polled))
@@ -882,10 +887,12 @@ class FuentesVivas:
         for st in polled:
             fid = st.spec.id
             if st.ok is False and st.fails > 0:
-                self.salud[fid] = self.salud.get(fid, 0.0) + inc
+                inicio = self.salud_inicio.setdefault(fid, ahora)
+                self.salud[fid] = max(0.0, (ahora - inicio) / H)
                 rows.append((fid, self.salud[fid], ahora))
-            elif fid in self.salud:
-                del self.salud[fid]
+            elif fid in self.salud or fid in self.salud_inicio:
+                self.salud.pop(fid, None)
+                self.salud_inicio.pop(fid, None)
                 gone.append((fid,))
         db = self.store.db
         db.executemany("INSERT OR REPLACE INTO source_health VALUES (?,?,?)", rows)
