@@ -1268,6 +1268,8 @@ function ingest(msg){
   if (msg.type==="sources") { S.sources = msg.sources; S.dirty=true; }
   if (msg.type==="calendar") { S.calendar = msg.events; S.dirty=true; }
   if (msg.type==="sources_summary") { S.srcSummary = msg; S.dirty=true; }
+  // Totales reales desde el arranque (al final de la foto): sustituyen lo contado con los eventos de la foto (n.º 8)
+  if (msg.type==="conteo" && isObj(msg.kinds)) { for (const [k, n] of Object.entries(msg.kinds)) if (isNum(n) && k in S.counts) S.counts[k] = n; S.dirty=true; }
   if (msg.type==="trend") { S.trend = msg.markets; S.dirty=true; }   // índices: ya no se pintan (solo interesa la cripto)
   if (msg.type==="cripto_aperturas") { S.criptoAp = msg; S.dirty=true; }
   if (msg.type==="orderflow") { S.orderflow = msg.coins; S.dirty=true; }

@@ -111,6 +111,14 @@ Monedas operables: `config.COINS = ["BTC", "ETH", "SOL", "XRP"]`, cotizadas en U
 
 ## 2. Mensajes nuevos (bus → web)
 
+### 2.0 `conteo` (bus, al final de la foto inicial del WebSocket)
+```json
+{"type": "conteo", "desde": 0, "kinds": {"captured": 1420, "filtered": 2462, "corroborated": 310, "triaged": 302, "lowprio": 95}}
+```
+Totales de eventos por tipo desde el arranque del bot (24 h como mucho). La foto solo trae los últimos 1.500 eventos y 300
+descartes, así que la web contaba con ellos una proporción falsa de captadas frente a ruido (hallazgo n.º 8): con este
+mensaje la web cambia sus contadores por los reales y sigue sumando lo que llega después.
+
 ### 2.1 `sources_summary` (módulo feeds)
 ```json
 {"type": "sources_summary", "ts": 0,

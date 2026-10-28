@@ -7,6 +7,9 @@ from .models import now_ms
 from .store import Store
 
 
+CONTEO_KINDS = ("captured", "filtered", "corroborated", "triaged", "lowprio")   # los contadores del cazador y la IA
+
+
 class Bus:
     def __init__(self, store: Store):
         self.store = store
@@ -56,4 +59,20 @@ class Bus:
         evs = self.store.recent_events(config.HISTORY_EVENTS, exclude=("filtered",))
         evs += self.store.recent_events(config.HISTORY_FILTERED, only=("filtered",))
         out += sorted(evs, key=lambda e: e["ts"])
+        out.append(self.conteo())   # al final: la web cambia lo contado con la foto por los totales reales
         return out
+
+    def conteo(self, now: int | None = None) -> dict:
+        """Totales de eventos por tipo desde el arranque (24 h como mucho: los descartes se borran a las 48 h). La foto
+        solo trae los últimos 1.500 eventos y 300 descartes: con ella la web daba que pasaba un 79 % cuando pasaba un
+        37 % (hallazgo n.º 8)."""
+        now = now_ms() if now is None else now
+        desde = max(self.started, now - 24 * 3600_000)
+        kinds = {}
+        for k in CONTEO_KINDS:
+            try:
+                kinds[k] = self.store.db.execute("SELECT COUNT(*) FROM events WHERE kind = ? AND ts >= ?",
+                                                 (k, desde)).fetchone()[0]
+            except Exception:
+                return {"type": "conteo", "desde": desde, "kinds": {}}
+        return {"type": "conteo", "desde": desde, "kinds": kinds}

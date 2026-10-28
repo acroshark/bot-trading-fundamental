@@ -1975,3 +1975,14 @@ def test_revision_28_10_operacion_por_noticia_capital_sin_cartera_y_grupo():
     assert 'data-story="nf-n1-btc"' in r["news"] and "Abrir la operación (paper)" in r["news"]
     assert "grupo fiable regulatorio · bajista" in r["res"] and "tipo_sentido:regulatorio" not in r["res"]
     _sin_null(r["op"], r["news"], r["res"])
+
+
+def test_contadores_del_cazador_con_los_totales_reales():
+    """Hallazgo n.º 8: con la foto (pocos descartes) la web daba que pasaba un 79 %; el mensaje «conteo» manda."""
+    r = run("""H.open(); reset();
+      H.recv(ev("captured", "a", {headline: "x"}), ev("captured", "b", {headline: "y"}), ev("filtered", "c", {headline: "z"}),
+             {type: "conteo", desde: now - 3600e3, kinds: {captured: 1420, filtered: 2462, corroborated: 3, triaged: 302, lowprio: 50}});
+      const a = {cap: S.counts.captured, fil: S.counts.filtered};
+      H.recv(ev("captured", "d", {headline: "w"}));
+      return {...a, cap2: S.counts.captured};""")
+    assert r == {"cap": 1420, "fil": 2462, "cap2": 1421}

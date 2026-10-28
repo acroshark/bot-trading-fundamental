@@ -952,3 +952,21 @@ def test_llama_server_log_rota_al_pasar_de_50_mb(tmp_path):
     log_.write_bytes(b"y" * 10)
     assert not rotate_log(log_, 0.001) and log_.exists()
     assert not rotate_log(tmp_path / "no-existe.log", 1)
+
+
+def test_foto_inicial_lleva_los_totales_reales(tmp_path):
+    """Hallazgo n.º 8: la foto trae 1.500 eventos y 300 descartes; el mensaje «conteo» (al final) da los totales reales
+    desde el arranque para que la web no muestre una proporción falsa de captadas frente a ruido."""
+    store = Store(tmp_path / "t.db")
+    bus = Bus(store)
+    t = bus.started
+    for k in range(5):
+        bus.publish({"type": "event", "kind": "captured", "story": f"c{k}", "ts": t + k})
+    for k in range(12):
+        bus.publish({"type": "event", "kind": "filtered", "story": f"f{k}", "ts": t + k})
+    bus.publish({"type": "event", "kind": "captured", "story": "viejo", "ts": t - 3_600_000})   # antes del arranque
+    snap = bus.snapshot()
+    assert snap[-1] == {"type": "conteo", "desde": t, "kinds": {"captured": 5, "filtered": 12, "corroborated": 0,
+                                                               "triaged": 0, "lowprio": 0}}
+    assert bus.conteo(t + 30 * 3_600_000)["desde"] == t + 6 * 3_600_000   # 24 h como mucho
+    store.close()
