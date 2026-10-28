@@ -1,5 +1,5 @@
 """Agenda macro: calendario oficial del BLS y reuniones de la Fed. La usan el paper (pausa de 10 min antes de un dato
-de alto impacto) y el briefing de la IA local antes de cada apertura; el estratega de la fase 2 todavía no (n.º 25).
+de alto impacto), el briefing de la IA local antes de cada apertura y el estratega de la fase 2 (agenda_macro, n.º 25).
 Las fechas del FOMC están escritas a mano: si la última está a menos de FOMC_AVISO_D días, lo dice el registro y el
 mensaje «calendar» (aviso), porque sin ellas no habría pausa por la Fed (hallazgo n.º 33)."""
 import asyncio

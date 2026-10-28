@@ -622,6 +622,24 @@ async def test_estratega_con_las_reglas_del_usuario(tmp_path, monkeypatch):
     store.close()
 
 
+async def test_estratega_recibe_la_agenda_macro(tmp_path):
+    """Hallazgo n.º 25: el estratega recibe los eventos de «calendar» de la última hora a las próximas 24 h."""
+    client = FakeClient(by_model())
+    p, bus, store, calls = make_phase2(tmp_path, client)
+    now = ms(PRE_LONDON)
+    bus.publish({"type": "calendar", "updated": now, "aviso": None, "events": [
+        {"t": now + 5 * 3600_000, "name": "Consumer Price Index", "src": "BLS", "impact": "alto"},
+        {"t": now + 30 * 3600_000, "name": "Decisión de tipos de la Fed (FOMC)", "src": "Fed", "impact": "alto"},
+        {"t": now - 2 * 3600_000, "name": "Employment Situation", "src": "BLS", "impact": "alto"}]})
+    await p.check_windows(PRE_LONDON)
+    user = client.calls[-1]["messages"][0]["content"]
+    assert ('{"agenda_macro":[{"evento":"Consumer Price Index","fuente":"BLS","hora_madrid":"26-10 13:46",'
+            '"impacto":"alto"}]') in user                                         # 07:46 UTC + 5 h, en Madrid
+    assert "FOMC" not in user and "Employment" not in user and "agenda_macro" in ca.STRAT_SYSTEM
+    assert ca.agenda_brief(None, now) == [] and ca.agenda_brief({"events": [{"t": "x"}, None]}, now) == []
+    store.close()
+
+
 async def test_estratega_sin_ventaja_publica_nostrategy(tmp_path):
     client = FakeClient(by_model(strat={"why": "Señales mezcladas", "tickets": []}))
     p, bus, store, calls = make_phase2(tmp_path, client)

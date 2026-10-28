@@ -108,7 +108,8 @@ def closes_before_open(a, b, day) -> bool;  def ordered_by_close(day) -> list[Ma
 
 # bot/agenda.py  (publica "calendar": {"events": [{t, name, src ("BLS"|"Fed"), impact ("alto"|"medio")}], "updated", "aviso"})
 #   aviso: texto si el calendario FOMC escrito a mano se acaba en menos de 90 días (o ya se acabó), o null (n.º 33).
-#   La usan el paper (pausa de 10 min antes de un dato de alto impacto) y el briefing de la IA local
+#   La usan el paper (pausa de 10 min antes de un dato de alto impacto), el briefing de la IA local y el estratega de la
+#   fase 2 (claude_agents.agenda_brief: «agenda_macro», de la última hora a las próximas 24 h; n.º 25)
 
 # bot/local_ai.py (LocalAI: classify(title, src, tier, coins) -> dict; brief(window, when) -> str; puerto 8094, alias qwen-trading)
 ```
