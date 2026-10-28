@@ -420,6 +420,21 @@ async def test_la_ficha_del_medio_es_la_de_su_feed_directo_o_la_de_mas_nivel(env
     await apr.step(now, force=True)
     assert ficha("coindesk.com") == ("T2", "cripto", "en", 1)
     assert A.ficha_mejor(1, "T3", 0, "T0") and not A.ficha_mejor(0, "T0", 1, "T3") and A.ficha_mejor(0, "T2", 0, None)
+    # Filas de antes (sin ficha_directo): una ficha de Google News de un medio que alguna vez llegó directo (directo 1)
+    # se corrige con el feed directo aunque no traiga más nivel; una buena no la estropea un Google News de más nivel.
+    store.db.executemany("INSERT INTO medios_info (outlet, nombre, nivel, region, idioma, directo, tipo) VALUES "
+                         "(?, ?, ?, ?, ?, 1, 'dominio')", [("sucia.example", "x", "T1", "kr", "ko"),
+                                                           ("buena.example", "x", "T2", "cripto", "en")])
+    store.db.commit()
+    for ev in (captured("s1", T + 6 * DAY, url="https://sucia.example/a", src="Sucia", src_id="cripto-sucia", tier="T2",
+                        region="cripto", lang="en"),
+               gnews("b1", T + 6 * DAY, "T1", "jp", "ja", via="buena.example")):
+        bus.publish(ev)
+    now = T + 7 * DAY
+    apr = make(bus, store, FakeBars({"BTC": flat()}), now)
+    await apr.step(now, force=True)
+    assert ficha("sucia.example") == ("T2", "cripto", "en", 1) and ficha("buena.example") == ("T2", "cripto", "en", 1)
+    assert store.db.execute("SELECT ficha_directo FROM medios_info WHERE outlet = 'sucia.example'").fetchone() == (1,)
 
 
 async def test_solo_cuenta_lo_que_usaria_la_senal(env):

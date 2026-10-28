@@ -171,7 +171,8 @@ MEASURE_COLS = ("p0", "previo", "desde_pub", "r15", "r60", "r240", "r1440", "max
 MIGRATE = (("news_outcomes", "senal", "INTEGER"), ("news_outcomes", "n_medios", "INTEGER"),
            ("news_outcomes", "ts_triaje", "INTEGER"), ("news_outcomes", "bolsas", "TEXT"),
            ("news_outcomes", "adelanto_pub", "INTEGER"), ("news_outcomes", "acc60", "REAL"),
-           ("news_outcomes", "acc240", "REAL"), ("medios_info", "tipo", "TEXT"))
+           ("news_outcomes", "acc240", "REAL"), ("medios_info", "tipo", "TEXT"),
+           ("medios_info", "ficha_directo", "INTEGER"))
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS news_outcomes(
@@ -195,7 +196,7 @@ CREATE TABLE IF NOT EXISTS medios_conteo(clase TEXT NOT NULL, clave TEXT NOT NUL
   confirmaciones INTEGER DEFAULT 0, PRIMARY KEY(clase, clave, dia));
 CREATE INDEX IF NOT EXISTS medios_conteo_dia ON medios_conteo(dia);
 CREATE TABLE IF NOT EXISTS medios_info(outlet TEXT PRIMARY KEY, nombre TEXT, nivel TEXT, region TEXT, idioma TEXT,
-  directo INTEGER DEFAULT 0, primera_vez INTEGER, ultima_vez INTEGER, tipo TEXT);
+  directo INTEGER DEFAULT 0, primera_vez INTEGER, ultima_vez INTEGER, tipo TEXT, ficha_directo INTEGER);
 CREATE TABLE IF NOT EXISTS medio_fuente(outlet TEXT NOT NULL, fuente TEXT NOT NULL, PRIMARY KEY(outlet, fuente));
 CREATE TABLE IF NOT EXISTS aportaciones(trade TEXT NOT NULL, story TEXT NOT NULL, outlet TEXT NOT NULL, cuota REAL,
   signo INTEGER, R REAL, cerrada INTEGER, PRIMARY KEY(trade, story, outlet));
@@ -337,8 +338,12 @@ def ficha_mejor(directo: int, nivel: str | None, directo_antes: int | None, nive
     return d > d0 or (d == d0 and (nivel or "T9") < (nivel_antes or "T9"))
 
 
-# La misma regla en el ON CONFLICT de medios_info (los niveles «T0»…«T3» se ordenan como texto).
-_FICHA_MEJOR = ("(excluded.directo > COALESCE(directo, 0) OR (excluded.directo = COALESCE(directo, 0) AND "
+# La misma regla en el ON CONFLICT de medios_info (los niveles «T0»…«T3» se ordenan como texto). Se compara con si la
+# FICHA guardada salió de un feed directo (ficha_directo), no con «directo» (si el medio llegó alguna vez directo): si
+# no, una ficha de Google News de un medio con feed propio no se corregía nunca. En las filas de antes (ficha_directo
+# NULL) se supone lo de siempre, salvo frente a un feed directo, que siempre corrige.
+_FICHA_ANTES = ("COALESCE(ficha_directo, CASE WHEN excluded.ficha_directo = 1 THEN 0 ELSE COALESCE(directo, 0) END)")
+_FICHA_MEJOR = (f"(excluded.ficha_directo > {_FICHA_ANTES} OR (excluded.ficha_directo = {_FICHA_ANTES} AND "
                 "COALESCE(excluded.nivel, 'T9') < COALESCE(nivel, 'T9')))")
 
 
@@ -858,11 +863,13 @@ def ingest_chunk(db, cursor: int, upto: int, limit: int, p: dict) -> dict:
     def note(o, nombre, nivel, region, idioma, directo, ts, tipo):
         x = info.get(o)
         if x is None:
-            info[o] = [nombre, nivel, region, idioma, directo, ts, ts, tipo]
+            info[o] = [nombre, nivel, region, idioma, directo, ts, ts, tipo, directo]
             return
         nuevo = [nombre, nivel, region, idioma]
-        a, b = (nuevo, x[:4]) if ficha_mejor(directo, nivel, x[4], x[1]) else (x[:4], nuevo)
+        mejor = ficha_mejor(directo, nivel, x[8], x[1])   # x[8]: si la ficha guardada salió de un feed directo
+        a, b = (nuevo, x[:4]) if mejor else (x[:4], nuevo)
         x[:4] = [a[i] or b[i] for i in range(4)]
+        x[8] = directo if mejor else x[8]
         x[4] = max(x[4], directo)
         x[5], x[6] = min(x[5], ts), max(x[6], ts)
         x[7] = x[7] or tipo
@@ -1837,9 +1844,10 @@ class Aprendizaje:
                        "triadas = triadas + excluded.triadas, archivadas = archivadas + excluded.archivadas, "
                        "confirmaciones = confirmaciones + excluded.confirmaciones", res["counts"])
         db.executemany("INSERT INTO medios_info (outlet, nombre, nivel, region, idioma, directo, primera_vez, ultima_vez, "
-                       "tipo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(outlet) DO UPDATE SET "
+                       "tipo, ficha_directo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(outlet) DO UPDATE SET "
                        + ", ".join(f"{c} = CASE WHEN {_FICHA_MEJOR} THEN COALESCE(excluded.{c}, {c}) "
                                    f"ELSE COALESCE({c}, excluded.{c}) END" for c in ("nombre", "nivel", "region", "idioma"))
+                       + f", ficha_directo = CASE WHEN {_FICHA_MEJOR} THEN excluded.ficha_directo ELSE ficha_directo END"
                        + ", directo = MAX(directo, excluded.directo), primera_vez = MIN(primera_vez, excluded.primera_vez), "
                        "ultima_vez = MAX(ultima_vez, excluded.ultima_vez), tipo = COALESCE(tipo, excluded.tipo)",
                        res["info"])
