@@ -387,6 +387,33 @@ tbody tr[data-bt]{cursor:pointer}
 .lmatrix .rl{font-family:var(--f-mono);color:var(--ink-2);white-space:nowrap}
 .lmatrix .c{height:26px;border-radius:3px;display:flex;align-items:center;justify-content:center;font-family:var(--f-mono);font-size:10px}
 .lmatrix .c.na{opacity:.35}
+/* Cripto en cada apertura de bolsa (cripto_aperturas): tarjetas de Mercado y de Predicciones */
+.mktgrid.ca{grid-template-columns:repeat(auto-fill,minmax(270px,1fr))}
+.stchip.en_curso{background:var(--good-wash);color:var(--good)} .stchip.por_abrir{background:var(--accent-wash);color:var(--accent)}
+.stchip.terminada{background:var(--surface-2);color:var(--muted);border:1px solid var(--line)}
+.mtile.ca{gap:6px;align-content:start}
+.mtile .cah3{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-top:2px}
+.carows{display:grid;gap:3px}
+.carow{display:grid;grid-template-columns:34px 66px minmax(0,1fr) 84px;gap:6px;align-items:center;font-size:12px}
+.carow b{font-family:var(--f-mono);font-weight:500}
+.carow .rg{font-family:var(--f-mono);font-size:11px;color:var(--muted);text-align:right;white-space:nowrap}
+.mtile svg.casp{width:100%;height:22px;display:block}
+.cahist{display:grid;gap:4px;border-top:1px dashed var(--line);padding-top:6px}
+.cahist .lead{font-size:12px;color:var(--ink-2)}
+.catbl{display:grid;grid-template-columns:auto repeat(4,minmax(0,1fr));gap:1px 8px;font-size:11px;align-items:baseline}
+.catbl b{font-family:var(--f-mono);font-weight:500;text-align:right}
+.catbl small{color:var(--muted);font-size:10.5px;white-space:nowrap}
+.catbl i{font-style:normal;font-family:var(--f-mono);font-size:10.5px;color:var(--muted);text-align:right}
+.capg{display:grid;grid-template-columns:36px minmax(0,1fr) minmax(0,1fr);gap:5px 10px;align-items:center;font-size:12px}
+.capg small{font-size:10.5px;color:var(--muted);letter-spacing:.04em;text-transform:uppercase}
+.capg > b{font-family:var(--f-mono);font-weight:500}
+.capv{display:grid;grid-template-columns:minmax(0,1fr) 42px;gap:6px;align-items:center}
+.capv b{font-family:var(--f-mono);font-weight:500;text-align:right;font-size:11.5px}
+.meter{height:8px;border-radius:4px;background:var(--surface-2);border:1px solid var(--line);overflow:hidden}
+.meter span{display:block;height:100%;background:var(--accent)}
+#predChain{margin-bottom:12px}
+#predMk .pcard{align-content:start}
+.pill.rfl{margin-left:4px;vertical-align:1px}
 @media (max-width:1100px){ .three{grid-template-columns:minmax(0,1fr)} .kpis.kpis6{grid-template-columns:repeat(3,minmax(0,1fr))} }
 @media (max-width:720px){ .kpis.kpis8,.kpis.kpis6{grid-template-columns:repeat(2,minmax(0,1fr))} .drivers li{grid-template-columns:minmax(0,1fr) 52px 44px} }
 
@@ -438,6 +465,11 @@ body.world-mode{background:var(--w-bg)}
 .nlist .nt{font-size:12px;line-height:1.35;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 .nlist .nm{font-size:10.5px;color:var(--w-muted);margin-top:2px}
 .nlist .wt{height:3px;border-radius:2px;margin-top:4px}
+.nlist.wait li{opacity:.75}
+.w-side h4.wsub{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--w-muted);margin:12px 0 6px;font-weight:600}
+.rft{display:inline-block;font-size:10px;font-weight:600;border-radius:3px;padding:0 5px;margin-top:3px;white-space:nowrap}
+.rft.good{background:rgba(59,227,160,.16);color:var(--w-good)} .rft.bad{background:rgba(255,107,107,.16);color:var(--w-bad)}
+.rft.warn{background:rgba(255,195,90,.14);color:var(--w-warn)} .rft.muted,.rft.info{background:rgba(255,255,255,.06);color:var(--w-muted)}
 @media (min-width:901px){ .w-top .hud-tr{display:none} }   /* las monedas ya están en el lateral izquierdo */
 @media (max-width:900px){ .w-side,.w-sp{display:none} }
 #globe{position:absolute;inset:0;display:block;cursor:grab;touch-action:none}
@@ -683,7 +715,7 @@ details.evo-more p{margin:6px 0 0}
     <div class="md-col">
       <div class="panel"><div class="panel-h"><h2>Estado</h2><p id="mdMode"></p></div><div class="panel-b" id="mdState"></div></div>
       <div class="panel"><div class="panel-h"><h2>Agentes</h2></div><ul class="md-list" id="mdAgents"></ul></div>
-      <div class="panel"><div class="panel-h"><h2>Bolsas</h2><p>Barra: en directo, última sesión o previsión (discontinua)</p></div><ul class="md-list" id="mdMarkets"></ul></div>
+      <div class="panel"><div class="panel-h"><h2>Bolsas · cripto</h2><p>Barra: media de BTC, ETH, SOL y XRP desde cada apertura (4 h); discontinua, su apertura anterior</p></div><ul class="md-list" id="mdMarkets"></ul></div>
       <div class="panel"><div class="panel-h"><h2>Cripto</h2></div><ul class="md-list" id="mdCoins"></ul></div>
     </div>
     <div class="md-col">
@@ -701,10 +733,10 @@ details.evo-more p{margin:6px 0 0}
 
   <!-- PREDICCIONES -->
   <section class="view" id="v-pred" hidden>
-    <div class="callout info"><b>Lo que sugieren los datos para las próximas aperturas. No son órdenes.</b><span>Cada predicción combina el comportamiento histórico entre bolsas (pestaña Backtest), cómo han cerrado hoy las bolsas anteriores, los futuros, las noticias puntuadas y el flujo de órdenes. Todas se guardan y se comprueban después para medir su acierto real.</span></div>
+    <div class="callout info"><b>Lo que dicen los datos de la cripto en las próximas aperturas. No son órdenes.</b><span>Solo cripto: lo que hicieron BTC, ETH, SOL y XRP en cada apertura de bolsa (velas de 1 minuto desde noviembre de 2023), las noticias puntuadas y el flujo de órdenes. Los índices de las bolsas no cuentan. Lo histórico es frecuencia pasada, no una previsión; las predicciones se guardan y se comprueban después para medir su acierto real.</span></div>
     <div class="panel"><div class="kpis" id="predKpis"></div></div>
-    <div class="panel"><div class="panel-h"><h2>Bolsas · próximas sesiones</h2><p>Probabilidad de que la sesión cierre por encima de su apertura.</p></div><div class="panel-b"><div class="pgrid" id="predMk"></div></div></div>
-    <div class="panel"><div class="panel-h"><h2>Cripto · próxima ventana</h2><p>Probabilidad de subida durante la próxima ventana de apertura.</p></div><div class="panel-b"><div class="pgrid" id="predCr"></div></div></div>
+    <div class="panel"><div class="panel-h"><h2>Cripto en las próximas aperturas</h2><p>Por cada apertura: cuántas veces subió cada cripto en las 4 h siguientes y cuántas se movió un 2 % o más (máximo − mínimo frente al precio de apertura).</p></div><div class="panel-b"><div id="predChain"></div><div class="pgrid" id="predMk"></div></div></div>
+    <div class="panel"><div class="panel-h"><h2>Cripto · próxima ventana</h2><p>Probabilidad de subida durante la próxima ventana, con los factores que manda el bot.</p></div><div class="panel-b"><div class="pgrid" id="predCr"></div></div></div>
   </section>
 
   <!-- RESULTADOS -->
@@ -767,7 +799,7 @@ details.evo-more p{margin:6px 0 0}
 
   <!-- MERCADO -->
   <section class="view" id="v-market" hidden>
-    <div class="panel"><div class="panel-h"><h2>Bolsas del mundo</h2><p>Índice de cada bolsa: en directo si está abierta, la última sesión si está cerrada.</p></div><div class="panel-b"><div class="mktgrid" id="mkTiles"></div></div></div>
+    <div class="panel"><div class="panel-h"><h2>Bolsas del mundo: cómo reacciona la cripto en cada apertura</h2><p>BTC, ETH, SOL y XRP desde que abre cada bolsa: en curso sus 4 primeras horas, luego el resultado a las 4 h y, antes de abrir, lo que hizo en su apertura anterior. Los índices no se muestran.</p></div><div class="panel-b"><p class="note" id="mkNote" hidden style="margin-bottom:10px"></p><div class="mktgrid ca" id="mkTiles"></div></div></div>
     <div class="panel"><div class="panel-h"><h2>Flujo de órdenes cripto</h2><p>Libro de órdenes de OKX EU y operaciones agresivas de Binance: quién empuja ahora mismo.</p></div><div class="panel-b"><div class="mktgrid" id="ofTiles"></div></div></div>
     <div class="panel"><div class="panel-h"><h2>Motor de aperturas</h2><p id="openSub">Señal de las noticias → confirmación en los primeros minutos de la apertura (ruptura del rango con volumen y presión a favor) → entrada → stop dinámico → reentradas mientras el volumen acompañe.</p></div><div class="panel-b" id="openings"></div></div>
     <div class="panel"><div class="panel-h"><h2>Vigilancia en vivo</h2><p>Prueba en avance de las estrategias congeladas del laboratorio y de su variante del usuario de 7 días: en cada apertura, si habrían entrado y cómo acaba cada operación VIRTUAL (sin dinero), frente a su cifra del backtest fuera de muestra.</p></div><div class="panel-b" id="vigil"></div></div>
@@ -898,8 +930,25 @@ const KINDS = {
   filled:    {label:"Ejecutada · paper", agent:"exec", tone:"good"},
   blocked:   {label:"Bloqueada",    agent:"exec",     tone:"bad",  drop:true},
   manage:    {label:"Gestión",      agent:"exec",     tone:"info"},
-  closed:    {label:"Cerrada · paper", agent:"exec",  tone:"good"}
+  closed:    {label:"Cerrada · paper", agent:"exec",  tone:"good"},
+  reflejo:   {label:"Reflejo en la cripto", agent:"flow", tone:"info"}   // noticia macro o geopolítica: ¿la cripto la confirma? (patch.reflejo)
 };
+// Reflejo en la cripto de una noticia macro o geopolítica (evento «reflejo»): solo las «confirmada» cuentan en la señal.
+const REFLEJO = {confirmada:["good","La cripto lo confirma"], contraria:["bad","La cripto dice lo contrario"],
+  sin_reflejo:["muted","Sin reflejo en la cripto"], pendiente:["warn","Esperando al mercado"]};
+const reflejoOf = st => st && st.reflejo && typeof st.reflejo==="object" ? st.reflejo : null;
+// Dirección del triaje como la lee el bot (bot/reflejo.direccion): ±1 si |dirección| > 15; si no, 0.
+const triDir = st => { const r = st && isObj(st.triage) && isObj(st.triage.repercusion) ? st.triage.repercusion : null, d = r && isNum(r.direccion) ? r.direccion : 0; return d > 15 ? 1 : d < -15 ? -1 : 0; };
+// Macro o geopolítica por la clase del prefiltro de su captada (patch.clase) o porque ya trae «reflejo».
+const isMacroSt = st => !!st && (st.clase==="macro" || st.clase==="contexto" || (st.clase!=="cripto" && !!reflejoOf(st)));
+// ¿Cuenta? Las de cripto y las neutrales, siempre; una macro con dirección, solo si la cripto la confirmó (como
+// bot/reflejo.cuenta). Sin «reflejo» todavía (los segundos tras el triaje, o una macro de antes de reiniciar), no cuenta.
+const reflejoOk = st => { if (!st || st.clase==="cripto") return true; const r = reflejoOf(st); if (r) return r.estado==="confirmada"; return !(isMacroSt(st) && triDir(st)!==0); };
+// Reflejo para enseñar: el que haya o, en una macro con dirección que aún no lo tiene, «pendiente».
+const reflejoShown = st => reflejoOf(st) || (st && st.clase!=="cripto" && isMacroSt(st) && triDir(st) ? {estado:"pendiente", mov_pct:null, min:null, ref:null} : null);
+// Lo que saldría «confirmada» por puro azar (bot/reflejo.AZAR, medido con velas de 1 min de junio a octubre de 2026).
+const REFLEJO_AZAR = {umbral:5.0, fijo:18.7};
+const reflejoInfo = r => REFLEJO[r && r.estado] || ["muted","Reflejo sin estado"];
 const VERIFY_MIN = 5, IMPACT_MIN = 6;   // = config.VERIFY_MIN_IMPORTANCE / IMPACT_MIN_IMPORTANCE del bot
 const ICON = {good:"✓", bad:"✗", warn:"◷", info:"•", muted:"–"};
 const STAGES = [
@@ -1179,7 +1228,8 @@ function ingest(msg){
   if (msg.type==="sources") { S.sources = msg.sources; S.dirty=true; }
   if (msg.type==="calendar") { S.calendar = msg.events; S.dirty=true; }
   if (msg.type==="sources_summary") { S.srcSummary = msg; S.dirty=true; }
-  if (msg.type==="trend") { S.trend = msg.markets; S.dirty=true; }
+  if (msg.type==="trend") { S.trend = msg.markets; S.dirty=true; }   // índices: ya no se pintan (solo interesa la cripto)
+  if (msg.type==="cripto_aperturas") { S.criptoAp = msg; S.dirty=true; }
   if (msg.type==="orderflow") { S.orderflow = msg.coins; S.dirty=true; }
   if (msg.type==="predictions") { S.predictions = msg; S.dirty=true; }
   if (msg.type==="openings") { S.openings = msg; S.dirty=true; }
@@ -1226,6 +1276,9 @@ async function loadApi(which){   // datos que no van por el WebSocket: backtest 
     if (!which || which==="res"){ const r = await fetch("/api/resultados"); if (r.ok) S.results = await r.json(); }
     S.dirty = true;
   } catch(e){ /* el bot puede estar reiniciándose; se reintenta en la próxima ronda */ }
+  if (!which && !S.criptoAp) try {   // la cripto en cada apertura: también va en el estado inicial del WebSocket
+    const r = await fetch("/api/cripto_aperturas"); if (r && r.ok){ const j = await r.json(); if (j && typeof j==="object" && j.markets && !S.criptoAp){ S.criptoAp = j; S.dirty = true; } }
+  } catch(e){ /* un bot sin esta ruta todavía: se espera al mensaje del WebSocket */ }
 }
 // Órdenes de la web al bot (paper) por el WebSocket. Si no está abierto, se avisa en vez de perder el clic.
 function sendBot(o){
@@ -1298,7 +1351,7 @@ function resetLive(msg){
     counts:newCounts(), execStop:false, lastClosedKey:null,
     ag:Object.fromEntries(AGENTS.map(a=>[a.id,{busy:0, now:"", n:0, ok:0, ko:0, calls:0, tin:0, tout:0, cost:0, last:[]}])),
     sources:[], calendar:[], prices:{}, p0:{}, spread:{}, hist:Object.fromEntries(COINS.map(c=>[c,[]])), lastHist:0,
-    trend:null, orderflow:null, predictions:null, srcSummary:null, portfolio:null, results:null,
+    trend:null, criptoAp:null, orderflow:null, predictions:null, srcSummary:null, portfolio:null, results:null,
     evo:null, apr:null, fv:null, fvList:null, fvCand:null, evoHist:null, evoInf:null, evoNews:null, evoMedio:null, evoSel:null,
     evoDemo:false, evoOrdTs:undefined, evoPend:null, fvPend:null, aprPend:null, evoRev:S.evoRev+1,
     sel:null, pickSel:true, dirty:true});
@@ -1311,7 +1364,8 @@ function resetLive(msg){
 function onEvent(e){
   e.id = e.id || "e"+(++S.seq); e.ts = e.ts || S.vnow;
   const k = KINDS[e.kind]; if (!k) return;
-  e.agent = e.agent || k.agent;
+  e.agent = e.agent || k.agent; if (!S.ag[e.agent]) e.agent = k.agent;   // un agente que la web no conoce no debe romper nada
+  if (e.kind==="reflejo" && !e.tone) e.tone = reflejoInfo(e.patch && e.patch.reflejo)[0];
   S.events.push(e); if (S.events.length>1200) S.events.splice(0, S.events.length-1200);
   S.counts[e.kind]++;
   if (e.kind==="humanok" && e.patch && e.patch.human && e.patch.human.mode==="auto") S.counts.humanauto++;
@@ -1392,7 +1446,9 @@ function capture(){
   }
   S.used.set(tpl.key, now);
   emit({kind:"captured", story:id, title:headline, coins:tpl.coins, text:`${src.name} · ${src.tier} · llega ${lat(l)} después de publicarse`,
-    patch:{headline, src:src.name, srcId:tpl.src, region:tpl.region||null, tier:src.tier, t0:now, lat:l, coins:tpl.coins, tpl:tpl.key, filter:{ok:true, why:"Universo BTC/ETH/SOL/XRP o tema de mercado, publicada hace < 10 s, sin duplicados"}}});
+    patch:{headline, src:src.name, srcId:tpl.src, region:tpl.region||null, tier:src.tier, t0:now, lat:l, coins:tpl.coins, tpl:tpl.key, px0:{...S.prices},
+      clase: ["macro","geopolítica","política"].includes(TIPO[tpl.key]) ? "macro" : "cripto",   // como filters.classify del bot
+      filter:{ok:true, why:"Universo BTC/ETH/SOL/XRP o tema de mercado, publicada hace < 10 s, sin duplicados"}}});
   if (tpl.truth==="true" && tpl.mag[1]>=0.8){ // el primer tirón lo cazan los bots rápidos
     const m = rnd(...tpl.mag)/100, jump = m*0.35*tpl.dir;
     for (const c of tpl.coins){ const b=INFO[c].beta/INFO[tpl.main].beta; S.prices[c]*=Math.exp(jump*b);
@@ -1426,8 +1482,37 @@ function triageStage(id, tpl, src){
     if (imp < 4) emit({kind:"lowprio", story:id, title:st.headline, coins:st.coins, text:`Importancia ${imp}/10 · ${tr.tipo}: no merece gastar IA de pago`, patch:{triage:tr}});
     else { emit({kind:"triaged", story:id, title:st.headline, coins:st.coins, text:`Importancia ${imp}/10 · ${tr.tipo} · ${senti}`, patch:{triage:tr}});
       later(rnd(100,300), () => verifyStage(id, tpl, src)); }
+    // macro o geopolítica con dirección: solo contará si la cripto la refleja (como el evento «reflejo» del bot)
+    if (["macro","geopolítica","política"].includes(tipo) && (senti==="alcista" || senti==="bajista")) simReflejo(id, senti==="alcista" ? 1 : -1);
     free("local");
   });
+}
+// Demostración del evento «reflejo», como bot/reflejo.py: media de las 4 monedas desde la captura; un movimiento a favor
+// de al menos el umbral (el mayor de 0,5 % y 2σ del movimiento de 60 min de las 24 h previas, con los precios simulados)
+// en 60 min confirma, en contra contradice y, si no, a los 60 min queda sin reflejo.
+function simUmbral(t0){
+  const L = S.pxLog || [], i = pxIdx(t0 - 24*3600e3), j = pxIdx(t0);
+  let s = 0, s2 = 0, n = 0;
+  for (let k = i + 1; k < j && k < L.length; k++){ if (L[k][0] - L[k-1][0] > 61000) continue;
+    let r = 0, ok = true; for (const c of COINS){ const a = L[k-1][1][c], b = L[k][1][c]; if (!(a > 0 && b > 0)){ ok = false; break; } r += Math.log(b/a); }
+    if (!ok) continue; r /= COINS.length; s += r; s2 += r*r; n++; }
+  if (n < 600) return 0.5;
+  const m = s/n, sd = Math.sqrt(Math.max(0, s2/n - m*m));
+  return Math.max(0.5, 2*sd*Math.sqrt(60)*100);
+}
+function simReflejo(id, dir){
+  const st = S.stories.get(id); if (!st) return;
+  const t0 = st.t0 || S.vnow, p0 = st.px0 || {...S.prices}, um = Math.round(simUmbral(t0)*1000)/1000;
+  const mov = () => COINS.reduce((a,c) => a + (S.prices[c]/(p0[c]||S.prices[c]) - 1)*100, 0)/COINS.length;
+  emit({kind:"reflejo", story:id, title:st.headline, coins:[...COINS], text:"Noticia macro: no cuenta hasta que la cripto la refleje (60 min como mucho)",
+    patch:{reflejo:{estado:"pendiente", mov_pct:mov(), min:Math.round((S.vnow-t0)/60000), ref:"media", umbral_pct:um}}});
+  const check = () => { const s = S.stories.get(id), r = reflejoOf(s); if (!r || r.estado!=="pendiente") return;
+    const m = mov(), mins = Math.min(60, Math.round((S.vnow-t0)/60000)), fav = m*dir;
+    const estado = fav >= um ? "confirmada" : fav <= -um ? "contraria" : mins >= 60 ? "sin_reflejo" : null;
+    if (!estado){ s.reflejo = {...r, mov_pct:m, min:mins}; S.dirty = true; later(60000, check); return; }
+    emit({kind:"reflejo", story:id, title:s.headline, coins:[...COINS], text:`${reflejoInfo({estado})[1]}: ${pct(m,2)} de media en ${mins} min (umbral ${nf(um,2)} %)`,
+      patch:{reflejo:{estado, mov_pct:m, min:mins, ref:"media", umbral_pct:um}}}); };
+  later(60000, check);
 }
 function verifyStage(id, tpl, src){
   const st = S.stories.get(id);
@@ -1610,7 +1695,7 @@ function checkBriefs(){
     if (s.next - S.vnow < 30*60000 && !S.briefed.has(key)){
       S.briefed.add(key);
       const since = S.vnow - 4*3600000;
-      const ver = [...S.stories.values()].filter(x => x.verify && x.verify.score>0.8 && x.t0>since);
+      const ver = [...S.stories.values()].filter(x => x.verify && x.verify.score>0.8 && x.t0>since && reflejoOk(x));   // macro solo si la cripto la confirma
       const net = {}; for (const x of ver) if (x.impact) net[x.impact.main] = (net[x.impact.main]||0) + x.impact.dir*x.impact.mag;
       const top = Object.entries(net).sort((a,b)=>Math.abs(b[1])-Math.abs(a[1]))[0];
       const llm = call("opus", 14000, 6000, 1800);
@@ -1630,7 +1715,19 @@ function step(dt){
   managePositions(); checkScheduled(); checkBriefs();
   eqAcc += dt; if (eqAcc >= 60000){ eqAcc = 0; S.eqHist.push({t:S.vnow, v:equityNow()}); if (S.eqHist.length>400) S.eqHist.shift(); }
   spAcc += dt; if (spAcc >= 30000){ spAcc = 0; for (const c of COINS){ S.hist[c].push(S.prices[c]); if (S.hist[c].length>240) S.hist[c].shift(); } }
+  pxAcc += dt; if (pxAcc >= 60000){ pxAcc = 0; pxPush(S.vnow); }
   simWorld(dt);
+}
+// Demostración: precios simulados de cada minuto (80 h, para cubrir el fin de semana) con los que se mide la cripto en
+// cada apertura igual que el bot (cripto_aperturas). Al arrancar se siembran hacia atrás con la volatilidad de cada moneda.
+let pxAcc = 0;
+const PX_KEEP = 80*60;
+function pxPush(t){ const L = S.pxLog || (S.pxLog = []); L.push([t, {...S.prices}]); if (L.length > PX_KEEP + 120) L.splice(0, L.length - PX_KEEP); }
+function seedPxLog(){
+  const t1 = S.vnow, out = new Array(PX_KEEP), p = {...S.prices};
+  for (let i = PX_KEEP-1; i >= 0; i--){ out[i] = [t1 - (PX_KEEP-i)*60000, {...p}];
+    for (const c of COINS) p[c] *= Math.exp(-INFO[c].ann/100/Math.sqrt(365*1440) * gauss()); }
+  S.pxLog = out;
 }
 // En directo el capital del bot ya va a precio de mercado (incluye lo latente): no se vuelve a sumar.
 function equityNow(){
@@ -1646,6 +1743,9 @@ const posR = p => p.riskUsd ? posPnl(p)/p.riskUsd : 0;
 function agChip(id){ const a=AG[id]; return `<span class="ag${id==="human"?" human":""}" style="--c:var(--a-${id})"><i></i>${esc(a.name)}</span>`; }
 function pill(tone, label){ return `<span class="pill ${tone}">${ICON[tone]} ${esc(label)}</span>`; }
 function coinTags(cs){ return (cs||[]).map(c=>`<span class="coin">${c}</span>`).join(""); }
+// Etiqueta de un evento en el cable: la del tipo o, en un «reflejo», lo que dice la cripto de la noticia.
+function evLabel(e){ return e.kind==="reflejo" ? reflejoInfo(e.patch && e.patch.reflejo)[1] : KINDS[e.kind].label; }
+function reflejoPill(r){ const [tone, label] = reflejoInfo(r); return `<span class="pill ${tone} rfl">${ICON[tone]} ${esc(label)}</span>`; }
 
 function renderHeader(){
   const t = S.vnow, drift = Math.abs(t-Date.now())>5000;
@@ -1738,7 +1838,7 @@ function renderFeed(){
     const k = KINDS[e.kind], tone = e.tone||k.tone, st = e.story && S.stories.get(e.story);
     const l = st && st.t0 ? e.ts - st.t0 : 0;
     return `<li class="ev${k.drop?" dim":""}" data-story="${e.story||""}" aria-current="${!!e.story && e.story===S.sel}">
-      <time>${hms(e.ts)}</time>${agChip(e.agent)}${pill(tone, k.label)}
+      <time>${hms(e.ts)}</time>${agChip(e.agent)}${pill(tone, evLabel(e))}
       <div class="ev-body"><b>${esc(e.title)}</b>${e.kind==="captured" && e.patch && e.patch.fresh===false ? `<span class="ctx" title="Publicada hace más de 15 min: sirve de contexto para las aperturas, no para entrar ya">contexto</span>` : ""}<span class="ev-sub">${esc(e.text||"")}${l>0?` · <span class="mono">${lat(l)}</span>`:""}${e.llm?` · <span class="mono">${esc(e.llm.model)} ${usd(e.llm.cost,4)}</span>`:""}</span></div>
       <span class="coins">${coinTags(e.coins)}</span></li>`;
   }).join("");
@@ -1766,6 +1866,24 @@ function checksList(cs){ return `<ul class="checks">${cs.map(c=>`<li><span class
 function llmLine(l){ return l ? `<span class="llm">${esc(l.model)} · ${nf(l.tin,0)} tokens de entrada (${nf(l.cached,0)} en caché) · ${nf(l.tout,0)} de salida · ${usd(l.cost,4)}</span>` : ""; }
 function kv(pairs){ return `<div class="kv">${pairs.map(([k,v])=>`<div><small>${esc(k)}</small><b>${v}</b></div>`).join("")}</div>`; }
 function evTime(st, kind){ const e = st.events.find(x=>x.kind===kind); return e ? (st.t0 ? `${hms(e.ts)} · ${lat(e.ts-st.t0)}` : hms(e.ts)) : ""; }
+// Paso del expediente: ¿la cripto refleja esta noticia macro o geopolítica? Solo si la confirma cuenta en la señal.
+function reflejoStep(st){
+  const r = reflejoOf(st); if (!r) return "";
+  const est = r.estado, status = est==="confirmada" ? "done" : est==="pendiente" ? "todo" : "fail";
+  const e = [...st.events].reverse().find(x => x.kind==="reflejo"), when = e ? (st.t0 ? `${hms(e.ts)} · ${lat(e.ts-st.t0)}` : hms(e.ts)) : "";
+  const um = isNum(r.umbral_pct) ? `${nf(r.umbral_pct,2)} %` : "el umbral";
+  const why = est==="confirmada" ? `<span>Cuenta en la señal: la cripto se movió a favor de la noticia. Puede ser casualidad: no prueba que la noticia moviera el precio.</span>`
+    : est==="contraria" ? `<span class="reason">No cuenta: la cripto se movió en contra de la noticia.</span>`
+    : est==="sin_reflejo" ? `<span class="reason">No cuenta: en 60 min la cripto no se movió ${um} ni a favor ni en contra.</span>`
+    : est==="pendiente" ? `<span>No cuenta todavía: espera hasta 60 min a que la cripto se mueva ${um} a favor o en contra.</span>`
+    : `<span class="reason">No cuenta: estado del reflejo desconocido.</span>`;
+  const facts = [];
+  if (isNum(r.mov_pct)) facts.push(["Movimiento", `<span class="${r.mov_pct>=0?"pos":"neg"}">${pct(r.mov_pct,2)}</span>`]);
+  if (isNum(r.umbral_pct)) facts.push(["Umbral", `${nf(r.umbral_pct,2)} %`]);
+  if (isNum(r.min)) facts.push(["Medido", `${nf(r.min,0)} min de 60`]);
+  if (r.ref) facts.push(["Referencia", r.ref==="BTC" ? "BTC (faltan datos de las demás)" : "media de BTC, ETH, SOL y XRP"]);
+  return stepNode("flow", "Reflejo en la cripto", status, when, `<div>${reflejoPill(r)}</div><span>Noticia macro o geopolítica: solo cuenta en la señal, en la balanza y para el estratega si la cripto la confirma: un movimiento a su favor de al menos el umbral (el mayor de 0,5 % y 2σ del movimiento de 60 min de las 24 h anteriores) en los 60 min siguientes a captarla.</span>${why}${facts.length ? kv(facts) : ""}<span class="note">Por puro azar, una noticia cualquiera se «confirmaría» alrededor del ${nf(REFLEJO_AZAR.umbral,0)} % de las veces (con un 0,5 % fijo, el ${nf(REFLEJO_AZAR.fijo,0)} %): es un filtro, no una prueba de causa.</span><span class="llm">Medido con los precios del mercado, sin coste de IA</span>`);
+}
 const GONE_TXT = "Sin datos: este paso quedó fuera del historial que recibió la web al conectar.";
 
 function renderTrace(box = $("#trace")){
@@ -1799,7 +1917,7 @@ function renderTrace(box = $("#trace")){
   if (st.filter) h += stepNode("hunter","Filtro de relevancia","done","", `<span>${esc(st.filter.why)}</span>`
     + ((st.topics && st.topics.length) || st.region ? kv([["Región", esc(REG_NAME[st.region] || st.region || "Global")], ["Idioma", esc(st.lang || "–")],
         ["Temas", esc((st.topics||[]).map(t => TOPIC_NAME[t] || t).join(", ") || "–")], ["Frescura", st.fresh===false ? "Contexto" : "Fresca"]]) : ""));
-  if (!st.triage){ h += stepNode("local","Triaje con IA local","todo","", `<span>${gone ? GONE_TXT : S.live ? "Esperando a la IA local de tu PC. Si está apagada, la noticia se queda sin triaje y no pasa a verificación ni a impacto." : "Clasificando…"}</span>`);
+  if (!st.triage){ h += stepNode("local","Triaje con IA local","todo","", `<span>${gone ? GONE_TXT : S.live ? "Esperando a la IA local de tu PC. Si está apagada, la noticia se queda sin triaje y no pasa a verificación ni a impacto." : "Clasificando…"}</span>`) + reflejoStep(st);
     if (!S.live || !(st.verify || gone)) return box.innerHTML = h+"</ol>"; }
   else { const tr = st.triage, low = st.final==="lowprio";
     h += stepNode("local","Triaje con IA local", low?"fail":"done", evTime(st, low?"lowprio":"triaged"),
@@ -1811,6 +1929,7 @@ function renderTrace(box = $("#trace")){
       + (tr.motivo ? `<span class="note">${esc(tr.motivo)}</span>` : "")
       + (low ? `<span class="reason">Archivada: importancia por debajo de 4/10, no se gasta IA de pago.</span>` : "")
       + `<span class="llm">${esc(tr.model||"IA local")}${tr.ms?` · ${nf(tr.ms/1000,1)} s`:""}</span>`);
+    h += reflejoStep(st);
     if (low) return box.innerHTML = h+"</ol>"; }
     if (noVer){ h += stepNode("verifier","Verificación","fail","", `<span class="reason">No se verifica: importancia ${imp}/10, por debajo de ${VERIFY_MIN}.</span>`); return box.innerHTML = h+"</ol>"; }
     if (!st.verify){ h += stepNode("verifier","Verificación","todo","", `<span>${gone ? GONE_TXT : S.live ? `Solo se verifican las noticias con importancia ${VERIFY_MIN} o más: Haiku 5.5 si hay clave de API, si no la IA local. Si otra fuente publica lo mismo, aparece arriba como confirmación.` : "Cruzando fuentes…"}</span>`);
@@ -1827,7 +1946,7 @@ function renderTrace(box = $("#trace")){
     h += stepNode("impact","Impacto esperado", im.drop?"fail":"done", evTime(st, im.drop?"noimpact":"impact"),
       kv([["Dirección", im.dir>0?'<span class="pos">▲ Alcista</span>':'<span class="neg">▼ Bajista</span>'],["Movimiento",`${nf(im.mag,1)} % en ${im.main}`],["Confianza",`${nf(im.conf*100,0)} %`],["Horizonte",esc(im.hz)]])
       + `<div class="kv">${Object.entries(im.per||{}).map(([c,m])=>`<div><small>${c}${INFO[c]?` (beta ${nf(INFO[c].beta,2)})`:""}</small><b>${im.dir>0?"+":"−"}${nf(m,1)} %</b></div>`).join("")}</div>`
-      + (im.markets && Object.keys(im.markets).length ? `<div class="kv">${Object.entries(im.markets).map(([k,m])=>`<div><small>${esc((MKBY[k] && MKBY[k].name) || k)}</small><b class="${m>=0?"pos":"neg"}">${pct(m,1)}</b></div>`).join("")}</div>` : "")
+      // im.markets (cambio esperado de los índices) ya no se pinta: solo interesa cómo reacciona la cripto
       + `<div class="why">${esc(im.why)}</div>${im.drop?`<span class="reason">Archivada: ${esc(im.drop)}.</span>`:""}${llmLine(im.llm)}`);
     if (im.drop) return box.innerHTML = h+"</ol>"; } }
   }
@@ -2281,10 +2400,10 @@ function renderAI(){
 const EVO_TIPOS = {fuente_añadida:"Medio añadido", fuente_silenciada:"Medio silenciado", fuente_retirada:"Medio retirado",
   fuente_restaurada:"Medio restaurado", peso_cambiado:"Peso cambiado", estrategia_promovida:"Estrategia promovida",
   estrategia_degradada:"Estrategia degradada", parametro_cambiado:"Parámetro cambiado", informe_semanal:"Informe semanal",
-  veredicto_medio:"Veredicto de un medio", propuesta_descartada:"Propuesta descartada"};
+  veredicto_medio:"Veredicto de un medio", propuesta_descartada:"Propuesta descartada", filtro_cambiado:"Filtro de noticias cambiado"};
 const EVO_TONE = {fuente_añadida:"good", fuente_restaurada:"good", fuente_silenciada:"warn", fuente_retirada:"bad", peso_cambiado:"info",
   estrategia_promovida:"good", estrategia_degradada:"bad", parametro_cambiado:"info", informe_semanal:"muted", veredicto_medio:"muted",
-  propuesta_descartada:"muted"};
+  propuesta_descartada:"muted", filtro_cambiado:"warn"};
 const EVO_ESTADO = {ok:["good","Al día"], arrancando:["info","Arrancando"], sin_datos:["muted","Sin datos aún"],
   datos_atrasados:["warn","Datos atrasados"], error:["bad","Fallo de cálculo"], apagada:["muted","Apagada"]};
 const EVO_ORIGEN = {fuentes_vivas:"ciclo de vida de las fuentes", aprendizaje:"aprendizaje de medios", evolucion:"evolución",
@@ -2889,14 +3008,16 @@ function mbar(val, pred){   // val de −1 a 1
   const v = Math.max(-1, Math.min(1, val || 0));
   return `<span class="mbar${pred?" pred":""}"><span style="${v>=0?"left:50%":"right:50%"};width:${Math.abs(v)*50}%;background:${v>=0?"var(--good)":"var(--bad)"}"></span></span>`;
 }
+// Cada bolsa, por cómo reacciona la cripto en su apertura (media de las 4 monedas, barra de ±2 %); nunca su índice.
 function marketLine(m){
-  const s = mkSession(m, S.vnow), t = (S.trend||{})[m.key] || {}, state = t.state || s.state, open = state==="abierta" || state==="pausa";
-  const pr = ((S.predictions && S.predictions.items) || []).find(p => p.kind==="bolsa" && p.target===m.key);
-  const last = t.last_session && t.last_session.change_pct!=null ? t.last_session.change_pct : t.change_pct;
-  if (open && t.change_pct!=null) return {txt:`${state==="pausa"?"pausa":"abierta"} ${pct(t.change_pct,2)}`, bar:mbar(t.change_pct/2), led:"busy"};
-  if (pr && s.next && s.next-S.vnow < 12*3600e3) return {txt:`abre en ${dur(s.next-S.vnow)} · prev. ${Math.round(pr.prob_up*100)} %`, bar:mbar((pr.prob_up-0.5)*2, true), led: s.next-S.vnow < 3600e3 ? "wait" : ""};
-  if (last!=null) return {txt:`cerró ${pct(last,2)}${s.next ? " · abre en "+dur(s.next-S.vnow) : ""}`, bar:mbar(last/2), led:""};
-  return {txt: s.next ? `abre en ${dur(s.next-S.vnow)}` : "cerrada", bar:mbar(0), led:""};
+  const now = S.vnow, s = mkSession(m, now), r = cryptoReaction(m.key, now), x = caMarket(m.key);
+  const next = x && isNum(x.next_open_ms) ? x.next_open_ms : s.next, nx = next && next > now ? " · abre en "+dur(next-now) : "";
+  if (r && r.avg!=null){
+    if (r.kind==="live") return {txt:`en curso · cripto ${pct(r.avg,2)}${r.left!=null ? ` · quedan ${dur(r.left)}` : ""}`, bar:mbar(r.avg/2), led:"busy"};
+    if (r.kind==="done") return {txt:`cripto ${pct(r.avg,2)} a las 4 h${nx}`, bar:mbar(r.avg/2), led:""};
+    return {txt:`última apertura: cripto ${pct(r.avg,2)}${nx}`, bar:mbar(r.avg/2, true), led: next && next-now < 3600e3 ? "wait" : ""};
+  }
+  return {txt:`${r ? CA_STATE[r.state] + " · sin datos de la cripto" : S.live ? "aún sin datos de la cripto" : "solo con el bot en marcha"}${nx}`, bar:mbar(0), led:""};
 }
 function renderMando(){
   const now = S.vnow, t = World.tensionNow(), nw = nextWindow(now), ss = S.srcSummary;
@@ -2921,7 +3042,7 @@ function renderMando(){
   if (sig !== mdFeedSig){ mdFeedSig = sig; const out = [];
     for (let i=S.events.length-1; i>=0 && out.length<160; i--){ const e = S.events[i]; if (!showNoise && e.kind==="filtered") continue; out.push(e); }
     $("#mdFeed").innerHTML = out.map(e => { const k = KINDS[e.kind], tone = e.tone || k.tone;
-      return `<li class="ev${k.drop?" dim":""}" data-story="${e.story||""}" aria-current="${!!e.story && e.story===S.sel}"><time>${hms(e.ts)}</time>${agChip(e.agent)}${pill(tone, k.label)}
+      return `<li class="ev${k.drop?" dim":""}" data-story="${e.story||""}" aria-current="${!!e.story && e.story===S.sel}"><time>${hms(e.ts)}</time>${agChip(e.agent)}${pill(tone, evLabel(e))}
         <div class="ev-body"><b>${esc(e.title)}</b><span class="ev-sub">${esc(short(e.text||"", 160))}</span></div></li>`; }).join("") || `<li class="empty">Todavía no hay eventos.</li>`; }
   renderTrace($("#mdTrace"));
   // decisión, cartera y resultado de hoy
@@ -2939,7 +3060,7 @@ function renderMando(){
           ["Hoy", pf ? `<span class="${(pf.day_pnl||0)>=0?"pos":"neg"}">${pct(pf.day_pnl_pct||0,2)}</span> · con lo abierto` : td ? `<span class="${td.pnl>=0?"pos":"neg"}">${pct(td.pnl_pct,2)}</span> · ${td.n} ops.` : "–"],
           ["Operaciones", nf((R.trades||[]).length,0)],
           ["Pérdida del día", `${nf(S.dayLoss||0,2)} % de ${nf(S.limits.max_daily_loss_pct,0)} %`]]);
-  const preds = ((S.predictions && S.predictions.items) || []).slice().sort((a,b) => a.when_utc-b.when_utc).slice(0,8);
+  const preds = ((S.predictions && S.predictions.items) || []).filter(p => p.kind!=="bolsa").sort((a,b) => a.when_utc-b.when_utc).slice(0,8);   // solo cripto
   $("#mdPred").innerHTML = preds.map(p => `<li data-tabgo="pred"><span class="led ${p.confidence==="alta"?"busy":p.confidence==="media"?"wait":""}"></span><span class="nm">${esc(p.label)}</span>
     <span class="tx">${p.when_utc>now ? "en "+dur(p.when_utc-now) : "ahora"} · confianza ${esc(p.confidence)}</span><b class="${p.prob_up>=0.5?"pos":"neg"}">${Math.round(p.prob_up*100)} %</b></li>`).join("")
     || `<li><span class="led"></span><span class="nm">Sin predicciones</span><span class="tx">${S.live ? "llegan cada 5 min" : ""}</span><b></b></li>`;
@@ -3008,17 +3129,57 @@ function predCard(p){
       return `<li><span>${esc(d.factor)}<br><small>${esc(d.source||"")}</small></span><span class="dbar"><span style="${d.effect_pp>=0?"left:50%":"right:50%"};width:${a}%;background:${d.effect_pp>=0?"var(--good)":"var(--bad)"}"></span></span><b class="mono ${d.effect_pp>=0?"pos":"neg"}" style="font-size:11.5px;text-align:right">${pp(d.effect_pp)}</b></li>`; }).join("") || `<li><span class="note">Sin factores todavía: solo cuenta la tasa base.</span></li>`}</ul>
     <span class="note">${esc(p.note||"")}${p.n_samples?` · ${nf(p.n_samples,0)} casos históricos`:""}</span></div>`;
 }
+// Aperturas que vienen (y las que están en sus 4 primeras horas), con su histórico de la cripto.
+function caUpcoming(now){
+  const A = S.criptoAp; if (!isObj(A) || !isObj(A.markets)) return [];
+  return MK.map(m => ({m, x:caMarket(m.key)})).filter(z => z.x)
+    .map(z => { const live = z.x.state==="en_curso"; return {...z, live, t: live ? z.x.open_ms : z.x.next_open_ms}; })
+    .filter(z => isNum(z.t) && (z.live || z.t > now)).sort((a, b) => (b.live - a.live) || a.t - b.t);
+}
+function caPredCard(z, now){
+  const x = z.x, h = isObj(x.hist) && isObj(x.hist.coins) ? x.hist : null, since = caSince(x, now);
+  const when = z.live ? `En curso: abrió ${madWhen(z.t)}${since!=null ? ` · quedan ${dur(Math.max(0, CA_WIN-since))} de las 4 h` : ""}` : `Apertura ${whenTxt(z.t)} · ventana de 4 h`;
+  let grid = `<span class="note">Sin histórico de la cripto en esta apertura.</span>`, foot = "";
+  if (h){ const cs = COINS.filter(c => isObj(h.coins[c]));
+    if (cs.length){
+      grid = `<div class="capg"><span></span><small>Sube en 4 h</small><small>Rango ≥ 2 % en 4 h</small>${cs.map(c => { const v = h.coins[c], u = v.up_rate, g = v.range_ge2_rate;
+        const w = isNum(u) ? Math.min(50, Math.abs(u-0.5)*100) : 0, upB = isNum(u) && u >= 0.5;
+        return `<b>${c}</b><span class="capv"><span class="prob" role="img" aria-label="${isNum(u) ? `sube el ${rate(u)} de las veces` : "sin datos"}">${isNum(u) ? `<span style="left:${(upB?50:50-w).toFixed(1)}%;width:${w.toFixed(1)}%;background:${upB?"var(--good)":"var(--bad)"}"></span>` : ""}</span><b class="${isNum(u) ? (upB?"pos":"neg") : ""}">${rate(u)}</b></span>
+          <span class="capv"><span class="meter" role="img" aria-label="${isNum(g) ? `rango de 2 % o más el ${rate(g)} de las veces` : "sin datos"}"><span style="width:${isNum(g) ? Math.max(0, Math.min(100, g*100)).toFixed(1) : 0}%"></span></span><b>${rate(g)}</b></span>`; }).join("")}</div>`;
+      const r8 = cs.filter(c => isNum(h.coins[c].range_ge2_8h_rate)).map(c => `${c} ${rate(h.coins[c].range_ge2_8h_rate)}`);
+      foot = [r8.length ? `A 8 h el rango ≥ 2 % llega a: ${r8.join(" · ")}.` : "", isNum(h.n) ? `${nf(h.n,0)} aperturas${desdeTxt(h.desde) ? " desde el " + desdeTxt(h.desde) : ""}.` : "", "Frecuencia pasada, no una previsión."].filter(Boolean).join(" ");
+    } }
+  return `<div class="pcard"><h3>${esc(z.m.name)} <span class="stchip ${z.live ? "en_curso" : "por_abrir"}">${z.live ? "en curso" : "por abrir"}</span></h3>
+    <span class="note">${when}</span>${grid}${foot ? `<span class="note">${foot}</span>` : ""}</div>`;
+}
+// Encadenamiento entre aperturas, contado con honestidad: tras una apertura en positivo la siguiente sube como una moneda al aire.
+function caChain(){
+  const A = S.criptoAp, c = isObj(A) && isObj(A.chain) ? A.chain : null;
+  if (!c) return isObj(A) ? `<p class="note">Encadenamiento entre aperturas: aún sin datos.</p>` : "";
+  const nota = typeof c.nota==="string" ? c.nota : "";
+  const main = isNum(c.after_up_rate) ? `Tras una apertura en positivo, la siguiente sube el ${rate(c.after_up_rate)} de las veces: no predice.` : "Encadenamiento entre aperturas: no predice.";
+  let extra = [isNum(c.after_down_rate) ? `tras una en negativo, el ${rate(c.after_down_rate)}` : "", isNum(c.base_rate) ? `de media, el ${rate(c.base_rate)}` : ""].filter(Boolean).join("; ");
+  if (isNum(c.n)) extra += `${extra ? " " : ""}(${nf(c.n,0)} casos)`;
+  extra = extra ? extra[0].toUpperCase() + extra.slice(1) : "";
+  const solape = /solap/i.test(nota) ? "" : " Si se mira la siguiente apertura aunque empiece antes de saber cómo acabó la anterior sale un 60 %, pero es un espejismo del solape: São Paulo y Nueva York abren con entre 30 y 90 min de diferencia según la época del año y sus ventanas de 4 h se solapan.";
+  const coin = nota ? "" : " Es lo mismo que tirar una moneda: lo que hizo una apertura no dice nada de la siguiente.";
+  return `<div class="callout warn"><b>${main}</b><span>${extra ? esc(extra) + "." : ""}${coin}${solape}${nota ? " " + esc(nota) : ""}</span></div>`;
+}
 function renderPred(){
-  const P = S.predictions || {items:[], accuracy:{}}, a = P.accuracy || {}, bk = a.by_kind || {};
+  const P = S.predictions || {items:[], accuracy:{}}, a = P.accuracy || {}, bk = a.by_kind || {}, kc = isObj(bk.cripto) ? bk.cripto : {};
+  const now = S.vnow, items = [...(P.items||[])].sort((x,y) => x.when_utc-y.when_utc), cr = items.filter(p => p.kind==="cripto"), empty = t => `<p class="note">${t}</p>`;
+  const up = caUpcoming(now), nx = up.find(z => !z.live), ch = isObj(S.criptoAp) && isObj(S.criptoAp.chain) ? S.criptoAp.chain : null;
   kpiRow($("#predKpis"), [
-    ["Predicciones activas", P.items.length, S.live ? "se recalculan cada 5 min" : "simulación"],
-    ["Evaluadas", nf(a.evaluated||0,0), "ya pasó su horizonte"],
-    ["Acierto total", a.evaluated ? pctp(a.hit_rate*100) : "–", "acertó la dirección"],
-    ["Acierto en bolsas", bk.bolsa && bk.bolsa.evaluated ? pctp(bk.bolsa.hit_rate*100) : "–", `${bk.bolsa ? bk.bolsa.evaluated : 0} evaluadas`],
-    ["Acierto en cripto", bk.cripto && bk.cripto.evaluated ? pctp(bk.cripto.hit_rate*100) : "–", `${bk.cripto ? bk.cripto.evaluated : 0} evaluadas`]]);
-  const items = [...P.items].sort((x,y) => x.when_utc-y.when_utc), empty = t => `<p class="note">${t}</p>`;
-  $("#predMk").innerHTML = items.filter(p => p.kind==="bolsa").map(predCard).join("") || empty(S.live ? "Esperando la primera ronda de predicciones (cada 5 min)." : "Ninguna bolsa abre en los próximos días.");
-  $("#predCr").innerHTML = items.filter(p => p.kind==="cripto").map(predCard).join("") || empty("Sin predicciones cripto todavía.");
+    ["Predicciones cripto", cr.length, S.live ? "se recalculan cada 5 min" : "simulación"],
+    ["Evaluadas", nf(isNum(kc.evaluated) ? kc.evaluated : 0, 0), "ya pasó su horizonte"],
+    ["Acierto en cripto", kc.evaluated && isNum(kc.hit_rate) ? pctp(kc.hit_rate*100) : "–", "acertó la dirección"],
+    ["Próxima apertura", nx ? esc(nx.m.name) : "–", nx ? `en ${dur(nx.t-now)}` : S.live ? "aún sin datos de la cripto" : ""],
+    ["Tras una en positivo", ch && isNum(ch.after_up_rate) ? pctp(ch.after_up_rate*100) : "–", ch && isNum(ch.base_rate) ? `sube la siguiente (base ${pctp(ch.base_rate*100)}): no predice` : "encadenamiento: aún sin datos"]]);
+  $("#predChain").innerHTML = caChain();
+  const est = isObj(S.criptoAp) ? CA_ESTADO[S.criptoAp.estado] : "";
+  $("#predMk").innerHTML = up.map(z => caPredCard(z, now)).join("")
+    || empty(est || (S.live ? "Aún sin datos de la cripto en las aperturas: el bot los manda cada minuto (si no llegan, necesita reiniciarse con la versión nueva)." : "Solo con el bot en marcha."));
+  $("#predCr").innerHTML = cr.map(predCard).join("") || empty("Sin predicciones cripto todavía.");
 }
 
 function windowMarket(win){ const m = MK.find(x => win && win.includes(x.name)); return m ? m.key : ""; }
@@ -3273,14 +3434,96 @@ function renderBacktest(){
   $("#btMatrix").innerHTML = btMatrix(B.leadlag);
 }
 
+// ---------- La cripto en cada apertura de bolsa (mensaje «cripto_aperturas»): solo cripto, nunca el índice ----------
+const CA_WIN = 4*3600e3;   // ventana de reacción: de 0 a 4 h desde la apertura
+const CA_STATE = {por_abrir:"por abrir", en_curso:"en curso", terminada:"terminada"};
+const fmtMadWd = new Intl.DateTimeFormat("es-ES",{timeZone:"Europe/Madrid",weekday:"short",day:"2-digit",hour:"2-digit",minute:"2-digit",hourCycle:"h23"});
+const madWhen = t => fmtMadWd.format(t).replace(/,/g, "") + " en Madrid";
+const rate = v => isNum(v) ? pctp(v*100) : "–";
+const caPct = v => isNum(v) ? pct(v,2) : "–";
+const caCls = v => isNum(v) ? (v>=0 ? "pos" : "neg") : "";
+function caMarket(key){ const A = S.criptoAp; return isObj(A) && isObj(A.markets) && isObj(A.markets[key]) ? A.markets[key] : null; }
+function caAvg(coins, f){   // media de las monedas con dato
+  if (!isObj(coins)) return null; const v = COINS.map(c => isObj(coins[c]) ? coins[c][f] : null).filter(isNum);
+  return v.length ? v.reduce((a,x) => a+x, 0)/v.length : null; }
+function caSince(x, now){ return isNum(x.open_ms) ? Math.max(0, now - x.open_ms) : isNum(x.minutes_since_open) ? x.minutes_since_open*60000 : null; }
+function desdeTxt(s){ const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s||"")); return m ? `${m[3]}-${m[2]}-${m[1]}` : ""; }
+// Reacción de la cripto (media de BTC, ETH, SOL y XRP) en la apertura de una bolsa: en curso, a las 4 h o la anterior.
+function cryptoReaction(key, now){
+  const x = caMarket(key); if (!x) return null;
+  const st = CA_STATE[x.state] ? x.state : null, since = caSince(x, now);
+  if (st==="en_curso"){ const a = caAvg(x.coins, "ret_pct"); return {state:st, kind:"live", avg:a, since, left: since!=null ? Math.max(0, CA_WIN-since) : null}; }
+  if (st==="terminada"){ const a = caAvg(x.coins, "ret_pct"); return {state:st, kind:"done", avg:a, since}; }
+  return {state:st || "por_abrir", kind:"last", avg: isObj(x.last) ? caAvg(x.last.coins, "ret_4h_pct") : null, since};
+}
+// Minicurva del % desde la apertura: el eje horizontal es la ventana de 4 h, así una apertura en curso se ve a medias.
+function caSpark(pts, t0){
+  const P = (Array.isArray(pts) ? pts : []).filter(p => Array.isArray(p) && isNum(p[0]) && isNum(p[1])).slice(-120);
+  if (P.length < 2) return `<svg class="casp" viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true"></svg>`;
+  const a = isNum(t0) ? t0 : P[0][0], span = Math.max(CA_WIN, P[P.length-1][0]-a) || 1;
+  const vs = P.map(p => p[1]), lo = Math.min(0, ...vs), hi = Math.max(0, ...vs), rg = (hi-lo) || 1;
+  const X = t => Math.max(0, Math.min(100, (t-a)/span*100)).toFixed(2), Y = v => (22-(v-lo)/rg*20).toFixed(2), col = P[P.length-1][1] >= 0 ? "var(--good)" : "var(--bad)";
+  return `<svg class="casp" viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true"><line x1="0" x2="100" y1="${Y(0)}" y2="${Y(0)}" stroke="var(--line-2)" stroke-width="1" stroke-dasharray="2 2" vector-effect="non-scaling-stroke"/><path d="M${P.map(p => `${X(p[0])},${Y(p[1])}`).join(" L")}" fill="none" stroke="${col}" stroke-width="1.5" vector-effect="non-scaling-stroke"/></svg>`;
+}
+function caRows(coins, retK, rangeK, withSpark, t0){
+  if (!isObj(coins)) return "";
+  const rows = COINS.filter(c => isObj(coins[c])).map(c => { const v = coins[c], r = v[retK], g = v[rangeK];
+    const hl = isNum(v.high_pct) && isNum(v.low_pct) ? ` title="máximo ${pct(v.high_pct,2)} · mínimo ${pct(v.low_pct,2)}"` : "";
+    return `<div class="carow"${hl}><b>${c}</b><b class="${caCls(r)}">${caPct(r)}</b>${withSpark ? caSpark(v.spark, t0) : "<span></span>"}<span class="rg">rango ${isNum(g) ? nf(g,2)+" %" : "–"}</span></div>`; });
+  return rows.length ? `<div class="carows">${rows.join("")}</div>` : "";
+}
+// Lo histórico de esta apertura: frecuencia con la que la cripto se movió ≥ 2 % y subió en sus 4 h (y ≥ 2 % en 8 h).
+function caHist(h){
+  if (!isObj(h) || !isObj(h.coins)) return `<div class="cahist"><span class="note">Sin histórico de la cripto en esta apertura.${isObj(h) && typeof h.nota==="string" && h.nota ? " " + esc(h.nota) : ""}</span></div>`;
+  const cs = COINS.filter(c => isObj(h.coins[c])); if (!cs.length) return `<div class="cahist"><span class="note">Sin histórico de la cripto en esta apertura.</span></div>`;
+  const best = cs.reduce((a, c) => (isNum(h.coins[c].range_ge2_rate) ? h.coins[c].range_ge2_rate : -1) > (isNum(h.coins[a].range_ge2_rate) ? h.coins[a].range_ge2_rate : -1) ? c : a, cs[0]), b = h.coins[best];
+  const row = (lbl, f) => `<small>${lbl}</small>${COINS.map(c => `<b>${isObj(h.coins[c]) ? rate(h.coins[c][f]) : "–"}</b>`).join("")}`;
+  const foot = [isNum(h.n) ? `${nf(h.n,0)} aperturas` : "", desdeTxt(h.desde) ? `desde el ${desdeTxt(h.desde)}` : ""].filter(Boolean).join(" ");
+  const any = isNum(h.any_range_ge2_rate) ? `Alguna de las 4 con rango ≥ 2 %: ${rate(h.any_range_ge2_rate)} en 4 h${isNum(h.any_range_ge2_8h_rate) ? ` · ${rate(h.any_range_ge2_8h_rate)} en 8 h` : ""}` : "";
+  return `<div class="cahist"><span class="lead">En esta apertura: rango ≥ 2 % en 4 h el ${rate(b.range_ge2_rate)} de las veces (${best}) · sube ${rate(b.up_rate)}</span>
+    <div class="catbl"><span></span>${COINS.map(c => `<i>${c}</i>`).join("")}${row("≥ 2 % en 4 h", "range_ge2_rate")}${row("≥ 2 % en 8 h", "range_ge2_8h_rate")}${row("sube en 4 h", "up_rate")}</div>
+    ${any ? `<span class="note">${any}</span>` : ""}${typeof h.nota==="string" && h.nota ? `<span class="note">${esc(h.nota)}</span>` : ""}
+    <span class="note">${foot ? foot + " · " : ""}lo que pasó, no una previsión</span></div>`;
+}
+// Todas las aperturas juntas (total): la cifra de «casi siempre se mueve un 2 %» que pidió el usuario, con su muestra.
+function caTotalTxt(T){
+  if (!isObj(T) || !isObj(T.coins)) return "";
+  const cs = COINS.filter(c => isObj(T.coins[c])); if (!cs.length) return "";
+  const per = f => cs.map(c => `${c} ${rate(T.coins[c][f])}`).join(" · ");
+  const head = `Todas las aperturas juntas${isNum(T.n) ? ` (${nf(T.n,0)}${desdeTxt(T.desde) ? " desde el " + desdeTxt(T.desde) : ""})` : ""}`;
+  return `${head}: rango ≥ 2 % en 4 h: ${per("range_ge2_rate")}${isNum(T.any_range_ge2_rate) ? ` · alguna de las 4 ${rate(T.any_range_ge2_rate)}` : ""}; en 8 h: ${per("range_ge2_8h_rate")}${isNum(T.any_range_ge2_8h_rate) ? ` · alguna de las 4 ${rate(T.any_range_ge2_8h_rate)}` : ""}. Que se mueva no dice hacia dónde: sube en 4 h ${per("up_rate")}.`;
+}
+const CA_ESTADO = {apagado:"El bot no tiene en marcha el módulo que mide la cripto en las aperturas.", arrancando:"El bot está calculando lo histórico de cada apertura (velas de 1 minuto de los últimos 3 años); la primera ronda llega enseguida."};
+function caTile(m, now){
+  const x = caMarket(m.key), name = esc(m.name);
+  if (!x){ const s = mkSession(m, now), open = (s.state==="abierta" || s.state==="pausa") && s.open;
+    return `<div class="mtile ca"><div class="t1"><b>${name}</b><span class="stchip ${s.state}">${s.state}</span></div>
+      <span class="note">${open ? `abrió ${madWhen(s.open)}` : s.next ? `abre en ${dur(s.next-now)} · ${madWhen(s.next)}` : ""}</span>
+      <span class="note">${S.live ? "Aún sin datos de la cripto en esta apertura (el bot los manda cada minuto; si no llegan, necesita reiniciarse con la versión nueva)." : "Solo con el bot en marcha."}</span></div>`; }
+  const st = CA_STATE[x.state] ? x.state : "por_abrir", since = caSince(x, now), next = isNum(x.next_open_ms) ? x.next_open_ms : null;
+  let when, body;
+  if (st==="en_curso"){
+    when = `abrió ${isNum(x.open_ms) ? madWhen(x.open_ms) : ""}${since!=null ? ` · quedan ${dur(Math.max(0, CA_WIN-since))} de las 4 h` : ""}`;
+    body = `<span class="cah3">Desde la apertura${since!=null ? ` (${dur(since)})` : ""}</span>` + (caRows(x.coins, "ret_pct", "range_pct", true, x.open_ms) || `<span class="note">Aún sin datos de la cripto en esta apertura.</span>`);
+  } else if (st==="terminada"){
+    when = `abrió ${isNum(x.open_ms) ? madWhen(x.open_ms) : ""}${next ? ` · próxima en ${dur(next-now)}` : ""}`;
+    body = `<span class="cah3">Resultado a las 4 h</span>` + (caRows(x.coins, "ret_pct", "range_pct", true, x.open_ms) || `<span class="note">Aún sin datos de la cripto en esta apertura.</span>`);
+  } else {
+    const L = isObj(x.last) ? x.last : null;
+    when = next ? `abre en ${dur(next-now)} · ${madWhen(next)}` : "sin próxima sesión conocida";
+    body = `<span class="cah3">Su última apertura${L && isNum(L.open_ms) ? ` (${madWhen(L.open_ms).replace(" en Madrid","")})` : ""} · a las 4 h</span>`
+      + ((L && caRows(L.coins, "ret_4h_pct", "range_4h_pct", false)) || `<span class="note">Aún sin datos de su última apertura.</span>`);
+  }
+  const aviso = typeof x.aviso==="string" && x.aviso ? `<span class="note caaviso">${esc(x.aviso)}</span>` : "";
+  return `<div class="mtile ca"><div class="t1"><b>${name}</b><span class="stchip ${st}">${CA_STATE[st]}</span></div>
+    <span class="note">${when}</span>${body}${aviso}${caHist(x.hist)}</div>`;
+}
 function renderWorldMarkets(){
-  $("#mkTiles").innerHTML = MK.map(m => { const t = (S.trend||{})[m.key] || {}, s = mkSession(m, S.vnow), state = t.state || s.state, open = state==="abierta" || state==="pausa";
-    const ch = open ? t.change_pct : (t.last_session && t.last_session.change_pct!=null ? t.last_session.change_pct : t.change_pct);
-    const sub = open ? `cierra en ${dur((s.close||S.vnow)-S.vnow)}` : s.next ? `abre en ${dur(s.next-S.vnow)} · ${fmtMad.format(s.next).slice(0,5)} en Madrid` : "";
-    return `<div class="mtile"><div class="t1"><b>${esc(m.name)}</b><span class="note">${esc(m.index)}</span><span class="stchip ${state}">${state}</span></div>
-      <span class="big ${ch==null?"":ch>=0?"pos":"neg"}">${ch==null?"–":pct(ch,2)}</span>${t.spark && t.spark.length>1 ? spark(t.spark, (ch||0)>=0) : ""}
-      <span class="note">${open?"en directo":"última sesión"}${t.price?` · ${nf(t.price, t.price>1000?0:2)}`:""}${t.futures?` · futuros ${pct(t.futures.change_pct,2)}`:""}${open && t.mom_30m_pct!=null?` · 30 min ${pct(t.mom_30m_pct,2)}`:""}</span>
-      <span class="note">${sub}${t.error?` · ${esc(t.error)}`:""}</span></div>`; }).join("");
+  const now = S.vnow, A = isObj(S.criptoAp) ? S.criptoAp : null, note = $("#mkNote");
+  const parts = A ? [A.demo ? "Simulación: los precios y la reacción de cada apertura son inventados. El histórico sí es real, pero es el de todas las aperturas juntas (velas de 1 minuto de Binance desde noviembre de 2023), el mismo en cada tarjeta; con el bot en marcha sale el de cada bolsa." : "",
+    CA_ESTADO[A.estado] || "", caTotalTxt(A.total)].filter(Boolean) : [];
+  note.hidden = !parts.length; note.textContent = parts.join(" ");
+  $("#mkTiles").innerHTML = MK.map(m => caTile(m, now)).join("");
   $("#ofTiles").innerHTML = COINS.map(c => { const o = (S.orderflow||{})[c];
     if (!o) return `<div class="mtile"><div class="t1"><b>${c}</b></div><span class="note">Esperando el flujo de órdenes…</span></div>`;
     const im = Math.max(-1, Math.min(1, o.imbalance||0)), dec = c==="BTC" ? 2 : c==="ETH" ? 1 : 0;
@@ -3294,26 +3537,51 @@ function renderWorldMarkets(){
 let simMkAcc = 60000, simOfAcc = 5000, simPrAcc = 300000;
 function simWorld(dt){
   simMkAcc += dt; simOfAcc += dt; simPrAcc += dt;
-  if (simMkAcc >= 60000){ simMkAcc = 0; simMarkets(); }
+  if (simMkAcc >= 60000){ simMkAcc = 0; S.criptoAp = simCriptoAp(S.vnow); }
   if (simOfAcc >= 5000){ simOfAcc = 0; simOrderflow(); }
   if (simPrAcc >= 300000){ simPrAcc = 0; S.predictions = simPredictions(); }
 }
-function simMarkets(){
-  const now = S.vnow; S.trend = S.trend || {}; S.simBias = (S.simBias||0)*0.97 + gauss()*0.06;   // humor global: las bolsas se contagian
+// Demostración del mensaje «cripto_aperturas»: la reacción de la cripto en cada apertura se mide con los precios
+// simulados (sin festivos); el histórico y el encadenamiento son las cifras reales medidas con todas las aperturas
+// juntas (3.771 desde nov-2023, velas de 1 min de Binance), iguales en cada bolsa. Va marcado con demo: true.
+const DEMO_HIST = {n:3771, desde:"2023-11-01", any_range_ge2_rate:0.76, any_range_ge2_8h_rate:0.93, coins:{
+  BTC:{up_rate:0.497, mean_ret_pct:null, mean_range_pct:null, range_ge2_rate:0.30, range_ge2_8h_rate:0.53},
+  ETH:{up_rate:0.484, mean_ret_pct:null, mean_range_pct:null, range_ge2_rate:0.50, range_ge2_8h_rate:0.77},
+  SOL:{up_rate:0.494, mean_ret_pct:null, mean_range_pct:null, range_ge2_rate:0.69, range_ge2_8h_rate:0.89},
+  XRP:{up_rate:0.505, mean_ret_pct:null, mean_range_pct:null, range_ge2_rate:0.51, range_ge2_8h_rate:0.75}}};
+const DEMO_CHAIN = {after_up_rate:0.490, after_down_rate:0.511, base_rate:0.501, n:null,
+  nota:"Cifra real medida sin mirar el futuro: la siguiente apertura que empieza cuando ya se sabe cómo acabó la anterior. En la demostración no se recalcula."};
+const DEMO_WIN = {tokio:"tokio-seul", seul:"tokio-seul", shanghai:"china", hongkong:"china", frankfurt:"europa", londres:"europa", madrid:"europa", nuevayork:"nuevayork", saopaulo:"saopaulo", dubai:null};
+function pxIdx(t){ const L = S.pxLog || []; let lo = 0, hi = L.length; while (lo < hi){ const mid = (lo+hi) >> 1; if (L[mid][0] < t) lo = mid+1; else hi = mid; } return lo; }
+function lastOpenOf(m, now){   // última apertura (día laborable) en las 4 últimas jornadas
+  for (let k=0; k<5; k++){ const q = zparts(m.tz, now - k*864e5), t = zonedToUtc(m.tz, q.y, q.m, q.d, m.o[0], m.o[1]), wd = zparts(m.tz, t).wd;
+    if (t <= now && wd!=="Sat" && wd!=="Sun") return t; }
+  return null;
+}
+function simReaction(t0, t1){   // % de cada moneda desde la apertura t0 hasta t1 (máx. 4 h) con los precios simulados
+  const L = S.pxLog || [], i = pxIdx(t0), j = pxIdx(t1 + 1);
+  if (i >= L.length || L[i][0] - t0 > 3*60000 || j - i < 2) return null;
+  const out = {};
+  for (const c of COINS){ const p0 = L[i][1][c], seg = L.slice(i, j).map(([t, p]) => [t, (p[c]/p0 - 1)*100]);
+    const vs = seg.map(x => x[1]), hi = Math.max(...vs), lo = Math.min(...vs), step = Math.max(1, Math.ceil(seg.length/60));
+    out[c] = {ret_pct:vs[vs.length-1], range_pct:hi-lo, high_pct:hi, low_pct:lo, spark:seg.filter((x, k) => k % step===0 || k===seg.length-1).slice(-60)}; }
+  return out;
+}
+function simCriptoAp(now){
+  const markets = {};
   for (const m of MK){
-    const s = mkSession(m, now), t = S.trend[m.key] || (S.trend[m.key] = {name:m.name, index:m.index, change_pct:rnd(-0.5,0.5), last_session:{change_pct:rnd(-1.2,1.2)}, spark:[], mom_30m_pct:0});
-    const was = t.state==="abierta" || t.state==="pausa", open = s.state==="abierta" || s.state==="pausa";
-    if (open){ if (!was && t.state){ t.change_pct = rnd(-0.3,0.3) + S.simBias*0.8; t.spark = []; }
-      if (s.state==="abierta") t.change_pct += gauss()*0.04 + S.simBias*0.01;
-      t.spark.push(t.change_pct); if (t.spark.length>120) t.spark.shift(); t.mom_30m_pct = t.spark.length>6 ? t.change_pct - t.spark[t.spark.length-7] : 0; }
-    else if (was){ t.last_session = {change_pct:t.change_pct};   // cierra: se evalúa la predicción que se hizo antes de abrir
-      const id = `${m.key}-${dm(s.open || now)}`, lg = (S.simPredLog||{})[id];
-      if (lg && !lg.done){ lg.done = true; const acc = S.simAcc || (S.simAcc = {evaluated:0, hits:0, hit_rate:0, by_kind:{bolsa:{evaluated:0, hits:0, hit_rate:0}}});
-        const hit = (lg.prob>=0.5) === (t.change_pct>0); acc.evaluated++; acc.hits += hit; acc.hit_rate = acc.hits/acc.evaluated;
-        const b = acc.by_kind.bolsa; b.evaluated++; b.hits += hit; b.hit_rate = b.hits/b.evaluated; } }
-    t.state = s.state; t.next_open_utc = s.next; t.close_utc = s.close;
-    if (m.key==="nuevayork") t.futures = {symbol:"ES=F", change_pct:S.simBias*0.6};
+    const s = mkSession(m, now), lo = lastOpenOf(m, now), since = lo!=null ? now - lo : null, wd = zparts(m.tz, now).wd;
+    // como el bot: «terminada» hasta 24 h después de abrir y solo si hoy (fecha local) hay sesión; si no, «por_abrir»
+    const today = wd!=="Sat" && wd!=="Sun";
+    const state = since!=null && since < CA_WIN ? "en_curso" : since!=null && since < 24*3600e3 && today ? "terminada" : "por_abrir";
+    const coins = state==="por_abrir" || lo==null ? null : simReaction(lo, Math.min(now, lo + CA_WIN));
+    let last = null;
+    if (state==="por_abrir" && lo!=null){ const c = simReaction(lo, lo + CA_WIN);
+      if (c) last = {open_ms:lo, coins:Object.fromEntries(COINS.map(k => [k, {ret_4h_pct:c[k].ret_pct, range_4h_pct:c[k].range_pct}]))}; }
+    markets[m.key] = {name:m.name, window:DEMO_WIN[m.key] ?? null, state, open_ms:lo, next_open_ms:s.next, minutes_since_open: since!=null ? Math.floor(since/60000) : null,
+      coins, last, hist: DEMO_WIN[m.key] ? DEMO_HIST : null};
   }
+  return {type:"cripto_aperturas", ts:now, demo:true, coins:[...COINS], markets, chain:DEMO_CHAIN, total:DEMO_HIST};
 }
 function simOrderflow(){
   S.orderflow = S.orderflow || {};
@@ -3327,11 +3595,16 @@ function simOrderflow(){
 // Peso de una noticia a favor de compra (+) o venta (−): repercusión × credibilidad × importancia, con más peso si el
 // analista de impacto la confirmó, si otros medios la confirman, y menos cuanto más vieja (vida media unas 2 h).
 const BAL_HOURS = 6;
-function newsTilt(st, now){
+// Una noticia macro o geopolítica (con «reflejo») solo cuenta si la cripto la confirma; anyReflejo la mide igualmente
+// para enseñarla aparte en la balanza como «no cuenta».
+function newsTilt(st, now, anyReflejo){
   if (!st || !st.t0 || now - st.t0 > BAL_HOURS*3600e3) return null;
+  if (!anyReflejo && !reflejoOk(st)) return null;
   if (st.final==="unverified" || st.final==="lowprio" || (st.verify && st.verify.score < 0.7)) return null;
   if (st.final==="noimpact" || (st.impact && st.impact.drop)) return null;   // archivada por el analista: no vale su triaje
-  const tr = st.triage, im = st.impact || null;
+  const tr = st.triage, macro = isMacroSt(st), td = triDir(st);
+  // En una macro, el reflejo confirmó la dirección del triaje (como apertura._news): un impacto de signo contrario no vale.
+  const im = st.impact && !(macro && td && Math.sign(st.impact.dir||0) !== td) ? st.impact : null;
   let dir = 0, mag = 0, cred = 60, coins = null, why = "";
   if (im){ dir = Math.sign(im.dir||0); mag = Math.min(100, (im.mag||0)*30); cred = (im.conf!=null ? im.conf*100 : 70); coins = Object.keys(im.per||{}); why = "impacto estimado"; }
   else if (tr){ const r = tr.repercusion || {};
@@ -3345,15 +3618,16 @@ function newsTilt(st, now){
   return {dir, w, coins: coins && coins.length ? coins : null, why, cred, credLbl: im ? "conf." : "cred.", imp: tr ? tr.importancia : null};
 }
 function newsBalance(now){
-  const by = Object.fromEntries(COINS.map(c => [c, {buy:0, sell:0, n:0}])), items = [];
-  for (const st of S.stories.values()){ const t = newsTilt(st, now); if (!t) continue;
+  const by = Object.fromEntries(COINS.map(c => [c, {buy:0, sell:0, n:0}])), items = [], waiting = [];
+  for (const st of S.stories.values()){ const t = newsTilt(st, now, true); if (!t) continue;
+    if (!reflejoOk(st)){ waiting.push({st, ...t}); continue; }   // macro sin confirmar por la cripto: se enseña, no pesa
     items.push({st, ...t});
     for (const c of COINS){ const k = t.coins ? (t.coins.includes(c) ? 1 : 0) : 0.6; if (!k) continue;   // sin monedas concretas: afecta a todas, algo menos
       const b = by[c]; if (t.dir>0) b.buy += t.w*k; else b.sell += t.w*k; b.n++; } }
   for (const c of COINS){ const b = by[c], tot = b.buy + b.sell; b.tilt = tot ? (b.buy-b.sell)/(tot+0.15) : 0; b.strength = Math.min(1, tot/0.8); }
-  items.sort((a,b) => b.w - a.w);
+  items.sort((a,b) => b.w - a.w); waiting.sort((a,b) => b.st.t0 - a.st.t0);
   const buy = items.filter(x=>x.dir>0).reduce((a,x)=>a+x.w,0), sell = items.filter(x=>x.dir<0).reduce((a,x)=>a+x.w,0);
-  return {by, items, buy, sell};
+  return {by, items, buy, sell, waiting};
 }
 // Ventana del motor de aperturas que manda para la moneda. Una ventana sale «terminada» en cuanto acaban todas sus
 // monedas con señal (MOVING o la puerta las acaban en la primera vela), así que no basta con saltar a la siguiente:
@@ -3412,26 +3686,12 @@ function coinSignal(c, nb, now){
 function newsPressure(match, hours){
   let s = 0; const now = S.vnow;
   for (let i=S.events.length-1;i>=0;i--){ const e = S.events[i]; if (now-e.ts > hours*3600e3) break; if (e.kind!=="triaged") continue;
-    const st = S.stories.get(e.story), tr = st && st.triage, r = tr && tr.repercusion; if (r && match(r)) s += r.direccion*r.magnitud*(tr.credibilidad||50)/1e4; }
+    const st = S.stories.get(e.story), tr = st && st.triage, r = tr && tr.repercusion; if (r && match(r) && reflejoOk(st)) s += r.direccion*r.magnitud*(tr.credibilidad||50)/1e4; }
   return Math.max(-10, Math.min(10, s));
 }
+// Predicciones de la demostración: solo cripto (los índices de las bolsas ya no se predicen ni se pintan).
 function simPredictions(){
-  const now = S.vnow, items = [], L = S.backtest && S.backtest.leadlag; S.simPredLog = S.simPredLog || {};
-  for (const m of MK){ const s = mkSession(m, now); if (!s.next || s.next-now > 80*3600e3 || s.state==="abierta" || s.state==="pausa") continue;   // hasta 80 h: cubre el fin de semana
-    const drivers = [];
-    for (const a of MK){ if (a.key===m.key) continue; const ta = S.trend && S.trend[a.key], sa = mkSession(a, now);
-      if (!ta || sa.state==="abierta" || sa.state==="pausa") continue; const ch = ta.last_session && ta.last_session.change_pct; if (ch==null || Math.abs(ch)<0.15) continue;
-      let eff = Math.sign(ch)*2.5, src = "regla de la demostración";
-      if (L){ const i = L.markets.indexOf(a.key), j = L.markets.indexOf(m.key); if (i>=0 && j>=0 && L.actionable[i][j]){ const p = ch>0 ? L.p_up_given_up[i][j] : 1-L.p_down_given_down[i][j]; eff = (p-L.base_up[j])*100; src = `backtest: ${a.name} → ${m.name}`; } else if (L) continue; }
-      if (Math.abs(eff) >= 0.5) drivers.push({factor:`${a.name} cerró ${pct(ch,2)}`, effect_pp:eff, source:src}); }
-    const news = newsPressure(r => (r.bolsas||[]).includes(m.key), 12); if (Math.abs(news) >= 0.5) drivers.push({factor:"Noticias de su región (12 h)", effect_pp:news, source:"triaje con IA local"});
-    if (m.key==="nuevayork" && S.trend && S.trend.nuevayork && S.trend.nuevayork.futures){ const fc = S.trend.nuevayork.futures.change_pct; if (Math.abs(fc)>0.1) drivers.push({factor:`Futuros del S&P ${pct(fc,2)}`, effect_pp:Math.max(-8,Math.min(8,fc*10)), source:"futuros"}); }
-    drivers.sort((a,b) => Math.abs(b.effect_pp)-Math.abs(a.effect_pp)); const top = drivers.slice(0,5);
-    const j = L ? L.markets.indexOf(m.key) : -1, base = j>=0 ? L.base_up[j] : 0.52, prob = clampP(base + top.reduce((a,d) => a+d.effect_pp, 0)/100);
-    const id = `${m.key}-${dm(s.next)}`; S.simPredLog[id] = {prob, done:false};
-    items.push({id, kind:"bolsa", target:m.key, label:`${m.name} (${m.index})`, event:"apertura", when_utc:s.next, horizon:"sesión", prob_up:prob, expected_pct:(prob-0.5)*1.6,
-      confidence: top.length>=3 && Math.abs(prob-0.5)>0.06 ? "media" : "baja", n_samples: j>=0 ? (L.n[0] ? Math.max(...L.n.map(r => r[j]||0)) : 0) : 0, drivers:top,
-      note:`Tasa base ${pctp(base*100)}${L ? "" : " (sin backtest: reglas de la demostración)"}`}); }
+  const now = S.vnow, items = [];
   const nw = nextWindow(now);
   for (const c of COINS){ const o = (S.orderflow||{})[c], f = S.flow[c], drivers = [];
     if (o){ const e = Math.max(-6, Math.min(6, (o.imbalance||0)*5 + (o.trend==="alcista"?2:o.trend==="bajista"?-2:0))); if (Math.abs(e) >= 0.5) drivers.push({factor:`Flujo de órdenes ${o.trend}`, effect_pp:e, source:"libro y operaciones"}); }
@@ -3440,7 +3700,7 @@ function simPredictions(){
     const prob = clampP(0.5 + drivers.reduce((a,d) => a+d.effect_pp, 0)/100);
     items.push({id:`${c}-${nw ? nw.w.id : "h"}`, kind:"cripto", target:c, label:`${c} · ${nw ? nw.w.name : "próxima hora"}`, event:"ventana", when_utc: nw ? nw.t : now+3600e3, horizon:"1h",
       prob_up:prob, expected_pct:(prob-0.5)*2, confidence: drivers.length>=2 ? "media" : "baja", n_samples:0, drivers, note:"Demostración: factores calculados con datos simulados"}); }
-  return {type:"predictions", ts:now, items, accuracy:S.simAcc || {evaluated:0, hit_rate:0, by_kind:{}}};
+  return {type:"predictions", ts:now, items, accuracy:{evaluated:0, hit_rate:0, by_kind:{}}};
 }
 
 // ---------- Vista Mundo: globo con entradas y decisiones en tiempo real ----------
@@ -3590,24 +3850,23 @@ const World = (() => {
         arc(HQ, VENUE, long?C.good:C.bad, 1500, 3, 1, () => { ping(VENUE, long?C.good:C.bad, 30, 1600); float(VENUE, "Paper · "+t, long?C.good:C.bad); });
         tick("Paper · "+t, long?C.good:C.bad); break; }
       case "closed": { const r = st && st.result; const col = r && r.pnl>=0 ? C.good : C.bad; ping(VENUE, col, 36, 1800); float(VENUE, r ? `${r.pnl>=0?"+":""}${nf(r.pnl,2)} ${QUOTE} (paper)` : "Cerrada (paper)", col, 3400); tick("Paper · "+t, col); break; }
+      case "reflejo": { const rf = e.patch && e.patch.reflejo, est = rf && rf.estado, col = est==="confirmada" ? C.good : est==="contraria" ? C.bad : est==="pendiente" ? C.warn : C.grey;
+        float(HQ, reflejoInfo(rf)[1].toUpperCase(), col, 3000); if (est==="confirmada" || est==="contraria") tick(`${reflejoInfo(rf)[1]}: ${short(t, 70)}`, col); break; }
     }
   }
 
   // ---- dibujo ----
+  // Rótulo y barra de cada bolsa: cómo reacciona la cripto en su apertura (media de las 4 monedas), nunca su índice.
   function marketInfo(m, st){
     if (m.cme) return {sub: st.open ? "abierta" : st.next ? `abre en ${dur(st.next-S.vnow)}` : "cerrada", val:null};
-    const tr = S.trend && S.trend[m.key];
-    const pr = ((S.predictions && S.predictions.items) || []).find(p => p.kind==="bolsa" && p.target===m.key);
-    const nextIn = st.next ? st.next - S.vnow : null;
-    if (tr && (tr.state==="abierta" || tr.state==="pausa") && tr.change_pct!=null)
-      return {sub:`${tr.state==="pausa"?"pausa":"abierta"} ${pct(tr.change_pct,2)}`, val:tr.change_pct/2, col:tr.change_pct>=0?C.good:C.bad};
-    if (pr && nextIn!=null && nextIn < 12*3600e3)
-      return {sub:`abre en ${dur(nextIn)} · prev. ${Math.round(pr.prob_up*100)} % ↑`, val:(pr.prob_up-0.5)*2, pred:true, col:pr.prob_up>=0.5?C.good:C.bad};
-    const last = tr ? (tr.last_session && tr.last_session.change_pct!=null ? tr.last_session.change_pct : tr.change_pct) : null;
-    if (last!=null) return {sub:`cerró ${pct(last,2)}${nextIn!=null && nextIn<3600e3 ? " · abre en "+dur(nextIn) : ""}`, val:last/2, col:last>=0?C.good:C.bad};
+    const nextIn = st.next ? st.next - S.vnow : null, r = cryptoReaction(m.key, S.vnow);
+    if (r && r.avg!=null){ const col = r.avg>=0 ? C.good : C.bad;
+      if (r.kind==="live") return {sub:`cripto ${pct(r.avg,2)}${r.since!=null ? " · " + dur(r.since) : ""}`, val:r.avg/2, col};
+      if (r.kind==="done") return {sub:`cripto ${pct(r.avg,2)} a las 4 h`, val:r.avg/2, col};
+      return {sub:`última: cripto ${pct(r.avg,2)}${nextIn!=null && nextIn<3600e3 ? " · abre en "+dur(nextIn) : ""}`, val:r.avg/2, pred:true, col}; }
     return {sub: st.open ? "abierta" : nextIn!=null ? `abre en ${dur(nextIn)}` : "cerrada", val:null};
   }
-  function trendBar(x, y, val, pred, align){   // val de −1 a 1 (±2 % en índices, o probabilidad centrada)
+  function trendBar(x, y, val, pred, align){   // val de −1 a 1 (±2 % de la cripto; discontinua, su apertura anterior)
     const w = 58, x0 = align==="left" ? x : x-w, mid = x0 + w/2, v = Math.max(-1, Math.min(1, val));
     ctx.fillStyle = "rgba(255,255,255,.13)"; ctx.fillRect(x0, y, w, 5);
     ctx.globalAlpha = pred ? 0.6 : 1; ctx.fillStyle = v>=0 ? `rgb(${C.good})` : `rgb(${C.bad})`;
@@ -3705,10 +3964,10 @@ const World = (() => {
 
   // ---- paneles y HUD (cada medio segundo) ----
   function setHTML(el, h){ if (el._h !== h){ el._h = h; el.innerHTML = h; } }
-  const DECIDE = new Set(["triaged","verified","unverified","impact","noimpact","brief","strategy","nostrategy","riskok","riskko","humanwait","humanok","humanko","scheduled","filled","blocked","closed"]);
+  const DECIDE = new Set(["triaged","verified","unverified","impact","noimpact","reflejo","brief","strategy","nostrategy","riskok","riskko","humanwait","humanok","humanko","scheduled","filled","blocked","closed"]);
   const INPUT = new Set(["captured","filtered","corroborated","flow"]);
   function toneRGB(e){ const tone = e.tone || KINDS[e.kind].tone; return tone==="good"?C.good : tone==="bad"?C.bad : tone==="warn"?C.warn : e.kind==="captured"||e.kind==="corroborated"?C.news : e.kind==="filtered"?C.noise : e.kind==="flow"?C.warn : C.plan; }
-  function item(e){ return `<li data-story="${e.story||""}"><time>${hms(e.ts)}</time><i style="--c:${toneRGB(e)}"></i><span class="t">${esc(KINDS[e.kind].label)} · ${esc(e.title)}<small>${esc(AG[e.agent].name)}</small></span></li>`; }
+  function item(e){ return `<li data-story="${e.story||""}"><time>${hms(e.ts)}</time><i style="--c:${toneRGB(e)}"></i><span class="t">${esc(evLabel(e))} · ${esc(e.title)}<small>${esc((AG[e.agent] || AG[KINDS[e.kind].agent]).name)}</small></span></li>`; }
   function tension(win){
     let rel=0, hi=0; const now = S.vnow;
     for (let i=S.events.length-1;i>=0;i--){ const e = S.events[i]; if (now-e.ts > 30*60000) break;
@@ -3748,13 +4007,18 @@ const World = (() => {
     setHTML($("#wRight"), `<div class="sh"><h3>Balanza</h3><span>noticias de ${BAL_HOURS} h · peso por repercusión, credibilidad e importancia</span></div>
       <div class="bal"><div class="tr"><span style="width:${bp}%;background:#3be3a0"></span><span style="width:${100-bp}%;background:#ff6b6b"></span></div>
         <div class="lbl"><span class="w-pos">▲ Compra ${nf(bp,0)} %</span><span class="w-neg">Venta ${nf(100-bp,0)} % ▼</span></div></div>
-      ${nb.items.length ? `<ul class="nlist">${nb.items.slice(0,14).map(x => { const st = x.st, tr = st.triage || {}, wmax = nb.items[0].w || 1;
-        const head = tr.resumen && tr.resumen !== st.headline ? tr.resumen : st.headline;
-        const meta = [st.src, "hace " + dur(now - st.t0), tr.importancia!=null ? `imp. ${tr.importancia}/10` : null, x.cred!=null ? `${x.credLbl} ${nf(x.cred,0)} %` : null,
-          x.coins ? x.coins.join(", ") : "todas", (st.corrob||[]).length ? `+${st.corrob.length} medios` : null].filter(Boolean).join(" · ");
-        return `<li data-story="${esc(st.id)}"><span class="ar ${x.dir>0?"w-pos":"w-neg"}">${x.dir>0?"▲":"▼"}</span><div><div class="nt">${esc(head)}</div><div class="nm">${esc(meta)}</div>
-          <div class="wt" style="width:${Math.max(6, x.w/wmax*100)}%;background:${x.dir>0?"#3be3a0":"#ff6b6b"}"></div></div></li>`; }).join("")}</ul>`
-        : `<p class="wempty">${S.live ? "Aún no hay noticias triadas con dirección clara en las últimas horas. Aparecen aquí en cuanto la IA local las puntúa." : "Esperando noticias…"}</p>`}`);
+      ${nb.items.length ? `<ul class="nlist">${nb.items.slice(0,14).map(x => newsLi(x, now, nb.items[0].w || 1)).join("")}</ul>`
+        : `<p class="wempty">${S.live ? "Aún no hay noticias triadas con dirección clara en las últimas horas. Aparecen aquí en cuanto la IA local las puntúa." : "Esperando noticias…"}</p>`}
+      ${nb.waiting.length ? `<h4 class="wsub">Macro y geopolítica que la cripto no confirma · no cuentan</h4><ul class="nlist wait">${nb.waiting.slice(0,6).map(x => newsLi(x, now, 0)).join("")}</ul>` : ""}`);
+  }
+  // Una noticia de la balanza: titular, medio, edad, importancia, credibilidad, monedas y, si es macro, lo que dice la cripto.
+  function newsLi(x, now, wmax){
+    const st = x.st, tr = st.triage || {}, rf = reflejoShown(st), head = tr.resumen && tr.resumen !== st.headline ? tr.resumen : st.headline;
+    const meta = [st.src, "hace " + dur(now - st.t0), tr.importancia!=null ? `imp. ${tr.importancia}/10` : null, x.cred!=null ? `${x.credLbl} ${nf(x.cred,0)} %` : null,
+      x.coins ? x.coins.join(", ") : "todas", (st.corrob||[]).length ? `+${st.corrob.length} medios` : null].filter(Boolean).join(" · ");
+    const tag = rf ? `<span class="rft ${reflejoInfo(rf)[0]}">${esc(reflejoInfo(rf)[1])}${isNum(rf.mov_pct) ? ` · ${pct(rf.mov_pct,2)}` : ""}</span>` : "";
+    return `<li data-story="${esc(st.id)}"><span class="ar ${x.dir>0?"w-pos":"w-neg"}">${x.dir>0?"▲":"▼"}</span><div><div class="nt">${esc(head || "")}</div><div class="nm">${esc(meta)}</div>${tag}
+      ${wmax ? `<div class="wt" style="width:${Math.max(6, x.w/wmax*100)}%;background:${x.dir>0?"#3be3a0":"#ff6b6b"}"></div>` : ""}</div></li>`;
   }
   function panes(){
     if (!visible) return;
@@ -3770,7 +4034,7 @@ const World = (() => {
     $("#tensionWhy").textContent = `${t.rel} noticias de importancia 6+ en 15 min ·${win ? (win.on ? win.w.name+" en curso" : win.w.name+" en "+dur(win.t-now)) : "sin ventana cercana"} · ${t.ext} criptos con minorista extremo`;
     setHTML($("#hudMarkets"), names.filter(Boolean).join("<br>") || "Ninguna bolsa abierta ahora");
     // monedas
-    const press = {}; for (let i=S.events.length-1;i>=0;i--){ const e = S.events[i]; if (e.ts<cut) break; if (e.kind==="impact"){ const st = S.stories.get(e.story); if (st && st.impact) for (const [c,m] of Object.entries(st.impact.per)) press[c] = (press[c]||0) + st.impact.dir*m; } }
+    const press = {}; for (let i=S.events.length-1;i>=0;i--){ const e = S.events[i]; if (e.ts<cut) break; if (e.kind==="impact"){ const st = S.stories.get(e.story); if (st && st.impact && reflejoOk(st)) for (const [c,m] of Object.entries(st.impact.per||{})) press[c] = (press[c]||0) + st.impact.dir*m; } }
     setHTML($("#hudCoins"), COINS.map(c => { const p = S.prices[c], f = S.flow[c]||{}, lp = f.ls!=null ? f.ls/(1+f.ls)*100 : 50, ch = p && S.p0[c] ? (p/S.p0[c]-1)*100 : 0, pr = press[c]||0;
       return `<div class="coinhud">${ring(lp)}<b>${c}</b><span class="cp">${p?pricef(p):"–"} <span class="${ch>=0?"w-pos":"w-neg"}">${pct(ch,2)}</span></span>
         <span class="cs">${f.ls!=null?`${Math.round(lp)} % minorista en largo`:"sin datos de flujo"}${pr?` · noticias <span class="${pr>0?"w-pos":"w-neg"}">${pr>0?"▲":"▼"} ${nf(Math.abs(pr),1)} %</span>`:""}</span></div>`; }).join(""));
@@ -3823,7 +4087,7 @@ const World = (() => {
     if (!raf && visible) raf = requestAnimationFrame(frame);
   }
   function hide(){ visible = false; if (raf){ cancelAnimationFrame(raf); raf = 0; } lastT = 0; }
-  return {onEvent, show, hide, panes, tensionNow: () => tension(activeWindow(S.vnow, 30)),
+  return {onEvent, show, hide, panes, marketInfo, tensionNow: () => tension(activeWindow(S.vnow, 30)),
     get visible(){ return visible; }, get fx(){ return {arcs:arcs.length, pings:pings.length, floats:floats.length}; }};
 })();
 
@@ -3933,9 +4197,11 @@ if (LIVE){
 } else {
   // Simulación: se recrean ~3 h previas para que el panel abra con historia
   S.start = S.vnow;
+  seedPxLog();   // precios de cada minuto hacia atrás para medir la cripto en las aperturas anteriores (cripto_aperturas)
   const target = Date.now();
   while (S.vnow < target) step(Math.min(2000, target-S.vnow));
   S.warm = false;
+  safe(() => { S.criptoAp = simCriptoAp(S.vnow); });
   for (const c of COINS){ S.p0[c] = S.hist[c][0] || S.p0[c]; }
   const firstGood = [...S.stories.values()].reverse().find(x=>x.result) || [...S.stories.values()].reverse().find(x=>x.strat);
   S.sel = firstGood ? firstGood.id : null;

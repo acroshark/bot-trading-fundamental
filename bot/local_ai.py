@@ -383,9 +383,19 @@ class LocalAI:
         await asyncio.gather(self._worker(), self._idle_loop(), self._brief_loop())
 
     def brief_context(self, window: str, when: datetime) -> str:
-        """Lo que la IA local necesita para preparar una apertura: noticias triadas, flujo minorista y agenda."""
-        evs = self.bus.store.events_since(now_ms() - 4 * 3600_000, ("triaged",))
-        news = sorted((e["patch"]["triage"] for e in evs if e.get("patch", {}).get("triage")), key=lambda t: -t["importancia"])[:8]
+        """Lo que la IA local necesita para preparar una apertura: noticias triadas, flujo minorista y agenda. Una macro o
+        geopolítica solo entra si la cripto la confirmó (bot/reflejo.py), como en la señal del motor."""
+        from . import reflejo   # perezoso: reflejo importa filters y topics
+        evs = self.bus.store.events_since(now_ms() - 4 * 3600_000, ("triaged", "reflejo"))
+        refl = {e.get("story"): (e.get("patch") or {}).get("reflejo") for e in evs if e.get("kind") == "reflejo"}
+        tri = [e for e in evs if e.get("kind") != "reflejo" and (e.get("patch") or {}).get("triage")]
+        try:
+            cls = reflejo.clases(self.bus.store, [e.get("story") for e in tri])
+        except Exception:   # sin clase se decide por el titular
+            cls = {}
+        news = sorted((e["patch"]["triage"] for e in tri
+                       if reflejo.cuenta(e.get("title"), e["patch"]["triage"], refl.get(e.get("story")), cls.get(e.get("story")))),
+                      key=lambda t: -(t.get("importancia") or 0))[:8]
         lines = [f"Ventana: {window}, {when.astimezone(MAD):%H:%M} hora de Madrid.", "Noticias de las últimas 4 horas (importancia/10):"]
         lines += [f"- {t['importancia']}/10 {t['sentimiento']} {','.join(t['monedas'])}: {t['resumen']}" for t in news] or ["- Ninguna relevante."]
         lines.append("Posicionamiento minorista:")

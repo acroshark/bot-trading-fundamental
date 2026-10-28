@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 
 from aiohttp import WSCloseCode, WSMsgType, web
 
-from . import aprendizaje, config, resumen_backtest
+from . import aprendizaje, config, reaccion, reflejo, resumen_backtest
 from .backtest import filter_results
 from .bus import Bus
 from .market import bias_of, funding_8h
@@ -22,7 +22,7 @@ LIVE_FLAG = '<script>window.RADAR_LIVE = {ws: "/events"};</script>'
 MAD = ZoneInfo("Europe/Madrid")
 TIER_ADJ = {"T0": 5, "T1": 2, "T2": 0, "T3": -5}   # suave: la IA local ya ve el nivel de la fuente
 NEWS_MAX = 60
-NEWS_KINDS = ("captured", "triaged", "lowprio", "corroborated", "srcstate")
+NEWS_KINDS = ("captured", "triaged", "lowprio", "corroborated", "srcstate", "reflejo")
 STORY_MAX = 128             # ids de historia: «n…», «w-…», «a-…»
 LOOPBACK = ("127.0.0.1", "::1")
 # Órdenes de la web sobre las fuentes (bot/fuentes_vivas.py: accion) y valores admitidos en las rutas
@@ -46,6 +46,8 @@ class Services:
     aprendizaje: Any = None  # Aprendizaje (medida de noticias y medios, pesos y post-mortems)
     evolucion: Any = None    # Evolucion (historial de cambios, campeón y aspirantes, propuestas e informe semanal)
     fuentes_vivas: Any = None   # FuentesVivas (estado de cada fuente y descubrimiento de medios)
+    reaccion: Any = None     # Reaccion (la cripto en cada apertura de bolsa: «cripto_aperturas»)
+    reflejo: Any = None      # Reflejo (¿la cripto refleja las noticias macro y geopolíticas?)
 
 
 def _hora(ms: int) -> str:
@@ -110,7 +112,9 @@ def _pick_stories(db, since: int, min_imp: int, bolsa: str | None) -> list[str]:
 
 def recent_news(bus: Bus, hours: float, min_imp: int, bolsa: str | None = None) -> list[dict]:
     """Noticias relevantes recientes con su triaje local, en el formato que leen las skills de OpenClaw.
-    Usa su propia conexión de solo lectura: se puede (y se debe) llamar desde un hilo, fuera del bucle."""
+    Usa su propia conexión de solo lectura: se puede (y se debe) llamar desde un hilo, fuera del bucle.
+    Cada una lleva «clase» (cripto, macro o contexto, del prefiltro) y «reflejo» (el último estado del evento «reflejo»,
+    o null): una macro o geopolítica que la cripto no ha confirmado sale con credibilidad_ajustada 0."""
     since = now_ms() - int(hours * 3600_000)
     with bus.store.reader() as db:
         pick = _pick_stories(db, since, min_imp, bolsa)
@@ -128,13 +132,16 @@ def recent_news(bus: Bus, hours: float, min_imp: int, bolsa: str | None = None) 
                      monedas=p.get("coins"), url=p.get("url"), region=p.get("region"), idioma=p.get("lang"),
                      fresca=p.get("fresh", True), temas_reglas=p.get("topics", []),
                      medio=p.get("outlet") or aprendizaje.outlet_from_patch(p) or None,
-                     estado_fuente=p.get("srcState") or "activa", peso_fuente=_w(p.get("srcWeight")))
+                     estado_fuente=p.get("srcState") or "activa", peso_fuente=_w(p.get("srcWeight")),
+                     clase=p.get("clase"))
         elif e["kind"] in ("triaged", "lowprio"):
             tr = p.get("triage", {})
             s.update(importancia=tr.get("importancia"), tipo=tr.get("tipo"), sentimiento=tr.get("sentimiento"),
                      resumen=tr.get("resumen"), motivo=tr.get("motivo"), archivada=e["kind"] == "lowprio",
                      credibilidad=tr.get("credibilidad"), alcance=tr.get("alcance"), temporalidad=tr.get("temporalidad"),
                      repercusion=tr.get("repercusion"), novedad=tr.get("novedad"), temas=tr.get("temas"))
+        elif e["kind"] == "reflejo":
+            s["reflejo"] = p.get("reflejo")
         else:
             if e["kind"] == "corroborated":   # una confirmación de una fuente silenciada no es independiente
                 s["confirmaciones"] = sum(1 for c in p.get("corrob", []) if _w((c or {}).get("srcWeight")) > 0)
@@ -147,6 +154,11 @@ def recent_news(bus: Bus, hours: float, min_imp: int, bolsa: str | None = None) 
         s["peso_medio"] = aprendizaje.source_weight(s.get("medio"))
         s["credibilidad_ajustada"] = news_credibility(s.get("credibilidad"), s.get("nivel"), s.get("confirmaciones", 0),
                                                       s.get("medio"), s.get("peso_fuente", 1.0))
+        s["reflejo"] = s.get("reflejo")
+        tri = {"tipo": s.get("tipo"), "temas": s.get("temas"), "repercusion": s.get("repercusion"),
+               "resumen": s.get("resumen")}
+        if s["credibilidad_ajustada"] is not None and not reflejo.cuenta(s.get("titular"), tri, s["reflejo"], s.get("clase")):
+            s["credibilidad_ajustada"] = 0   # macro o geopolítica sin reflejo confirmado en la cripto: no cuenta
         out.append(s)
     return sorted(out, key=lambda s: -s["ts"])[:NEWS_MAX]
 
@@ -160,6 +172,34 @@ def ws_origins() -> set[str]:
 def _story(m: dict) -> str | None:
     s = m.get("story")
     return s if isinstance(s, str) and 0 < len(s) <= STORY_MAX else None
+
+
+def _media(vals) -> float | None:
+    v = [float(x) for x in vals if isinstance(x, (int, float)) and not isinstance(x, bool)]
+    return round(sum(v) / len(v), 3) if v else None
+
+
+def cripto_aperturas_resumen(msg: dict | None) -> dict:
+    """Para /api/estado: cómo va la cripto en cada apertura de bolsa (del último «cripto_aperturas», nunca el índice).
+    Por bolsa: estado, hora de apertura (Madrid), lo que lleva o hizo cada moneda (en curso: desde la apertura;
+    terminada: a las 4 h; por abrir: la última apertura a las 4 h) y su media."""
+    out = {}
+    for k, m in ((msg or {}).get("markets") or {}).items():
+        if not isinstance(m, dict):
+            continue
+        state = m.get("state")
+        if state in ("en_curso", "terminada"):
+            src, ret_k, rng_k, t0 = m.get("coins") or {}, "ret_pct", "range_pct", m.get("open_ms")
+        else:
+            last = m.get("last") or {}
+            src, ret_k, rng_k, t0 = last.get("coins") or {}, "ret_4h_pct", "range_4h_pct", last.get("open_ms")
+        coins = {c: {"pct": v.get(ret_k), "rango_pct": v.get(rng_k)} for c, v in src.items() if isinstance(v, dict)}
+        out[k] = {"nombre": m.get("name"), "estado": state,
+                  "apertura": _hora(int(t0)) if isinstance(t0, (int, float)) else None,
+                  "minutos_desde_apertura": m.get("minutes_since_open"),
+                  "medida": {"en_curso": "desde la apertura", "terminada": "a las 4 h"}.get(state, "última apertura, a las 4 h"),
+                  "cripto": coins or None, "media_pct": _media(v["pct"] for v in coins.values())}
+    return out
 
 
 def state_summary(bus: Bus) -> dict:
@@ -178,14 +218,14 @@ def state_summary(bus: Bus) -> dict:
     fuentes = [{"nombre": s["name"], "ok": s["ok"], "noticias": s["n"], "error": s.get("err") or None}
                for s in (st.get("sources") or {}).get("sources", [])]
     masivas = (st.get("sources_summary") or {}).get("totals")
-    bolsas = {k: {"estado": m.get("state"), "cambio_pct": m.get("change_pct"), "ultima_sesion": m.get("last_session")}
-              for k, m in ((st.get("trend") or {}).get("markets") or {}).items()}
+    aperturas = cripto_aperturas_resumen(st.get("cripto_aperturas"))
     libro = {c: {"desequilibrio": o.get("imbalance"), "cvd_5m": o.get("cvd_5m"), "compras_5m": o.get("buy_ratio_5m"),
                  "tendencia": o.get("trend")} for c, o in ((st.get("orderflow") or {}).get("coins") or {}).items()}
     local = st.get("agent:local", {}).get("patch", {})
     cartera = st.get("portfolio") or {}
     return {"fase": config.PHASE, "hora_madrid": _hora(now), "precios_usdc": market.get("prices", {}), "flujo_minorista": flow,
-            "libro_y_operaciones": libro, "bolsas": bolsas, "agenda_macro": agenda, "fuentes": fuentes, "fuentes_masivas": masivas,
+            "libro_y_operaciones": libro, "aperturas_cripto": aperturas, "agenda_macro": agenda, "fuentes": fuentes,
+            "fuentes_masivas": masivas,
             "ia_local": {"encendida": not local.get("off", True), "estado": local.get("note") or local.get("now")},
             "cartera_paper": {"capital": cartera.get("equity"), "pnl_dia": cartera.get("day_pnl"),
                               "posiciones": len(cartera.get("positions", []))} if cartera else None}
@@ -616,6 +656,12 @@ def make_app(bus: Bus, health, services: Services | None = None) -> web.Applicat
     async def api_openings(_request: web.Request) -> web.Response:
         return j(sv.openings.view() if sv.openings else bus.state.get("openings") or {"type": "openings", "windows": []})
 
+    async def api_cripto_aperturas(_request: web.Request) -> web.Response:
+        """La cripto en cada apertura de bolsa (contrato 2.14): el último «cripto_aperturas» o «apagado»."""
+        if sv.reaccion:
+            return j(sv.reaccion.view())
+        return j(bus.state.get("cripto_aperturas") or reaccion.apagado())
+
     async def api_vigilancia(_request: web.Request) -> web.Response:
         if sv.vigilancia:
             return j(sv.vigilancia.view())
@@ -665,6 +711,7 @@ def make_app(bus: Bus, health, services: Services | None = None) -> web.Applicat
     app.router.add_get("/api/backtest/aperturas", api_bt_openings)
     app.router.add_get("/api/backtest/impulso", api_bt_impulso)
     app.router.add_get("/api/vigilancia", api_vigilancia)
+    app.router.add_get("/api/cripto_aperturas", api_cripto_aperturas)
     app.router.add_get("/api/fuentes_vivas", api_fv)
     app.router.add_get("/api/fuentes_vivas/lista", api_fv_lista)
     app.router.add_get("/api/fuentes_vivas/candidatos", api_fv_candidatos)

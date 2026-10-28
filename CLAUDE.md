@@ -18,6 +18,7 @@ El usuario habla español: código, comentarios, textos de la web y documentaci�
 - No se promete rentabilidad: se mide en paper y se enseñan las cifras. Lo único sin medir es la señal en vivo de las noticias.
 - Las expectativas del usuario (≥ 3 % por apertura) se contrastan con datos, sin discutir por discutir.
 - La estrategia en marcha (E2, impulso): +0,14 R por operación fuera de muestra con la salida del laboratorio y +0,35 R con la de 7 días, pero esta segunda se eligió después de ver los datos y no está validada. Con 0,5 % de riesgo son unos +0,09 % al día, no +2 %.
+- Con ≥ 6 operaciones al día y las reglas del usuario, la mejor variante pierde (≈ −0,4 % de la cuenta al día fuera de muestra). Ni sabiendo el sentido a 24 h se pasa de +1,9 %/día con 0,5 % de riesgo. Para no perder, la noticia tendría que acertar el sentido un 60 %, y las grabadas aciertan el 49 % (docs/05, sección 19).
 - Nunca se maquillan resultados ni se cambia el riesgo para llegar a un objetivo. La cartera paper de prueba (100 € ficticios desde el 28-10-2026) se mide tal cual.
 
 ## Estructura
@@ -26,7 +27,7 @@ El usuario habla español: código, comentarios, textos de la web y documentaci�
   - Análisis: `local_ai.py` (triaje con llama.cpp + Qwen local), `claude_agents.py` (fase 2: verificación, impacto y estrategia con la API de Claude), `predict.py`.
   - Mercado: `market.py` (precios, libro, flujo y funding de Binance), `trend.py`, `agenda.py`, `regions.py`.
   - Operativa: `apertura.py` (motor de aperturas; modo «impulso» = preset de la prometedora n.º 2), `paper.py` (broker paper con perpetuos y funding).
-  - Medida: `backtest.py`, `backtest_aperturas.py`, `laboratorio.py`, `historia_extra.py`, `vigilancia.py` (prueba en avance virtual de la lista congelada).
+  - Medida: `backtest.py`, `backtest_aperturas.py`, `laboratorio.py`, `historia_extra.py`, `vigilancia.py` (prueba en avance virtual de la lista congelada), `reaccion.py` (la cripto en cada apertura, mensaje `cripto_aperturas`; historia en `BACKTEST_DIR/reaccion_aperturas.json`), `reflejo.py` (si la cripto confirma una noticia macro).
   - Sistema que aprende: `aprendizaje.py` (acierto de noticias y medios ajustado al mercado, pesos), `fuentes_vivas.py` (estados prueba, activa, silenciada y retirada; descubrimiento), `evolucion.py` (historial solo de añadir, campeón frente a aspirantes, informe semanal, propuestas).
   - Infraestructura: `bus.py`, `store.py` (SQLite WAL), `server.py` (API HTTP y WebSocket en 127.0.0.1:8765).
 - `dashboard/radar.html`: la web, en un solo archivo, con modo en vivo y modo de demostración. Lleva el backtest incrustado mediante `scripts/incrustar_backtest.py`.

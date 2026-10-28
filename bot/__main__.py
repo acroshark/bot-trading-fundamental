@@ -2,8 +2,9 @@
 
 Además de noticias, mercado, paper y aperturas, arrancan los módulos que miden y aprenden (todo solo paper):
 vigilancia (prueba en avance de las estrategias congeladas), aprendizaje (medida de noticias y medios, pesos y
-post-mortems), fuentes vivas (estado de cada fuente y descubrimiento) y evolución (historial, campeón y aspirantes,
-propuestas e informe semanal). Si uno no arranca, el bot sigue sin él."""
+post-mortems), fuentes vivas (estado de cada fuente y descubrimiento), evolución (historial, campeón y aspirantes,
+propuestas e informe semanal), reacción (la cripto en cada apertura de bolsa: «cripto_aperturas») y reflejo (¿la cripto
+refleja las noticias macro y geopolíticas?). Si uno no arranca, el bot sigue sin él."""
 import asyncio
 import logging
 import os
@@ -32,6 +33,8 @@ from .market import Market
 from .models import now_ms
 from .paper import PaperBroker
 from .predict import Predictor, results_getter
+from .reaccion import Reaccion
+from .reflejo import Reflejo
 from .server import Services, make_app
 from .store import Store, in_batches
 from .trend import Trend
@@ -120,7 +123,8 @@ async def main() -> None:
         backtester = Backtester(bus, session)
         bt = results_getter()   # resultados del backtest con caché por fecha del archivo (pesa varios MB)
         state = bus.state.get
-        predictor = Predictor(bus, store, lambda: state("trend"), lambda: state("orderflow"), lambda: state("market"), bt)
+        predictor = Predictor(bus, store, lambda: state("trend"), lambda: state("orderflow"), lambda: state("market"), bt,
+                              get_reaccion=lambda: state("cripto_aperturas"))
         broker = PaperBroker(bus, store, lambda: state("market", {}), lambda: state("orderflow", {}))
         phase2 = Phase2(bus, store, session, local, lambda: state("predictions"), lambda: state("trend"),
                         lambda: state("orderflow"), lambda: state("market"), bt, broker.portfolio, broker.submit)
@@ -140,6 +144,14 @@ async def main() -> None:
             bus, store, local_ai=local, bars=CacheBars(live=lambda c: vigil.bars.get(c))))
         if learn is not None:
             observe_bus(bus, learn.observe)
+        # Reflejo: una noticia macro o geopolítica solo cuenta si la cripto la confirma (el mayor de 0,5 % y 2σ de 60 min,
+        # en 60 min). Recibe las captadas y las triadas por el gancho del bus; velas de la vigilancia y la caché.
+        refl = optional("El reflejo", lambda: Reflejo(bus, bars=CacheBars(live=lambda c: vigil.bars.get(c)).get))
+        if refl is not None:
+            observe_bus(bus, refl.observe)
+        # Reacción: la cripto en cada apertura de bolsa (cripto_aperturas); la historia, en un hilo y una vez al día.
+        react = optional("La reacción de la cripto en las aperturas", lambda: Reaccion(
+            bus, bars=CacheBars(live=lambda c: vigil.bars.get(c)).get))
         # Fuentes vivas: estado de cada fuente (lo respetan feeds y la mesa) y descubrimiento. Antes de feeds.run().
         vivas = optional("Fuentes vivas", lambda: FuentesVivas(bus, store, session))
         if vivas is not None:
@@ -155,6 +167,8 @@ async def main() -> None:
                 optional("El enlace evolución–fuentes", lambda: evo.conectar_fuentes(vivas))
             if learn is not None:
                 optional("El enlace evolución–aprendizaje", lambda: evo.conectar_aprendizaje(learn))
+            # El cambio del filtro de noticias (28-10-2026) entra con este reinicio: queda apuntado una sola vez.
+            optional("El apunte de los cambios del código", evo.apuntar_cambios_codigo)
 
         def health() -> dict:
             return {"phase": config.PHASE, "sources": [st.view() for st in states],
@@ -164,7 +178,8 @@ async def main() -> None:
                     "clients": len(bus.clients)}
 
         services = Services(feeds=feeds, predictor=predictor, broker=broker, phase2=phase2, backtest=bt, openings=openings,
-                            vigilancia=vigil, aprendizaje=learn, evolucion=evo, fuentes_vivas=vivas)
+                            vigilancia=vigil, aprendizaje=learn, evolucion=evo, fuentes_vivas=vivas, reaccion=react,
+                            reflejo=refl)
         runner = web.AppRunner(make_app(bus, health, services))
         await runner.setup()
         await web.TCPSite(runner, config.HOST, config.PORT).start()
@@ -187,7 +202,7 @@ async def main() -> None:
                     bus.publish({"type": "sources", "sources": view})
                 await asyncio.sleep(3)
 
-        extra = [m.run() for m in (learn, vivas, evo) if m is not None]   # cada run() atrapa sus fallos
+        extra = [m.run() for m in (learn, vivas, evo, refl, react) if m is not None]   # cada run() atrapa sus fallos
         try:
             await asyncio.gather(*(run_source(st, session, desk) for st in states),
                                  market.run(), agenda.run(bus, session), local.run(), report_sources(),

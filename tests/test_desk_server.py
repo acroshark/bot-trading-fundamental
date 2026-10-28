@@ -79,7 +79,13 @@ def test_contexto_region_idioma_y_temas(tmp_path):
     [ev] = events(q)
     p = ev["patch"]
     assert p["region"] == "es" and p["lang"] == "es" and p["fresh"] is False and "elecciones" in p["topics"]
-    assert "Contexto" in p["filter"]["why"]
+    assert "Contexto" in p["filter"]["why"] and p["clase"] == "contexto" and ev["coins"] == []
+    assert got == []   # política: se capta (y se mide), pero ya no gasta IA local
+    # Una macro de hace horas sí va a la IA local, detrás de lo fresco.
+    assert desk.handle(Item("elpais", "y", "El BCE sube los tipos de interés medio punto", "https://elpais.com/b", t,
+                            region="es", lang="es"), ES, warm=False) == "captured"
+    [ev] = events(q)
+    assert ev["patch"]["clase"] == "macro" and ev["patch"]["macro"] is True and ev["coins"] == []
     (args, kw), = got
     assert args[0] == ev["story"] and kw["region"] == "es" and kw["prio"] < 6   # el contexto va detrás de lo fresco
 
@@ -746,3 +752,45 @@ def test_arranque_temporales_en_m_gancho_del_bus_y_modulos_opcionales(tmp_path, 
     m = bus.publish({"type": "market", "prices": {}})
     assert seen == [m] and bus.state["market"] is m
     store.close()
+
+
+def test_cripto_va_antes_que_la_macro_en_la_cola_de_la_ia_local():
+    """Hallazgo n.º 7 de la revisión: la macro es unas 2,6 veces más numerosa; la cripto del mismo nivel y frescura va
+    un punto por delante (la cola descarta lo menos prioritario y más antiguo)."""
+    from bot.desk import priority
+    from bot.filters import classify
+    cripto = classify("Bitcoin ETF sees record inflows", "x", 60, lang="en")
+    macro = classify("Russia launches missiles at Kyiv", "x", 60, lang="en")
+    contexto = classify("Apple unveils new iPhone with AI features", "x", 60, lang="en")
+    assert cripto.clase == "cripto" and macro.clase == "macro" and contexto.clase == "contexto"
+    for tier in ("T0", "T1", "T2"):
+        assert priority(cripto, tier) == priority(macro, tier) + 1 > priority(contexto, tier)
+    viejo = classify("Bitcoin ETF sees record inflows", "x", 5 * 3600, lang="en")   # de hace horas
+    assert priority(macro, "T2") > priority(viejo, "T0")   # lo fresco sigue mandando
+
+
+def test_api_estado_resume_la_cripto_en_las_aperturas_y_no_el_indice(tmp_path):
+    """Hallazgo n.º 7: /api/estado ya no devuelve la variación de cada índice (bolsas.cambio_pct), sino cómo va la
+    cripto en cada apertura (del último «cripto_aperturas»)."""
+    from bot.bus import Bus
+    from bot.store import Store
+    store = Store(tmp_path / "t.db")
+    bus = Bus(store)
+    bus.publish({"type": "trend", "markets": {"tokio": {"state": "abierta", "change_pct": 1.2, "index": "Nikkei 225"}}})
+    st = server.state_summary(bus)
+    assert "bolsas" not in st and st["aperturas_cripto"] == {}
+    bus.publish({"type": "cripto_aperturas", "ts": 1, "coins": ["BTC", "ETH"], "markets": {
+        "tokio": {"name": "Tokio", "state": "en_curso", "open_ms": 1_793_000_000_000, "minutes_since_open": 70,
+                  "coins": {"BTC": {"ret_pct": 0.4, "range_pct": 1.1}, "ETH": {"ret_pct": -0.2, "range_pct": 1.8}}},
+        "nuevayork": {"name": "Nueva York", "state": "por_abrir", "open_ms": None, "coins": None,
+                      "last": {"open_ms": 1_792_900_000_000, "coins": {"BTC": {"ret_4h_pct": 0.6, "range_4h_pct": 1.9}}}},
+        "dubai": {"name": "Dubái", "state": "por_abrir", "coins": None, "last": None}}})
+    ap = server.state_summary(bus)["aperturas_cripto"]
+    tk, ny, du = ap["tokio"], ap["nuevayork"], ap["dubai"]
+    assert tk["estado"] == "en_curso" and tk["medida"] == "desde la apertura" and tk["media_pct"] == pytest.approx(0.1)
+    assert tk["cripto"]["BTC"] == {"pct": 0.4, "rango_pct": 1.1} and tk["apertura"] and tk["minutos_desde_apertura"] == 70
+    assert ny["medida"].startswith("última apertura") and ny["cripto"]["BTC"]["pct"] == 0.6 and ny["apertura"]
+    assert du["cripto"] is None and du["media_pct"] is None and du["apertura"] is None
+    json.dumps(ap)
+    store.close()
+

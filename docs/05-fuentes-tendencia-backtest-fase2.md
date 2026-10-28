@@ -145,8 +145,9 @@ El 2:1 es el máximo para particulares en derivados en España. Son las mismas o
 
 Cada 5 minutos, la probabilidad de subida de cada bolsa que va a abrir y de cada cripto en su próxima ventana.
 
-- **Cómo se calcula:** parte de la tasa base y se ajusta con factores visibles (bolsas anteriores según el backtest, futuros, noticias, flujo de órdenes y minorista extremo).
-- **Cómo se mide:** todas se guardan y se comprueban, así que el acierto real queda a la vista.
+- **Cómo se calcula:** parte de la tasa base y se ajusta con factores visibles. Las de cripto (desde el 28-10-2026, sección 18): tasa base de la cripto en esa apertura, la reacción de la cripto en la apertura anterior (hoy pesa 0: no predice), su tendencia de 4 h, el flujo de órdenes, el minorista extremo y sus noticias. Ya no usan los cierres de los índices. Las de bolsa (probabilidad de que el índice cierre por encima de su apertura) quedan obsoletas: siguen en el mensaje, pero ni la web ni la skill radar las enseñan y el motor ya no las usa en su señal.
+- **Noticias sin saturar:** antes se sumaban con un tope de ±10 puntos y una sola noticia bajista ya llegaba al tope; como el triaje sale bajista casi siempre (72 h: 1.697 bajistas y 313 alcistas), el 98 % de las predicciones eran bajistas (hallazgo n.º 3 de la auditoría). Ahora pesa la media ponderada por credibilidad, con una confianza que crece con el número de noticias, y se descuenta el tono medio de las noticias de 24 h. Las macro solo cuentan con reflejo confirmado en la cripto.
+- **Cómo se mide:** todas se guardan y se comprueban, así que el acierto real queda a la vista. Al lado va `up_rate`, la proporción de veces que subió: si el acierto no supera a «siempre sube» o «siempre baja», no vale nada.
 - **No son órdenes.**
 
 ## 8. Paper trading
@@ -323,3 +324,142 @@ Todo queda en el historial.
 - **Qué cabe esperar:** con 0,5 % de riesgo, 1 R es el 0,5 % de la cuenta. En el backtest fuera de muestra (variante de 7 días, sin validar) salieron +0,35 R por operación, unas 0,5 operaciones al día y 65 h de media por operación. Eso son unos +0,09 % al día, con rachas largas en negativo, no +2 % al día. Con la salida del laboratorio, +0,14 R. La cuenta honesta en avance del laboratorio perdió un 61 %.
 - **Pestaña Backtest:** abre con la estrategia en marcha (E2, `GET /api/backtest/impulso`: curva de R acumulado dentro y fuera de muestra, salidas, largos y cortos, y las advertencias) y con el laboratorio. El motor v2 «ruptura» queda debajo, rotulado como anterior. Los datos salen de `BACKTEST_DIR/impulso_7d.json`, que escribe `controles/compara_impulso.py`.
 - **Sin nadie delante:** el bot se puede arrancar suelto, sin ventana ni sesión de Claude. `scripts/vigilante-bot.ps1` comprueba `/health` cada minuto y lo vuelve a arrancar si cae; si escucha pero no contesta en 5 min, lo cierra con sus hijos antes. Registro en `logs\vigilante.log`; para pararlo, crea `M:\BotFundamental-datos\parar-vigilante`. El vigilante no se arranca solo con Windows: hace falta una tarea programada, que está pendiente de tu aprobación.
+
+## 18. La cripto en cada apertura, el reflejo de las noticias y el prefiltro nuevo (28-10-2026)
+
+Lo que pidió el usuario: no le importa cómo abre cada bolsa ni lo que hacen sus acciones, sino cómo reacciona la cripto
+cuando abre cada bolsa, y las noticias de cripto. De las demás (guerras, sanciones, bancos centrales…), solo las que se ven
+reflejadas en el mercado.
+
+**Cifras medidas con las velas de 1 min** (`HIST_DIR/1m`, Binance al contado, 3.771 aperturas de las ventanas del motor del
+1-11-2023 al 23-10-2026; scripts de referencia `oscilacion.py` y `encadenamiento.py`, reproducidas exactamente por
+`bot/reaccion.py`):
+
+| Rango (máximo − mínimo) ≥ 2 % tras la apertura | BTC | ETH | SOL | XRP | Alguna de las 4 |
+|---|---|---|---|---|---|
+| en las 4 h siguientes | 30 % | 50 % | 69 % | 51 % | 76 % |
+| en las 8 h siguientes | 53 % | 77 % | 89 % | 75 % | 93 % |
+
+- Moverse un 2 % no es ganar un 2 %: el rango cuenta la subida y la bajada, y nadie sabe de antemano por qué lado irá.
+  La subida a las 4 h ronda el 50 % en todas (BTC 49,7 %, ETH 48,4 %, SOL 49,4 %, XRP 50,5 %).
+- Por bolsa (3 años, hasta el 27-10-2026; `GET /api/cripto_aperturas`, `hist`): Nueva York y São Paulo son las que más
+  mueven (rango ≥ 2 % a las 4 h en BTC el 51 %, SOL el 86 %); Europa y Dubái, las que menos (BTC 12 %).
+- **Encadenamiento, sin mirar el futuro** (la siguiente apertura que empieza cuando ya se sabe lo que hizo la anterior en
+  4 h): tras una apertura en positivo, la siguiente sube el **49,0 %** de las veces, frente al **50,1 %** de todas
+  (15.076 casos, las cuatro monedas). Con lo que llevaba la anterior al abrir la siguiente: 48,5 % frente a 49,5 %.
+  **No predice.**
+- El **60 %** que sale al mirar «la siguiente apertura tal cual» es un artefacto del solape: São Paulo y Nueva York abren
+  con entre 30 y 90 min de diferencia según la época del año (30 con EE. UU. en horario de verano, 90 desde el 1-11) y sus
+  ventanas de 4 h se solapan, así que se mide casi dos veces el mismo movimiento. No es una señal y no se vende como tal.
+- Con el periodo del módulo (los últimos 3 años, 28-10-2023 → 27-10-2026, 3.791 aperturas) salen las mismas cifras: 30, 50,
+  69 y 51 % (alguna, 76 %) a 4 h; 52, 76, 88 y 75 % (alguna, 93 %) a 8 h; encadenamiento 49,0 % frente al 50,1 %.
+
+**Mensaje `cripto_aperturas`** (`bot/reaccion.py`, contrato 2.14): cada minuto, por bolsa, el estado de su sesión (por abrir,
+en curso las primeras 4 h, terminada), lo que lleva cada moneda desde la apertura (rendimiento, rango, máximo, mínimo y la
+curva), la anterior completa y su historia de 3 años. La historia y el encadenamiento se calculan en un hilo al arrancar y
+una vez al día (unos 50 s) y se guardan en `BACKTEST_DIR/reaccion_aperturas.json`.
+
+**Predicciones:** las de cripto ya no usan los cierres de los índices («Hong Kong cerró −0,28 % → −6,3 pp» desaparece). En su
+lugar, la reacción de la cripto en la apertura anterior, con el encadenamiento de arriba: como no predice, pesa 0 y la nota
+lo dice. La tasa base de cada ventana sale de la historia de la cripto en esa apertura.
+
+**Prefiltro** (`bot/filters.py`): tres clases.
+- *cripto*: nombra una de las cuatro monedas (lleva esas, no las cuatro) o habla de cripto en general;
+- *macro*: bancos centrales y tipos, inflación, aranceles, guerra, sanciones y, de empleo, PIB y banca, solo los datos de
+  las grandes economías y las crisis financieras, más la geopolítica y la energía de gran impacto (estrechos y bloqueos,
+  ensayos nucleares, ataques u ofensivas contra un país, golpes de Estado, pandemias, recortes de la OPEP y saltos del
+  crudo de un 4 % o más), en 14 idiomas (`topics.FUERTE`). Va sin monedas y marcada macro;
+- *contexto*: política, elecciones, empresas, tecnología, sucesos, energía, inmobiliario y economía local. Se capta para
+  medir las fuentes, pero ya no va a la IA local ni lleva monedas. Antes era la mayoría de lo captado (temas de 1.532
+  captadas: política 479, empresas 255, tecnología 187 y elecciones 164, frente a 140 de cripto), entraba con las cuatro
+  monedas y saturaba la cola de la IA local (hallazgo n.º 2).
+
+**Reflejo en la cripto** (`bot/reflejo.py`): una noticia que no es de cripto (por la clase del prefiltro, nunca por los
+temas o el tipo que le ponga la IA local) y que el triaje dejó alcista o bajista solo cuenta si la cripto la confirma.
+Desde su captura, con la media de las cuatro monedas (o BTC si falta alguna), y con un umbral que es el mayor de 0,5 % y
+2σ del movimiento de 60 min de las 24 h anteriores (mediana de 0,93 %; del 0,52 al 1,48 % entre el 10 y el 90 % de los
+casos):
+- *confirmada*: se mueve al menos el umbral a favor de la noticia en los 60 min siguientes;
+- *contraria*: al menos el umbral en contra;
+- *sin reflejo*: pasados 60 min, ninguna de las dos;
+- *pendiente*: mientras tanto. Manda lo que pase antes.
+Solo las confirmadas cuentan en la señal del motor (y entonces valen para las cuatro monedas), en la balanza de la vista
+Mundo, en el contexto del estratega y en las predicciones; en `/api/noticias` las demás salen con credibilidad ajustada 0.
+Las de cripto cuentan como siempre.
+
+**El azar (revisión del 28-10-2026).** Con momentos y direcciones al azar (6.000 casos, velas de 1 min de junio a octubre
+de 2026, medidos con `reflejo.medir`):
+
+| Umbral | Sale «confirmada» | Sale «contraria» |
+|---|---|---|
+| 0,5 % fijo (el primero) | 18,7 % | 18,6 % |
+| mayor de 0,5 % y 2σ de 60 min (el de ahora) | 5,0 % | 5,2 % |
+
+Con el 0,5 % fijo, casi una de cada cinco noticias se habría «confirmado» por puro azar, y en una hora de caída del 0,5 %
+se confirmaban a la vez todas las bajistas (el triaje es bajista casi siempre): el factor de noticias se habría convertido
+en impulso retrasado. Con las macro reales de 5 días (1.892 con dirección, 1.707 bajistas): con 2σ sale *confirmada* el
+2,9 % y *contraria* el 5,1 %, y en las mismas horas con una dirección al azar, el 3,5 %. **La dirección del triaje no se
+cumple más que al azar**: una confirmada es un filtro prudente, no la prueba de que la noticia moviera el precio, y la web
+lo dice en el expediente de cada noticia. Cuánto vale como señal se mide en paper (`Reflejo.view()` lleva la tasa de
+confirmación real y la del azar para compararlas).
+
+**Cambio de régimen en el paper.** Este cambio altera lo que filtra la estrategia en marcha (news_mode «no_contra»): las
+noticias de contexto salen de la señal (1.091 de 3.379 triadas con dirección en 24 h), la macro solo cuenta confirmada y
+las predicciones de los índices dejan de pesar en la señal. La cartera de prueba de 100 € (desde el 28-10-2026) mezcla dos
+regímenes desde el reinicio que lo active; queda apuntado en el historial de la evolución (`filtro_cambiado`,
+`codigo-noticias-2026-10-28`). Para medirla limpia, empezar otra con `scripts/nueva_cartera_paper.py` al reiniciar.
+
+## 19. ¿Noticias fiables + tendencia + entrada + salidas, con ≥ 6 operaciones al día? (28-10-2026)
+
+El usuario pidió: elegir las noticias que más aciertan, confirmar la tendencia, entrar en cada apertura, poner los límites de
+salida, sacar ≥ 1-2 % por apertura y hacer **como mínimo 6 operaciones al día**. Se midió cada paso. Los scripts y el
+resultado completo están en `BACKTEST_DIR/controles/` (`acierto_noticias.py`, `seis_diarias.py` y `seis_diarias.json`).
+Todo es solo lectura sobre `bot.db` y las velas de 1 min.
+
+**1. Qué noticias aciertan más** (`news_outcomes`, del 23 al 28-10-2026: 13.888 historias×moneda con dirección, contada
+una vez aunque la den 20 medios). El acierto es que la cripto vaya hacia donde decía la noticia a 1 h y a 4 h desde que el
+bot pudo usarla, **ajustado al mercado**: se resta la deriva del día y la moneda, porque en una semana bajista toda noticia
+bajista «acierta».
+
+| grupo | n | acierto bruto 4 h | ajustado 4 h | movimiento ≥ 1 % a favor en 4 h |
+|---|---|---|---|---|
+| todas | 13.888 | 41,4 % | **49,4 %** | 2 % |
+| alcistas / bajistas | 2.298 / 11.590 | 66,0 / 36,6 % | 50,8 / 49,1 % | 4 / 2 % |
+| importancia ≥ 5 y \|dirección\| ≥ 40 | 8.453 | 42,7 % | 48,8 % | 2 % |
+| verificadas | 742 | 46,6 % | 50,1 % | 3 % |
+| medios T0 / T1 / T2 / T3 | 43 / 4.407 / 5.371 / 4.067 | — | 46,5 / 52,2 / 48,2 / 48,0 % | — |
+
+Ningún tipo, nivel, importancia ni moneda se separa del azar con una muestra que valga. Los grupos que salen altos (energía
+bajista 70 %, europapress.es 71 %, france24.com 90 %) tienen 50-200 historias de solo 3-4 días: con tan pocos días no se
+distingue la noticia del día que hizo. Hacen falta semanas de paper para separar medios.
+
+**2-4. Tendencia, entrada y salidas con 3 años de velas** (3.766 aperturas de las 5 ventanas del laboratorio, del 30-10-2023
+al 20-10-2026; se elige con el 60 % más antiguo y se mide con el 40 % más reciente, desde el 13-08-2025).
+- Entrada en el sentido de los primeros N min (5, 15 o 30), con un umbral de 0, 0,2 o 0,5 %.
+- Tendencia: ninguna, la de la moneda en 24 h o la diaria de BTC.
+- Bracket puro: stop de 1,5, 2 o 3 %, objetivo 2, 2,5 o 3R, con objetivo neto ≥ 3 %. Tope de 24 h o 7 días de seguridad.
+- Una posición por moneda y 6 entradas al día como mucho (0,5 % × 6 = 3 %, el límite de pérdida diaria).
+- Costes del laboratorio, sin funding.
+
+En total, 432 variantes:
+- Solo 6 llegan a unas 6 operaciones al día. Todas necesitan quitar todos los filtros, el stop de 1,5 % y el tope de 24 h;
+  aun así se quedan en 5,2-5,7, porque la posición ocupa la moneda unas 11-13 h.
+- **Las 6 pierden fuera de muestra: de −0,12 a −0,17 R por operación, de −0,32 a −0,44 % de la cuenta al día.**
+- La mejor de cualquier frecuencia elegida en la muestra hace 1,3 operaciones al día y +0,036 R fuera de muestra.
+
+**Qué acierto tendría que tener la noticia.** A cada apertura y moneda se le da el sentido «bueno» (el del precio 24 h
+después, mirando el futuro) con probabilidad q. Mismas entradas a +15 min, salidas y límites (≤ 6 al día, 0,5 % de riesgo):
+
+| acierto del sentido | stop 1,5 %, 2,5R | stop 1,5 %, 3R | stop 2 %, 2R | stop 3 %, 3R |
+|---|---|---|---|---|
+| 50 % (lo medido: 49 %) | −0,45 %/día | −0,43 | −0,30 | −0,14 |
+| 60 % | +0,01 | +0,06 | +0,11 | +0,20 |
+| 70 % | +0,48 | +0,55 | +0,52 | +0,53 |
+| 80 % | +0,93 | +1,02 | +0,93 | +0,86 |
+| 100 % (saber el futuro) | +1,86 | +1,96 | +1,73 | +1,50 |
+
+Con las reglas del usuario y el riesgo de 0,5 % por operación, **ni sabiendo siempre hacia dónde irá el precio se llega al
++2 % diario de la cuenta**. Para no perder, la noticia tendría que acertar el sentido un 60 % de las veces, y las medidas
+aciertan el 49 %. Lo que falta no es la entrada ni las salidas: es una señal que acierte el sentido. Eso se sigue midiendo en
+paper (aprendizaje por medio y el reflejo de la sección 18). Al reiniciar el 28-10, la cartera de prueba tenía 0
+operaciones: el cambio de filtro de la sección 18 no mezcla regímenes en sus resultados.

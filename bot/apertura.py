@@ -45,7 +45,7 @@ from zoneinfo import ZoneInfo
 
 import aiohttp
 
-from . import config, paper, regions
+from . import config, paper, reflejo, regions
 from .models import now_ms
 
 log = logging.getLogger("apertura")
@@ -980,7 +980,11 @@ def _triage(n: dict) -> dict:
 def _news(coin: str, markets: list[str], news, now: int, p: dict) -> tuple[float, int, str]:
     """Presión de las noticias triadas: Σ dirección × magnitud × credibilidad × decaimiento × peso de la fuente, en tanh
     (−1 a 1). La credibilidad es «credibilidad_ajustada» si viene (con el peso aprendido del medio, bot/aprendizaje.py);
-    el peso de la fuente, «srcWeight» (fuentes_vivas: activa 1, prueba 0,5; silenciada o retirada no cuenta)."""
+    el peso de la fuente, «srcWeight» (fuentes_vivas: activa 1, prueba 0,5; silenciada o retirada no cuenta).
+    Una noticia macro o geopolítica (no de cripto) solo cuenta si la cripto la confirmó (reflejo.cuenta: «reflejo» de
+    la noticia, que pone signal_getter con el evento «reflejo», y «clase», la del prefiltro de su captada). Una macro
+    confirmada sin monedas vale para las cuatro (se confirmó con la media de las cuatro), como antes del 28-10-2026,
+    cuando la mesa le ponía las cuatro monedas."""
     total, k, top, top_w = 0.0, 0, "", 0.0
     for n in news or []:
         if not isinstance(n, dict) or n.get("archivada") or n.get("kind") == "lowprio":
@@ -989,6 +993,9 @@ def _news(coin: str, markets: list[str], news, now: int, p: dict) -> tuple[float
         if n.get("srcState") in ("silenciada", "retirada") or sw <= 0:
             continue
         tr = _triage(n)
+        clase = n.get("clase")
+        if not reflejo.cuenta(n.get("title"), tr, n.get("reflejo"), clase):
+            continue
         rep = tr.get("repercusion") or n.get("repercusion") or {}
         imp = _f(tr.get("importancia"), _f(n.get("importancia")))
         if imp is not None and imp < config.TRIAGE_MIN:
@@ -1005,7 +1012,8 @@ def _news(coin: str, markets: list[str], news, now: int, p: dict) -> tuple[float
             continue
         bolsa = bool(set(rep.get("bolsas") or []) & set(markets))
         nivel = (tr.get("alcance") or n.get("alcance") or {}).get("nivel")
-        if not (bolsa or coin in named or nivel == "global" or tr.get("tipo") in CRIPTO_TIPOS):
+        macro = reflejo.macro_confirmada(n.get("title"), tr, n.get("reflejo"), clase)
+        if not (bolsa or coin in named or nivel == "global" or tr.get("tipo") in CRIPTO_TIPOS or macro):
             continue
         cred = _f(n.get("credibilidad_ajustada"), _f(tr.get("credibilidad"), 50.0))
         w = (_f(rep.get("direccion"), 0.0) / 100 * _f(rep.get("magnitud"), 0.0) / 100 * cred / 100
@@ -1020,35 +1028,23 @@ def _news(coin: str, markets: list[str], news, now: int, p: dict) -> tuple[float
 
 
 def _pred(coin: str, markets: list[str], open_ms: int, predictions) -> tuple[float, str] | None:
-    """Predicciones: la de la ventana cripto de la moneda (60 %) y las de las bolsas de la ventana (40 %)."""
+    """Predicción de la ventana cripto de la moneda. Las de los índices (kind «bolsa») ya no cuentan (28-10-2026): al
+    usuario no le importa el índice, sino la cripto; hasta entonces pesaban el 40 %."""
     items = (predictions or {}).get("items") if isinstance(predictions, dict) else predictions
-    crypto, bolsas = None, []
+    crypto = None
     for it in items or []:
-        if not isinstance(it, dict):
+        if not isinstance(it, dict) or it.get("kind") != "cripto" or it.get("target") != coin:
             continue
         prob, when = _f(it.get("prob_up")), _f(it.get("when_utc"))
         if prob is None or when is None:
             continue
-        w = CONF_W.get(it.get("confidence"), 0.5)
-        s = (prob - 0.5) * 2 * w
-        if it.get("kind") == "cripto" and it.get("target") == coin:
-            if "próxima hora" in str(it.get("label") or "").lower() or "-1h-" in str(it.get("id") or ""):
-                continue
-            if abs(when - open_ms) <= 2 * MIN:
-                crypto = (s, prob, it.get("label") or coin)
-        elif it.get("kind") == "bolsa" and it.get("target") in markets and abs(when - open_ms) <= 30 * MIN:
-            bolsas.append((s, prob, regions.MARKETS[it["target"]].name))
-    if crypto is None and not bolsas:
+        if "próxima hora" in str(it.get("label") or "").lower() or "-1h-" in str(it.get("id") or ""):
+            continue
+        if abs(when - open_ms) <= 2 * MIN:
+            crypto = ((prob - 0.5) * 2 * CONF_W.get(it.get("confidence"), 0.5), prob, it.get("label") or coin)
+    if crypto is None:
         return None
-    parts, score = [], 0.0
-    if bolsas:
-        b = sum(x[0] for x in bolsas) / len(bolsas)
-        parts.append(", ".join(f"{x[2]} {_n(x[1] * 100, 0)} %" for x in bolsas))
-        score = b
-    if crypto:
-        parts.insert(0, f"{crypto[2]} {_n(crypto[1] * 100, 0)} %")
-        score = 0.6 * crypto[0] + 0.4 * score if bolsas else crypto[0]
-    return score, "Predicciones de subida: " + "; ".join(parts)
+    return crypto[0], f"Predicción de subida: {crypto[2]} {_n(crypto[1] * 100, 0)} %"
 
 
 def signal_from(coin: str, markets: list[str], open_ms: int, plans=None, news=None, predictions=None,
@@ -1092,8 +1088,9 @@ SRC_KINDS = ("captured", "corroborated", "srcstate")   # eventos que dicen el me
 
 def story_sources(store, stories) -> dict[str, dict]:
     """Medio («outlet»), estado y peso de la fuente de cada historia: de su captada y de las subidas de estado
-    (confirmación por una fuente mejor o «srcstate»; la última manda). Una consulta por el índice de story; con un store
-    sin base (pruebas) o sin datos, {}."""
+    (confirmación por una fuente mejor o «srcstate»; la última manda), y la clase del prefiltro («clase» de la captada:
+    cripto, macro o contexto; no sale si la captada no la trae). Una consulta por el índice de story; con un store sin
+    base (pruebas) o sin datos, {}."""
     db = getattr(store, "db", None)
     ids = list(dict.fromkeys(s for s in stories if s))
     out: dict[str, dict] = {}
@@ -1106,12 +1103,15 @@ def story_sources(store, stories) -> dict[str, dict]:
         rows = db.execute(f"SELECT story, kind, json_extract(body, '$.patch.srcState'), "
                           f"json_extract(body, '$.patch.srcWeight'), json_extract(body, '$.patch.outlet'), "
                           f"json_extract(body, '$.patch.via'), json_extract(body, '$.patch.url'), "
-                          f"json_extract(body, '$.patch.srcId') FROM events WHERE story IN ({','.join('?' * len(part))}) "
+                          f"json_extract(body, '$.patch.srcId'), json_extract(body, '$.patch.clase') FROM events "
+                          f"WHERE story IN ({','.join('?' * len(part))}) "
                           f"AND kind IN ({marks}) ORDER BY ts, rowid", (*part, *SRC_KINDS)).fetchall()
-        for story, kind, estado, peso, outlet, via, url, src_id in rows:
+        for story, kind, estado, peso, outlet, via, url, src_id, clase in rows:
             d = out.setdefault(story, {})
             if kind == "captured" and "outlet" not in d:
                 d["outlet"] = aprendizaje.outlet_from_patch({"outlet": outlet, "via": via, "url": url, "srcId": src_id})
+                if clase is not None:
+                    d["clase"] = clase
             if estado is not None:
                 d["srcState"] = estado
             if peso is not None:
@@ -1120,14 +1120,15 @@ def story_sources(store, stories) -> dict[str, dict]:
 
 
 def weigh_news(news: list[dict], sources: dict[str, dict]) -> list[dict]:
-    """Copia de las triadas con el estado y el peso de su fuente y la credibilidad ajustada por el peso aprendido de su
-    medio (aprendizaje.adjusted_credibility; con pocos datos el peso es 1 y no cambia nada)."""
+    """Copia de las triadas con el estado y el peso de su fuente, la clase del prefiltro y la credibilidad ajustada
+    por el peso aprendido de su medio (aprendizaje.adjusted_credibility; con pocos datos el peso es 1 y no cambia
+    nada)."""
     from . import aprendizaje
     out = []
     for e in news:
         src = sources.get(e.get("story")) or {}
         cred = _triage(e).get("credibilidad")
-        extra = {k: src[k] for k in ("srcState", "srcWeight") if k in src}
+        extra = {k: src[k] for k in ("srcState", "srcWeight", "clase") if k in src}
         adj = aprendizaje.adjusted_credibility(cred, src.get("outlet"))
         if adj is not None:
             extra["credibilidad_ajustada"] = adj
@@ -1139,16 +1140,21 @@ def signal_getter(bus, clock=now_ms, params: dict | None = None, cache_s: float 
     """get_signal(coin, window) para OpeningEngine: lee del bus los planes del estratega, las noticias triadas y las
     predicciones, y llama a signal_from. Las lecturas de la base se reutilizan durante cache_s. Cada noticia lleva el
     estado y el peso de su fuente y la credibilidad con el peso aprendido de su medio (story_sources, weigh_news): las
-    de fuentes silenciadas no cuentan."""
+    de fuentes silenciadas no cuentan. Cada una lleva también su último «reflejo» (bot/reflejo.py): una macro sin
+    reflejo confirmado no cuenta."""
     p = _params(params)
     memo = {"at": -1e18, "plans": [], "news": [], "err_at": -1e18}
 
     def load(now: int) -> None:
         if time.monotonic() - memo["at"] < cache_s:
             return
-        evs = bus.store.events_since(now - int(max(p["news_hours"], 4) * H), ("triaged", "strategy", "nostrategy"))
+        evs = bus.store.events_since(now - int(max(p["news_hours"], 4) * H),
+                                     ("triaged", "strategy", "nostrategy", "reflejo"))
         memo["plans"] = [e for e in evs if e.get("kind") in ("strategy", "nostrategy")]
-        news = [e for e in evs if e.get("kind") == "triaged"]
+        refl = {e["story"]: (e.get("patch") or {}).get("reflejo") for e in evs
+                if e.get("kind") == "reflejo" and e.get("story")}   # el último de cada historia
+        news = [{**e, "reflejo": refl[e["story"]]} if e.get("story") in refl else e
+                for e in evs if e.get("kind") == "triaged"]
         try:   # sin pesos (fallo de la base o del aprendizaje) la señal sigue como antes
             news = weigh_news(news, story_sources(bus.store, [e.get("story") for e in news]))
         except Exception:

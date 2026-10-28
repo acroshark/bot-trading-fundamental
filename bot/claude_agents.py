@@ -20,7 +20,7 @@ from zoneinfo import ZoneInfo
 
 import aiohttp
 
-from . import aprendizaje, config, history
+from . import aprendizaje, config, history, reflejo
 from .models import now_ms
 from .local_ai import upcoming_windows
 from .regions import MARKETS, REGIONS
@@ -1123,10 +1123,12 @@ class Phase2:
         """Noticias triadas recientes para el estratega. Una historia que sube de estado (la confirma o la trae una
         fuente mejor: «corroborated» o «srcstate» con srcState) cuenta con su estado nuevo; cada una pesa srcWeight
         (prueba 0,5) × el peso aprendido de su medio (aprendizaje.source_weight, 1 sin datos) y se ordena por
-        importancia × peso."""
+        importancia × peso. Una noticia macro o geopolítica (no de cripto) solo entra si la cripto la confirmó (evento
+        «reflejo», bot/reflejo.py)."""
         now = self.clock()
         evs = self.store.events_since(now - int(hours * 3600_000), ("captured", "triaged", "verified", "unverified",
-                                                                      "impact", "noimpact", "corroborated", "srcstate"))
+                                                                      "impact", "noimpact", "corroborated", "srcstate",
+                                                                      "reflejo"))
         by: dict[str, dict] = {}
         for e in evs:
             if e.get("story"):
@@ -1142,6 +1144,8 @@ class Phase2:
                 continue
             if muted(s):   # fuente silenciada o retirada (fuentes_vivas): se mide, pero no cuenta
                 continue
+            if not reflejo.cuenta(s.get("headline"), tr, s.get("reflejo"), s.get("clase")):   # macro sin reflejo
+                continue
             w = _f(s.get("srcWeight"))
             peso = (1.0 if w is None else max(0.0, min(1.0, w))) * aprendizaje.source_weight(
                 s.get("outlet") or aprendizaje.outlet_from_patch(s) or None)
@@ -1149,6 +1153,7 @@ class Phase2:
                         "fuente": s.get("src"), "nivel": s.get("tier"), "importancia": tr.get("importancia"),
                         "peso": round(peso, 2), "credibilidad": tr.get("credibilidad"), "repercusion": tr.get("repercusion"),
                         "novedad": tr.get("novedad"), "verificada": v.get("score"),
+                        "reflejo_cripto": (s.get("reflejo") or {}).get("estado"),
                         "impacto": {k: im.get(k) for k in ("dir", "mag", "conf", "hz", "main")} if im and not im.get("drop") else None})
         out.sort(key=lambda x: (-(x["importancia"] or 0) * x["peso"], x["hace_min"]))
         return out[:top]
@@ -1218,6 +1223,9 @@ class Phase2:
         out["impact"] = ev = await self.impact.analyze(self.story(story_id))
         if not ev or ev["kind"] != "impact" or ev["patch"]["impact"]["mag"] < NEWS_PLAN_MIN_MAG:
             return out
+        st = self.story(story_id)
+        if not reflejo.cuenta(st.get("headline") or st.get("title"), st.get("triage"), st.get("reflejo"), st.get("clase")):
+            return out   # macro o geopolítica que la cripto aún no ha confirmado: no despierta al estratega
         win = open_window(datetime.fromtimestamp(self.clock() / 1000, timezone.utc))
         if win:
             out["plan"] = await self.plan_news(self.story(story_id), ev["patch"]["impact"], *win)

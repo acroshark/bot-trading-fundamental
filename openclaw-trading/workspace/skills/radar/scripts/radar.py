@@ -85,14 +85,73 @@ def balanza() -> str:
     return "\n".join(lines)
 
 
+ESTADO_TXT = {"en_curso": "en curso", "terminada": "terminada", "por_abrir": "por abrir"}
+
+
+def _rate(x) -> str:
+    return "–" if x is None else f"{n(x * 100, 0)} %"
+
+
+def _hora(ms) -> str:
+    """Hora en UTC, sin ambigüedad (/api/estado da las de Madrid)."""
+    import datetime
+    return datetime.datetime.fromtimestamp(ms / 1000, datetime.timezone.utc).strftime("%d-%m %H:%M UTC")
+
+
+def aperturas_cripto(ca: dict) -> list[str]:
+    """Cómo se mueve la cripto en cada apertura de bolsa (/api/cripto_aperturas): nunca el índice."""
+    mk = ca.get("markets") or {}
+    if not mk:
+        estado = ca.get("estado")
+        return ["Cripto en las aperturas de bolsa: " + ("el bot está calculando lo histórico; vuelve en un minuto."
+                                                         if estado == "arrancando" else "sin datos todavía.")]
+    lines = ["Cripto en cada apertura de bolsa (lo que hacen BTC, ETH, SOL y XRP, no el índice):"]
+    for k, m in mk.items():
+        st = m.get("state")
+        if st in ("en_curso", "terminada"):
+            src, rk, gk = m.get("coins") or {}, "ret_pct", "range_pct"
+            what = (f"desde la apertura ({m.get('minutes_since_open')} min)" if st == "en_curso" else "a las 4 h")
+            t0 = m.get("open_ms")
+        else:
+            last = m.get("last") or {}
+            src, rk, gk, t0 = last.get("coins") or {}, "ret_4h_pct", "range_4h_pct", last.get("open_ms")
+            what = "su última apertura, a las 4 h"
+        coins = ", ".join(f"{c} {pct(v.get(rk))} (rango {n(v.get(gk))} %)" for c, v in src.items() if isinstance(v, dict))
+        head = f"- {m.get('name', k)}: {ESTADO_TXT.get(st, st or '?')}"
+        if isinstance(t0, (int, float)):
+            head += f", abrió el {_hora(t0)}"
+        lines.append(f"{head} · {what}: {coins or 'sin datos'}")
+        if m.get("aviso"):
+            lines.append(f"  aviso: {m['aviso']}")
+        h = m.get("hist") or {}
+        hc = h.get("coins") or {}
+        if hc:
+            lines.append(f"  histórico ({h.get('n')} aperturas desde {h.get('desde')}): rango ≥ 2 % en 4 h "
+                         + ", ".join(f"{c} {_rate((v or {}).get('range_ge2_rate'))}" for c, v in hc.items())
+                         + " · sube en 4 h " + ", ".join(f"{c} {_rate((v or {}).get('up_rate'))}" for c, v in hc.items())
+                         + " (lo que pasó, no una previsión)")
+    tot = ca.get("total") or {}
+    if tot.get("coins"):
+        lines.append(f"Todas las aperturas juntas ({tot.get('n')} desde {tot.get('desde')}): rango ≥ 2 % en 4 h "
+                     + ", ".join(f"{c} {_rate((v or {}).get('range_ge2_rate'))}" for c, v in tot["coins"].items())
+                     + f"; alguna de las 4, {_rate(tot.get('any_range_ge2_rate'))} (en 8 h, "
+                     + f"{_rate(tot.get('any_range_ge2_8h_rate'))}). Que se mueva no dice hacia dónde.")
+    ch = ca.get("chain") or {}
+    if ch.get("base_rate") is not None:
+        lines.append(f"Encadenamiento: tras una apertura en positivo, la siguiente sube el {_rate(ch.get('after_up_rate'))} "
+                     f"de las veces (de media, el {_rate(ch.get('base_rate'))}; {ch.get('n')} casos): NO predice.")
+        if ch.get("nota"):
+            lines.append(f"  {ch['nota']}")
+    return lines
+
+
 def tendencia() -> str:
+    """La cripto en cada apertura de bolsa y el libro de órdenes de cada moneda. Al usuario no le importa el índice."""
+    try:
+        lines = aperturas_cripto(get("/api/cripto_aperturas"))
+    except urllib.error.HTTPError:
+        lines = ["Cripto en las aperturas de bolsa: este bot aún no lo publica (hay que reiniciarlo con la versión nueva)."]
     t = get("/api/tendencia")
-    lines = ["Bolsas (índice, estado y variación):"]
-    for k, m in ((t.get("trend") or {}).get("markets") or {}).items():
-        ls = m.get("last_session") or {}
-        lines.append(f"- {m.get('name', k)} ({m.get('index')}): {m.get('state')}, {pct(m.get('change_pct'))} hoy, "
-                     f"30 min {pct(m.get('mom_30m_pct'))}, última sesión completa {ls.get('date', '–')} {pct(ls.get('change_pct'))}"
-                     f"{', futuros ' + pct((m.get('futures') or {}).get('change_pct')) if m.get('futures') else ''}")
     lines.append("Libro de órdenes y operaciones cripto (OKX EU + Binance):")
     for c, o in ((t.get("orderflow") or {}).get("coins") or {}).items():
         lines.append(f"- {c}: tendencia {o.get('trend') or 'sin datos'}, desequilibrio del libro {n((o.get('imbalance') or 0) * 100, 0)} %, "
@@ -103,17 +162,19 @@ def tendencia() -> str:
 
 
 def predicciones() -> str:
+    """Solo las de cripto: las de los índices (kind «bolsa») ya no le interesan al usuario y no cuentan en la señal."""
     p = get("/api/predicciones")
-    items = sorted(p.get("items") or [], key=lambda i: i.get("when_utc") or 0)[:12]
-    lines = ["Predicciones del bot (no son órdenes):"]
+    items = sorted((i for i in p.get("items") or [] if i.get("kind") == "cripto"),
+                   key=lambda i: i.get("when_utc") or 0)[:12]
+    lines = ["Predicciones de cripto del bot (no son órdenes):"]
     for i in items:
         drv = "; ".join(f"{d['factor']} ({'+' if d['effect_pp'] >= 0 else ''}{n(d['effect_pp'], 1)} pp)" for d in (i.get("drivers") or [])[:3])
         lines.append(f"- {i['label']} · {i['event']} · {i['horizon']}: {n(i['prob_up'] * 100, 0)} % de que suba, "
                      f"esperado {pct(i.get('expected_pct'))}, confianza {i['confidence']} (n={i.get('n_samples')}). {drv}")
-    acc = p.get("accuracy") or {}
+    acc = ((p.get("accuracy") or {}).get("by_kind") or {}).get("cripto") or {}
     if acc.get("evaluated"):
-        lines.append(f"Acierto medido: {n(acc['hit_rate'] * 100, 0)} % en {acc['evaluated']} predicciones evaluadas.")
-    return "\n".join(lines if items else ["Aún no hay predicciones."])
+        lines.append(f"Acierto medido de las de cripto: {n(acc['hit_rate'] * 100, 0)} % en {acc['evaluated']} evaluadas.")
+    return "\n".join(lines if items else ["Aún no hay predicciones de cripto."])
 
 
 def backtest() -> str:

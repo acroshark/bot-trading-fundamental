@@ -74,7 +74,16 @@ def closes_before_open(a, b, day) -> bool;  def ordered_by_close(day) -> list[Ma
 # bot/fuentes_vivas.py  FuentesVivas(bus, store, session); attach(feeds) antes de feeds.run() → estado «fuentes_vivas» (2.12)
 #   prioridad_triaje(prio, estado, story) -> float | None: prioridad de la IA local según el estado de la fuente (la usa la mesa)
 # bot/evolucion.py      Evolucion(bus, store); conectar_fuentes(fv); conectar_aprendizaje(apr) → estado «evolucion» (2.11)
+# bot/reaccion.py       Reaccion(bus, bars=CacheBars(live).get)                     → estado «cripto_aperturas» (2.14)
+#   historia y encadenamiento en un hilo (al arrancar y una vez al día) → BACKTEST_DIR/reaccion_aperturas.json
+# bot/reflejo.py        Reflejo(bus, bars=CacheBars(live).get); observe(evento): gancho síncrono del bus → evento «reflejo» (2.6)
+#   aplica(titular, triaje, clase), cuenta(titular, triaje, reflejo, clase), macro_confirmada(…) -> bool y
+#   clases(store o conexión, historias) -> {historia: clase de la captada}: las usan apertura, predict, server,
+#   claude_agents y aprendizaje. clase = patch.clase de la captada; sin ella, solo el titular (nunca el triaje)
+# bot/predict.py        Predictor(bus, store, get_trend, get_orderflow, get_market, get_backtest, get_reaccion=None)
+#   get_reaccion() → último «cripto_aperturas» (tasa base de cada ventana y reacción de la apertura anterior)
 #   registrar(store, tipo, sujeto, antes, despues, motivo, evidencia, origen) y leer(...): historial evolution_log (4)
+#   apuntar_cambios_codigo(store): CAMBIOS_CODIGO (cambios del código que alteran el paper), una sola vez al arrancar
 #   leer_estrategia_activa(), params_motor(activa), firma_motor(params): la estrategia que opera el motor (2.9)
 
 # bot/local_ai.py (LocalAI: classify(title, src, tier, coins) -> dict; brief(window, when) -> str; puerto 8094, alias qwen-trading)
@@ -135,6 +144,22 @@ Se publica como mucho cada 10 s y solo si ha cambiado. El detalle por feed sale 
 - `prob_up` parte de la tasa base y se ajusta con cada factor.
 - Las predicciones no son órdenes.
 - Se publican cada 300 s y se guardan en la tabla `predictions` para medir su acierto después.
+- **Las de bolsa (`kind: "bolsa"`, la probabilidad de que el ÍNDICE cierre por encima de su apertura) están OBSOLETAS
+  desde el 28-10-2026.** Siguen en el mensaje para no romper el contrato y para medir su acierto, pero ni la web ni la
+  skill radar de OpenClaw las enseñan y el motor ya no las usa (`apertura._pred` solo lee la de la ventana cripto de la
+  moneda; antes daba el 40 % del factor a las de los índices): al usuario le importa la cripto, no el índice. No se
+  añaden factores nuevos.
+- **Las de cripto ya no usan los cierres de los índices** (antes «Hong Kong cerró −0,28 % → −6,3 pp»). Sus factores:
+  tasa base de la cripto a 4 h de la apertura (la de `cripto_aperturas`, 2.14, con velas de 1 min; si no hay, la del
+  backtest), la reacción de la cripto en la apertura anterior del motor medida sin mirar el futuro (la última cuyas 4 h
+  ya terminaron al empezar la ventana; solo pesa si mueve ≥ 2 puntos con p < 0,05; con las cifras de hoy no predice y sale
+  en `note` con peso 0), su tendencia de 4 h, el flujo de órdenes, el minorista extremo y sus noticias.
+- **Noticias:** media del tono (dirección/100 × magnitud/100) ponderada por la credibilidad, por la confianza
+  Σcred / (Σcred + 1), menos el tono medio de las triadas de 24 h (si hay ≥ 20), con tope de ±10 puntos. Ya no es una
+  suma: antes una sola noticia bajista llegaba al tope y todas las predicciones salían bajistas (hallazgo n.º 3 de
+  `docs/auditoria-2026-10-28.md`). Las macro o geopolíticas solo cuentan si la cripto las reflejó (evento `reflejo`).
+- `accuracy` (y cada bloque de `by_kind` y `by_horizon`) lleva `up_rate`: la proporción de veces que subió. «Siempre
+  sube» acertaría `up_rate` y «siempre baja», 1 − `up_rate`: un `hit_rate` que no las supera no tiene mérito.
 
 ### 2.5 `portfolio` (módulo paper trading)
 ```json
@@ -170,7 +195,7 @@ Todos llevan `kind`, `agent`, `story` (salvo `flow` y `brief`), `title`, `text`,
 
 | kind | agent | patch |
 |---|---|---|
-| `captured`, `filtered` | `hunter` | `headline, src, srcId, via, outlet, tier, t0, lat, url, coins, pub, region, lang, fresh (bool), filter{ok, why}, topics[], srcState, srcWeight` |
+| `captured`, `filtered` | `hunter` | `headline, src, srcId, via, outlet, tier, t0, lat, url, coins, pub, region, lang, fresh (bool), filter{ok, why}, topics[], srcState, srcWeight, clase, macro` |
 | `corroborated` | `hunter` | `corrob[] {src, tier, lat, title, url, region, outlet, srcId, lang, pub, srcState, srcWeight}`; y `srcState, srcWeight` si la confirma una fuente con mejor estado que el de la historia |
 | `srcstate` | `hunter` | `srcState, srcWeight`: la misma entrada llega por un feed con mejor estado (feeds la marca como `mejora`); la historia sube de estado sin duplicarse y vuelve a la cola de la IA local si su prioridad nueva es mayor |
 | `triaged`, `lowprio` | `local` | `triage` (ver 2.7) |
@@ -181,6 +206,55 @@ Todos llevan `kind`, `agent`, `story` (salvo `flow` y `brief`), `title`, `text`,
 | `humanwait`, `humanok`, `humanko` | `human` | `human{mode, deadline?, by?, at?, no?}` |
 | `scheduled`, `order`, `filled`, `manage`, `blocked` | `exec` | `exec{scheduled?, sent?, px, slip (pb), ms, notional, sl, tp1?, tp2?, trail?, stopLossUsd?, blocked?, why?, instrument, funding?, funding_n?}` (un `manage` con `funding` es una liquidación de funding de un perpetuo) |
 | `closed` | `exec` | `result{coin, side, qty, entry, exit, why, pnl, pnl_pct, R, fees, opened, closedAt, riskUsd, notional, headline, strategy, window}`; el evento lleva `tone: "good"` o `"bad"` |
+| `reflejo` | `flow` | `reflejo{estado ("pendiente"\|"confirmada"\|"contraria"\|"sin_reflejo"), mov_pct, min, ref ("BTC"\|"media"), umbral_pct}` (ver abajo) |
+
+Prefiltro (`bot/filters.py`, 28-10-2026; `clase` en la captada y en la descartada relevante):
+- `cripto`: nombra BTC, ETH, SOL o XRP (`coins` = esas y solo esas) o habla de cripto en general (`coins` = []).
+- `macro`: tema macro o geopolítico fuerte: bancos centrales y tipos, inflación, aranceles, guerra, sanciones y, de
+  empleo, macroeconomía y banca, solo los datos de las grandes economías y las crisis (`topics.FUERTE`: datos de empleo,
+  PIB, recesión, deuda soberana, crisis financiera…), más la geopolítica y la energía de gran impacto en 14 idiomas
+  (`geopolitica_fuerte`: estrechos y bloqueos, ensayos nucleares y misiles balísticos, ataques u ofensivas contra un
+  país, golpes de Estado, ley marcial, pandemias; `energia_shock`: recortes de la OPEP y subidas o caídas del crudo de
+  un 4 % o más). `coins` = [] y `macro: true`. Necesita reflejo para contar.
+- `contexto`: el resto de temas de mercado (política, elecciones, empresas, tecnología, sucesos, energía, inmobiliario,
+  economía local…). Se capta (cuenta para medir fuentes y medios) pero no va a la IA local, no lleva monedas y no se tría.
+- Ya no se reparten las cuatro monedas a todo (hallazgo n.º 2). Lo demás (ruido, opinión, antiguo, fuera del universo)
+  se descarta como siempre.
+- Cripto en general incluye los exchanges (Binance, Coinbase, OKX, Bybit, Bitget, Upbit, Bithumb, Bitvavo…), y en chino
+  `加密` con lo que lo hace cripto (加密市场, 加密行业, 加密營收…; suelto es «cifrado») y en coreano `코인` (salvo la
+  lavandería, el karaoke y 코인마켓캡). «sol» suelto solo es SOL en mayúsculas, como `$SOL` o con contexto cripto.
+- En la cola de la IA local, la cripto va un punto por delante de la macro del mismo nivel y frescura (`desk.priority`).
+
+Reflejo en la cripto (`bot/reflejo.py`): solo para las historias que NO son de cripto y que el triaje dejó con dirección
+(|dirección| > 15). Qué es de cripto lo decide la `clase` del prefiltro de la captada (`cripto`, o `macro` y `contexto`
+que no lo son); sin clase (historias de antes del 28-10-2026), solo el titular (nombra una moneda o habla de cripto).
+**Nunca el tipo, los temas ni el resumen del triaje** (revisión del 28-10-2026, hallazgo n.º 1: la IA local pone el tema
+«cripto» o el tipo «seguridad» a noticias de la Fed o de guerra, y el 12 % de las macro con dirección se colaba sin
+confirmar). Se mide desde la captura, con el cierre de cada vela de 1 min frente al de la última vela cerrada antes de la
+captura, la media de las cuatro monedas (o BTC si falta alguna); manda el primer toque. El umbral (`umbral_pct`) es el
+mayor de 0,5 % y 2σ del movimiento de 60 min de esa misma referencia en las 24 h anteriores a la captura (sin 24 h de
+velas, 0,5 %):
+- `confirmada`: a favor de la dirección de la noticia, al menos el umbral, en los 60 min siguientes;
+- `contraria`: al menos el umbral en contra;
+- `sin_reflejo`: pasados 60 min, ninguna de las dos (y, sin velas en 3 h, `mov_pct: null`);
+- `pendiente`: dentro de los 60 min (se publica una vez; luego el estado final, una vez). Puede llevar `ref` y
+  `umbral_pct` nulos si aún no hay velas.
+`mov_pct` es el movimiento (con signo, + = sube) en el momento del estado y `min` los minutos desde la captura. Solo las
+`confirmada` cuentan en la señal del motor (`apertura._news` y `signal_getter`, que adjuntan el último `reflejo` y la
+`clase` de cada triada; una macro confirmada de la clase `macro` sin monedas vale para las cuatro y para cualquier
+ventana, como una global), en la balanza de la vista Mundo, en el contexto del estratega (`Phase2.recent_news`: no
+entran; una sin confirmar tampoco despierta al estratega por impacto), en las predicciones y en la señal de las
+operaciones que mide el aprendizaje (`aprendizaje.signal_news`, aportaciones). En `/api/noticias` salen con `reflejo` y,
+si no están confirmadas, `credibilidad_ajustada: 0`. Las de cripto cuentan como siempre (sin reflejo).
+- **Azar:** con el 0,5 % fijo, un momento cualquiera con una dirección al azar salía `confirmada` el 18,7 % de las veces
+  (y `contraria` otro 18,6 %); con el umbral de 2σ, el 5,0 % (`reflejo.AZAR`; 6.000 casos con las velas de 1 min de
+  junio a octubre de 2026). Con las macro reales de 5 días (1.892), el 2,9 % sale `confirmada` y el 5,1 % `contraria`
+  (3,5 % en las mismas horas con una dirección al azar): la dirección del triaje no se cumple más que al azar. Una
+  `confirmada` es un filtro, no una prueba de causa; la web lo dice en el expediente.
+- Al arrancar se recuperan las triadas de las últimas 7 h (la señal y la balanza miran 6 h) sin estado final; las que ya
+  no se pueden medir quedan `sin_reflejo`. La web trata como macro sin confirmar una historia con `clase: "macro"` (o
+  `contexto`) y dirección aunque aún no le haya llegado el `reflejo` (no cuenta hasta `confirmada`), y en una macro usa la
+  dirección del triaje (la que se confirmó), no la del impacto.
 
 Estado de la fuente (`srcState`, `srcWeight`; lo decide `bot/fuentes_vivas.py` y lo marca feeds en cada entrada):
 - `srcState`: `activa` (peso 1), `prueba` (0,5), `silenciada` (0) o `retirada` (0). El de una historia es el mejor de las fuentes que la traen: sube con `srcstate` o con una confirmación de una fuente mejor. Al subir, la mesa la vuelve a mandar al triaje con la prioridad de su estado nuevo si es mayor que la que tuvo (una retirada no se trió nunca); la IA local no repite una historia que ya espera en su cola (le sube la prioridad) ni una que ya trió. La fase 2 (`Phase2.recent_news`) lee también `corroborated` y `srcstate` para ver esa subida y pondera cada noticia por `srcWeight` × el peso aprendido de su medio.
@@ -351,7 +425,7 @@ Estado (no evento) de `bot/evolucion.py`, solo si cambia. Todo solo paper.
  "ultima_evaluacion": 0, "proxima_evaluacion": 0, "ultimo_cambio": 0, "automatico_desde": null,
  "ultima_orden": {"accion": "aplicar", "id": "p…", "ok": true, "why": null, "ts": 0}}
 ```
-- **Historial (`evolution_log`):** todo lo que cambia el sistema, con fecha, tipo, sujeto, antes, después, motivo en español, evidencia (cifras y tamaño de muestra), origen y, si deshace otro, `revierte`. Solo se añade: SQLite impide borrar o modificar filas. Tipos: `fuente_añadida`, `fuente_silenciada`, `fuente_retirada`, `fuente_restaurada`, `peso_cambiado`, `estrategia_promovida`, `estrategia_degradada`, `parametro_cambiado` (también el cambio de modo), `informe_semanal`, `propuesta_descartada` (una propuesta que descartaste desde la web; lo descartado queda bloqueado) y `veredicto_medio` (el aprendizaje confirma otro veredicto de un medio sin cambiar su peso: filas `tipo='veredicto'` de `medios_peso_hist`). Cada entrada leída lleva `etiqueta` y `revertida_por`; las del mensaje y de `/api/evolucion/historial` llevan además `reversible` (la web solo ofrece «Revertir» entonces: estrategia y modo, y lo de fuentes_vivas y aprendizaje; nunca el informe, un veredicto ni una propuesta descartada). Una reversión de peso desde la web (`revertir_peso`) lleva «n.º N» en el motivo y queda enlazada (`revierte`).
+- **Historial (`evolution_log`):** todo lo que cambia el sistema, con fecha, tipo, sujeto, antes, después, motivo en español, evidencia (cifras y tamaño de muestra), origen y, si deshace otro, `revierte`. Solo se añade: SQLite impide borrar o modificar filas. Tipos: `fuente_añadida`, `fuente_silenciada`, `fuente_retirada`, `fuente_restaurada`, `peso_cambiado`, `estrategia_promovida`, `estrategia_degradada`, `parametro_cambiado` (también el cambio de modo), `informe_semanal`, `propuesta_descartada` (una propuesta que descartaste desde la web; lo descartado queda bloqueado), `veredicto_medio` (el aprendizaje confirma otro veredicto de un medio sin cambiar su peso: filas `tipo='veredicto'` de `medios_peso_hist`) y `filtro_cambiado` (origen `codigo`: un cambio del código que altera lo que filtra la estrategia en paper; `evolucion.CAMBIOS_CODIGO`, apuntado una sola vez al arrancar con su id fijo; el del 28-10-2026 es `codigo-noticias-2026-10-28`, el filtro de noticias y las predicciones de los índices, y no se revierte desde la web). Cada entrada leída lleva `etiqueta` y `revertida_por`; las del mensaje y de `/api/evolucion/historial` llevan además `reversible` (la web solo ofrece «Revertir» entonces: estrategia y modo, y lo de fuentes_vivas y aprendizaje; nunca el informe, un veredicto ni una propuesta descartada). Una reversión de peso desde la web (`revertir_peso`) lleva «n.º N» en el motivo y queda enlazada (`revierte`).
 - **Campeón:** la estrategia que opera el motor (`impulso-…` en el paper). Su referencia es su gemelo virtual de la vigilancia (misma salida, reglas y costes que los aspirantes); el paper es una segunda comprobación. Hasta que el motor confirma la versión del archivo (`openings.estrategia_cargada`, 2.9) sale `pendiente_reinicio` (la web dice «Pendiente de carga»: el motor la carga solo en ≤ 1 min, sin ninguna apertura en curso; no hace falta reiniciar) y no se evalúan su degradación ni sus ajustes. `desde` es cuando se aplicó esa versión (`estrategia_activa.json`) o, con el preset, su primera operación; la hora de carga del motor solo confirma la versión.
 - **Aspirantes:** las estrategias de la vigilancia que el motor sabe operar con su salida. Para sustituir al campeón: ≥ 40 operaciones nuevas y completas, ventaja con p < 0,05 corregida por Holm, gemelo con ≥ 20 operaciones, reglas del usuario y confirmación con datos posteriores. Pausa propuesta: R contraído < −0,3 con ≥ 30 operaciones y evidencia clara.
 - **Modo `proponer`** (por defecto): nada se aplica solo. **Modo `automatico`** (`BOT_EVOLUCION_MODO` o desde la web): promociones (una cada 14 días como mucho) y pausas se aplican solas; los ajustes de parámetros son siempre propuestas. Lo aplicado se escribe en `DATA_DIR/estrategia_activa.json`, que el motor carga entre aperturas (2.9).
@@ -383,12 +457,65 @@ Estado (no evento) de `bot/fuentes_vivas.py`: tras cada revisión (cada hora) y 
 ```
 Estado (no evento) con el resultado de la última orden de 3.3 sobre fuentes o pesos de medios: la web lo enseña como aviso (solo el de la orden que tiene pendiente: «Hecho» o el `why` del rechazo). Las órdenes de la evolución dejan su resultado en `evolucion.ultima_orden`.
 
+### 2.14 `cripto_aperturas` (la cripto en cada apertura de bolsa)
+
+Estado (no evento) de `bot/reaccion.py`: cada minuto, en el estado inicial del WebSocket y en `GET /api/cripto_aperturas`.
+Lo que importa no es el índice, sino cómo se mueve la cripto cuando abre cada bolsa.
+```json
+{"type": "cripto_aperturas", "ts": 0, "coins": ["BTC", "ETH", "SOL", "XRP"],
+ "markets": {"tokio": {"name": "Tokio", "window": "tokio-seul", "state": "por_abrir|en_curso|terminada",
+   "open_ms": 0, "next_open_ms": 0, "minutes_since_open": 90,
+   "coins": {"BTC": {"ret_pct": 0.29, "range_pct": 0.75, "high_pct": 0.5, "low_pct": -0.25, "spark": [[0, 0.0], [0, 0.12]]}},
+   "last": {"open_ms": 0, "coins": {"BTC": {"ret_4h_pct": -0.41, "range_4h_pct": 0.9}}},
+   "hist": {"n": 729, "desde": "2023-10-30",
+            "coins": {"BTC": {"up_rate": 0.48, "mean_ret_pct": -0.02, "mean_range_pct": 1.54, "range_ge2_rate": 0.2,
+                              "range_ge2_8h_rate": 0.36, "n": 729}},
+            "any_range_ge2_rate": 0.71, "any_range_ge2_8h_rate": 0.89}}},
+ "chain": {"after_up_rate": 0.49, "after_down_rate": 0.512, "base_rate": 0.501, "n": 15156, "n_up": 7501, "n_down": 7655,
+           "nota": "… no predice …", "parcial": {"after_up_rate": 0.485, "…": 0}, "tal_cual": {"after_up_rate": 0.597, "…": 0}},
+ "total": {"n": 3791, "desde": "2023-10-30", "coins": {"…": {}}, "any_range_ge2_rate": 0.76, "any_range_ge2_8h_rate": 0.93},
+ "hist_generated": 0}
+```
+- Claves de `markets`: las de `regions.MARKETS` (las mismas que la web usa en `MK` y `S.trend`). `window`: la ventana del
+  motor (`apertura.openings_on`); `null` en Dubái, que no es una ventana.
+- `state`: `en_curso` de 0 a 4 h desde la apertura (la ventana de reacción de la cripto); `terminada` pasadas 4 h y hasta
+  la siguiente apertura; `por_abrir` solo si no abrió en las últimas 24 h o si hoy (fecha local) no tiene sesión.
+  Horarios con cambio de hora y festivos (`regions`, `apertura.market_open_on`); São Paulo el miércoles de ceniza, a las 13:00.
+- `open_ms`: la apertura de la sesión en curso o de la última; `minutes_since_open`: `null` en `por_abrir`.
+- `coins` (`null` en `por_abrir` o sin velas): `ret_pct` desde la apertura (en curso) o a las 4 h (terminada); `range_pct`
+  = (máximo − mínimo) / apertura en %; `high_pct` y `low_pct` sobre la apertura; `spark` ≤ 60 puntos [ms del cierre de la
+  vela, % desde la apertura], empezando en [open_ms, 0]. La apertura es la de la primera vela de 1 min (como mucho 5 min
+  tarde). Velas de Binance al contado: las de la vigilancia en memoria y la caché de `HIST_DIR/1m`.
+- `last`: la última apertura completa distinta de la que va en `coins` (en `por_abrir`, la última), con `ret_4h_pct` y
+  `range_4h_pct`; su `coins` es `null` sin velas.
+- Un resultado «a las 4 h» (`coins` de `terminada` y `last`) solo lleva una moneda si sus velas llegan hasta 5 min antes
+  de las 4 h, como la historia; con un hueco (un reinicio, o la caché por detrás) esa moneda no sale (nunca un valor a
+  medias) y la bolsa lleva `aviso` (texto en español). En `en_curso` va lo que haya.
+- `hist` (`null` hasta que se calcula): las aperturas de esa bolsa con su propia hora en los últimos 3 años como mucho
+  (hasta ayer), sin sesiones especiales y con los festivos de los índices diarios. `up_rate`: proporción de aperturas en
+  que la moneda sube a las 4 h; `mean_ret_pct` y `mean_range_pct` a 4 h; `range_ge2_rate` y `range_ge2_8h_rate`: rango
+  ≥ 2 % a las 4 y a las 8 h (con ≥ 50 velas por hora). Extras: `n` por moneda, `any_range_ge2_rate` y
+  `any_range_ge2_8h_rate` (alguna de las cuatro) y, en Dubái, `nota` (sin calendario de festivos: cuenta los laborables).
+- `chain` (`null` hasta que se calcula): con las aperturas de las ventanas del laboratorio (`backtest_aperturas.build_openings`),
+  las cuatro monedas juntas. `after_up_rate`: tras una apertura que deja la moneda en positivo a las 4 h, proporción de
+  veces que sube en la siguiente que empieza cuando ya se sabe ese resultado (≥ 4 h después: sin mirar el futuro);
+  `after_down_rate`, tras una en negativo (o nula); `base_rate`, de todas; `n` casos. Extras: `n_up`, `n_down`, `parcial`
+  (con lo que llevaba la anterior al abrir la siguiente) y `tal_cual` (la siguiente sin más: se solapa y sale ~60 %, un
+  artefacto: São Paulo y Nueva York abren con entre 30 y 90 min de diferencia según la época del año). **No predice**:
+  `nota` lo dice con las cifras.
+- Extras de primer nivel: `total` (la historia de todas las aperturas de las ventanas del laboratorio, con la misma forma
+  que `hist`) y `hist_generated` (ms del cálculo). La historia se guarda en `BACKTEST_DIR/reaccion_aperturas.json`
+  (`version` 2 desde la nota del solape corregida; `generated`, `desde`, `hasta`, `markets`, `total`, `chain`) y se
+  reutiliza si tiene menos de 24 h y es de esa versión.
+- Sin el módulo, `GET /api/cripto_aperturas` da el último estado del bus o `{"type": "cripto_aperturas", "estado": "apagado",
+  "ts": null, "coins": […], "markets": {}, "chain": null}`; antes de la primera ronda, `"estado": "arrancando"`.
+
 ## 3. API de solo lectura (servidor en 127.0.0.1:8765)
 
 | Ruta | Devuelve |
 |---|---|
-| `GET /api/estado` | Ya existe |
-| `GET /api/noticias?horas=&min=&bolsa=` | Noticias con su triaje. Cada una lleva además `medio`, `estado_fuente`, `peso_fuente` y `peso_medio`; `credibilidad_ajustada` = la del nivel y las confirmaciones × peso del medio × peso de la fuente (0 si está silenciada); `confirmaciones` no cuenta las de fuentes silenciadas |
+| `GET /api/estado` | Resumen para la IA local (precios, flujo, libro, agenda, fuentes, IA local y cartera). Desde el 28-10-2026, en lugar de `bolsas` (la variación de cada índice) lleva `aperturas_cripto`: por bolsa, `{nombre, estado, apertura (Madrid), minutos_desde_apertura, medida ("desde la apertura"\|"a las 4 h"\|"última apertura, a las 4 h"), cripto {moneda: {pct, rango_pct}} \| null, media_pct}` del último `cripto_aperturas` |
+| `GET /api/noticias?horas=&min=&bolsa=` | Noticias con su triaje. Cada una lleva además `medio`, `estado_fuente`, `peso_fuente`, `peso_medio`, `clase` (`cripto\|macro\|contexto`, del prefiltro) y `reflejo` (el último del evento `reflejo`, o `null`); `credibilidad_ajustada` = la del nivel y las confirmaciones × peso del medio × peso de la fuente (0 si está silenciada, y 0 si es macro o geopolítica sin reflejo confirmado en la cripto); `confirmaciones` no cuenta las de fuentes silenciadas |
 | `GET /api/fuentes?region=&estado=` | Lista de feeds (2.1) con `estado` y `peso` de su ciclo de vida (2.12); `estado=` filtra |
 | `GET /api/tendencia` | Último `trend` y `orderflow` |
 | `GET /api/predicciones` | Último `predictions` |
@@ -398,6 +525,7 @@ Estado (no evento) con el resultado de la última orden de 3.3 sobre fuentes o p
 | `GET /api/resultados` | Operaciones paper y agregados (3.2) |
 | `GET /api/vigilancia` | Último `vigilancia` (2.8) y `operaciones`: las operaciones virtuales que cuentan, de la más reciente a la más antigua (filas de la tabla `vigilancia`, hasta 500) |
 | `GET /api/aperturas` | Último `openings` (2.9) |
+| `GET /api/cripto_aperturas` | Último `cripto_aperturas` (2.14), o `{"estado": "apagado"}` sin el módulo |
 | `GET /api/aprendizaje` | Último `aprendizaje` (2.10) más `medios` (ranking de 60), `postmortems` (20), `cambios` (30 cambios de peso) y `noticias` `{mejores, peores}` (las que mejor y peor funcionaron a 4 h, 20 de cada) |
 | `GET /api/aprendizaje/medios?orden=peso\|acierto\|casos\|ruido\|ops\|R&limit=&veredicto=&min_casos=&q=` | Ranking de medios del último cálculo |
 | `GET /api/aprendizaje/medio?id=dominio` | Todo lo medido de un medio (404 sin datos) |
@@ -507,7 +635,7 @@ Origen permitido (vale para todas las órdenes, también las de fuentes, pesos y
 - `vigilancia(id TEXT PRIMARY KEY, estrategia TEXT, apertura TEXT, moneda TEXT, lado TEXT, entrada_t INTEGER, entrada REAL, stop REAL, objetivo REAL, salida_t INTEGER, salida REAL, R REAL, pct REAL, motivo TEXT, cuerpo TEXT)` (vigilancia, 2.8). Una fila por estrategia, apertura y moneda (`id` = código de la estrategia, `<ventana>-<día>` y moneda): un reinicio no duplica nada. `salida_t`, `salida`, `R` y `pct` van a NULL mientras está abierta; una cerrada ya no cambia (salvo el funding de un corto aún sin liquidar del todo). `lado`: `largo|corto`; `motivo`: `objetivo|stop|tiempo|abierta|sin_datos` (`sin_datos`: abierta que ya no se puede resolver tras un apagón largo; no cuenta); `salida` es el precio de salida con deslizamiento. `cuerpo` (JSON): `apertura_ms`, `ventana`, `ventana_nombre`, `dia`, `instrumento` (`contado|perpetuo`), `sl_pct`, `r`, `dur`, `R_modelo`, `pct_modelo`, `comision_perp_pct`, `funding_pct`, `funding_completo`, `previa` y, abierta, `R_latente`, `pct_latente` y `datos_hasta`.
 - `vigilancia_estado(clave TEXT PRIMARY KEY, valor TEXT)` (vigilancia): `ultimo_calculo`, `datos_hasta`, `vigiladas` y `aperturas` (las evaluadas; se reescriben solo si cambian). Sirven para recalcular lo que faltó tras un apagón.
 - Aprendizaje (2.10; las crea y migra `bot/aprendizaje.py`):
-  - `news_outcomes`: una fila por historia triada, moneda y medio (`story, coin, outlet`), con los hechos del triaje, la verificación y el impacto, la ventana de apertura, si entraría en la señal (`senal`) y lo medido con velas de 1 min desde el primer cierre tras la captura: `previo`, `desde_pub`, `r15`, `r60`, `r240`, `r1440`, `max_sube`, `max_baja`, horquilla del usuario para largo y corto, sesión de apertura (`ap15`, `ap240`) y medida accionable (`acc60`, `acc240`). Se rellena por etapas (`proxima`, `estado`).
+  - `news_outcomes`: una fila por historia triada, moneda y medio (`story, coin, outlet`), con los hechos del triaje, la verificación y el impacto, la ventana de apertura, si entraría en la señal (`senal`: 1 la usaría el motor; 0 no; 2 la usaría por su triaje, pero es una macro que la cripto no ha confirmado y el motor no la usa; para el acierto, 2 cuenta como 1, porque contar solo las confirmadas inflaría el acierto por construcción; una macro de la clase nueva, captada sin monedas, se mide con las cuatro) y lo medido con velas de 1 min desde el primer cierre tras la captura: `previo`, `desde_pub`, `r15`, `r60`, `r240`, `r1440`, `max_sube`, `max_baja`, horquilla del usuario para largo y corto, sesión de apertura (`ap15`, `ap240`) y medida accionable (`acc60`, `acc240`). Se rellena por etapas (`proxima`, `estado`).
   - `news_stories` (titular, resumen y expediente de cada historia medida), `medios_conteo` (piezas por medio o feed y día: captadas, filtradas, triadas, archivadas, confirmaciones), `medios_info` y `medio_fuente` (catálogo de medios y qué feeds los traen), `mercado_base` (lo que habría acertado la tendencia del día por moneda y horizonte).
   - `aportaciones` (parte de cada operación paper cerrada que se debe a cada noticia y medio) y `postmortems(id, origen, ref, story, moneda, cerrada, R, hechos, resumen, texto, estado, intentos, modelo, creado, actualizado)`.
   - `medios_peso(outlet, peso, auto, manual, veredicto, casos, acierto, cuerpo, actualizado)` y `medios_peso_hist(id, ts, outlet, antes, despues, tipo auto|manual|automatico|revertir|veredicto, motivo, cuerpo)`; `aprendizaje_estado(clave, valor)`.

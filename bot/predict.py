@@ -1,9 +1,16 @@
-"""Predicciones (contrato 2.4): probabilidad de que cada bolsa cierre su próxima sesión por encima de la apertura y de
-que cada cripto suba en la próxima ventana y en la próxima hora. No son órdenes.
+"""Predicciones (contrato 2.4): probabilidad de que cada cripto suba en la próxima ventana y en la próxima hora y, por
+compatibilidad (OBSOLETAS desde el 28-10-2026: la web ya no las enseña), de que cada bolsa cierre su próxima sesión por
+encima de la apertura. No son órdenes.
 
-Cada predicción parte de la tasa base del backtest y la ajusta, sumando en log-odds, con factores visibles: bolsas que
-ya cerraron (encadenamiento), futuros, noticias puntuadas, flujo de órdenes y minorista extremo. Se publican cada 5 min,
-se guardan en la tabla predictions y, cuando pasa su horizonte, se comprueban con los datos de tendencia y mercado."""
+Cada predicción parte de una tasa base y la ajusta, sumando en log-odds, con factores visibles. Las de cripto ya no usan
+los cierres de los índices de bolsa (al usuario le importa la cripto, no el Nikkei): tasa base de la cripto en esa
+apertura (bot/reaccion.py, velas de 1 min, o el backtest), la reacción de la cripto en la apertura anterior medida sin
+mirar el futuro (si no predice, pesa 0 y se dice), su tendencia de 4 h, el flujo de órdenes, el minorista extremo y sus
+noticias. Las noticias pesan por su media ponderada por credibilidad (no se saturan con el volumen), con el tono medio
+de las últimas 24 h descontado, y las macro o geopolíticas solo si la cripto las reflejó (bot/reflejo.py).
+Se publican cada 5 min, se guardan en la tabla predictions y, cuando pasa su horizonte, se comprueban con los datos de
+tendencia y mercado. El acierto lleva al lado la proporción de veces que subió (up_rate): «siempre baja» acertaría
+1 − up_rate, y sin superar eso no hay mérito."""
 import asyncio
 import json
 import logging
@@ -14,8 +21,8 @@ from collections import deque
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-from . import backtest, config, regions
-from .backtest import ASIA, CLOSE_MARGIN_MS, VERDICT_TXT, binom_sf, known, prev_weekday
+from . import apertura, backtest, config, reflejo, regions
+from .backtest import ASIA, VERDICT_TXT, binom_sf, known, prev_weekday
 from .local_ai import WINDOWS, upcoming_windows
 
 log = logging.getLogger("predict")
@@ -34,9 +41,16 @@ P_CUT = 0.10                 # con este p-valor o más la señal no pesa
 # información a tiempo): para predecir de cierre a cierre vale tanto como «funciona».
 VERDICT_W = {"funciona": 1.0, "solo_correlacion": 1.0, "dudosa": 0.6, "pocos_datos": 0.5}
 LAG1 = "nuevayork"           # bolsa cuya sesión anterior sirve a las que abren antes de que ella cierre
-NEWS_CAP_PP = 10.0
+NEWS_CAP_PP = 10.0           # tope del factor de noticias (lo alcanza solo un flujo unánime de noticias extremas)
+NEWS_K = 1.0                 # confianza Σcred / (Σcred + K): una noticia de credibilidad 100 vale la mitad
 NEWS_BOLSA_H = 12
 NEWS_CRIPTO_H = 6
+NEWS_BIAS_H = 24             # tono medio de las noticias de 24 h, que se descuenta (el triaje sale casi siempre bajista)
+NEWS_BIAS_MIN = 20           # con menos noticias con dirección no se descuenta nada
+CHAIN_LIFT_PP = 2.0          # la reacción de la apertura anterior pesa solo si mueve ≥ 2 puntos y es significativa
+CHAIN_P = 0.05
+REACT_H = 4                  # la reacción de la cripto a una apertura se mide a 4 h (bot/reaccion.py)
+WIN_NAMES = {**{g[0]: g[1] for g in apertura.GROUPS.values()}, "saopaulo": "São Paulo", "nuevayork": "Nueva York"}
 FUT_PP_PER_PCT = 5.0         # +1 % en el futuro = +5 puntos (escala sin validar en el backtest)
 FUT_CAP_PP = 5.0
 FUT_STALE_MS = 15 * 60_000   # futuro sin actualizar en 15 min: no se usa
@@ -62,7 +76,7 @@ TZ_CITY = {"Asia/Tokyo": "Tokio", "Europe/London": "Londres", "America/New_York"
 # La predicción que cuenta para el acierto es la última ronda de cada id antes de su evento. Al arrancar se agrega
 # en SQLite por (kind, horizonte): evaluadas, aciertos y suma de Brier.
 ACC_SQL = ("SELECT p.kind, p.horizon, COUNT(*), SUM(p.hit), SUM((p.prob_up - (p.outcome_pct > 0)) * "
-           "(p.prob_up - (p.outcome_pct > 0))) FROM predictions p JOIN "
+           "(p.prob_up - (p.outcome_pct > 0))), SUM(p.outcome_pct > 0) FROM predictions p JOIN "
            "(SELECT id, MAX(ts) AS ts FROM predictions WHERE ts <= when_utc GROUP BY id) f "
            "ON p.id = f.id AND p.ts = f.ts WHERE p.hit >= 0 GROUP BY p.kind, p.horizon")
 FINAL_ONE_SQL = ("SELECT kind, horizon, prob_up, outcome_pct, hit FROM predictions WHERE id = ? AND ts <= when_utc "
@@ -166,22 +180,54 @@ def news_points(tr: dict) -> float | None:
     return float(rep["direccion"]) * float(rep.get("magnitud") or 0) * float(tr.get("credibilidad", 50)) / 1e4
 
 
-def news_pressure(news: list[tuple[int, dict]], match, since: int) -> tuple[float, int, tuple | None]:
-    """Suma de las noticias triadas desde `since` que cumplen match(repercusion), con tope de ±10 puntos.
-    Devuelve (puntos, cuántas, (puntos, resumen) de la de más peso)."""
-    total, n, top = 0.0, 0, None
+def news_signal(tr: dict) -> tuple[float, float] | None:
+    """(tono de −1 a 1 = dirección/100 · magnitud/100, peso = credibilidad/100) de una triada; None sin dirección."""
+    rep = tr.get("repercusion")
+    if not isinstance(rep, dict) or not rep.get("direccion"):
+        return None
+    s = float(rep["direccion"]) / 100 * float(rep.get("magnitud") or 0) / 100
+    w = max(0.0, min(1.0, float(tr.get("credibilidad", 50)) / 100))
+    return (s, w) if s and w else None
+
+
+def news_bias(news: list[tuple[int, dict]], since: int) -> float:
+    """Tono medio (ponderado por credibilidad) de todas las triadas con dirección desde `since`. El triaje sale bajista
+    casi siempre (72 h del 28-10-2026: 1.697 bajistas y 313 alcistas): sin descontarlo, toda predicción baja. Con menos
+    de NEWS_BIAS_MIN noticias, 0."""
+    ws, sw, n = 0.0, 0.0, 0
+    for ts, tr in news:
+        sig = news_signal(tr) if ts >= since else None
+        if sig:
+            ws += sig[0] * sig[1]
+            sw += sig[1]
+            n += 1
+    return ws / sw if n >= NEWS_BIAS_MIN and sw > 0 else 0.0
+
+
+def news_pressure(news: list[tuple[int, dict]], match, since: int, bias: float = 0.0) -> tuple[float, int, tuple | None]:
+    """Noticias triadas desde `since` que cumplen match(repercusion): su tono medio ponderado por credibilidad, menos el
+    tono medio del día (bias), por la confianza Σcred / (Σcred + NEWS_K), en puntos (tope ±NEWS_CAP_PP). Una media y no
+    una suma: cien noticias bajistas no valen cien veces una (antes una sola ya llegaba al tope de −10 y todas las
+    predicciones salían bajistas, hallazgo n.º 3 de docs/auditoria-2026-10-28.md).
+    Devuelve (puntos, cuántas, (peso, resumen) de la de más peso)."""
+    ws, sw, n, top = 0.0, 0.0, 0, None
     for ts, tr in news:
         rep = tr.get("repercusion")
         if ts < since or not isinstance(rep, dict) or not match(rep):
             continue
-        pts = news_points(tr)
-        if not pts:
+        sig = news_signal(tr)
+        if not sig:
             continue
-        total += pts
+        s, w = sig
+        ws += s * w
+        sw += w
         n += 1
-        if top is None or abs(pts) > abs(top[0]):
-            top = (pts, tr.get("resumen") or "")
-    return _clip(total, -NEWS_CAP_PP, NEWS_CAP_PP), n, top
+        if top is None or abs(s * w) > abs(top[0]):
+            top = (s * w, tr.get("resumen") or "")
+    if not n:
+        return 0.0, 0, None
+    raw = NEWS_CAP_PP * sw / (sw + NEWS_K) * (ws / sw - bias)
+    return _clip(raw, -NEWS_CAP_PP, NEWS_CAP_PP), n, top
 
 
 def flow_effect(of: dict | None, price: float | None = None) -> tuple[float, str] | None:
@@ -205,6 +251,11 @@ def flow_effect(of: dict | None, price: float | None = None) -> tuple[float, str
     if not parts:
         return None
     return FLOW_CAP_PP * sum(parts) / len(parts), "Flujo de órdenes: " + ", ".join(bits)
+
+
+def _bias_txt(ctx: dict) -> str:
+    b = ctx.get("news_bias") or 0.0
+    return f"; descontado el tono medio de las noticias de {NEWS_BIAS_H} h ({_signed(b, 2)})" if b else ""
 
 
 class BacktestIndex:
@@ -300,11 +351,12 @@ def results_getter():
 
 # ---------- Módulo ----------
 class Predictor:
-    def __init__(self, bus, store, get_trend, get_orderflow, get_market, get_backtest):
+    def __init__(self, bus, store, get_trend, get_orderflow, get_market, get_backtest, get_reaccion=None):
         self.bus = bus
         self.store = store
         self.get_trend, self.get_orderflow = get_trend, get_orderflow
         self.get_market, self.get_backtest = get_market, get_backtest
+        self.get_reaccion = get_reaccion   # último «cripto_aperturas» (bot/reaccion.py) o None
         self.bt = BacktestIndex(None)
         self.last: dict | None = None
         self.pending: dict[str, dict] = {}     # id → {kind, target, when_utc, ends_utc} aún sin evaluar
@@ -326,8 +378,8 @@ class Predictor:
             """
         )
         self._load_pending()
-        for kind, horizon, n, hits, brier in self.store.db.execute(ACC_SQL):
-            self._acc_n[(kind, horizon)] = [n, hits, brier]
+        for kind, horizon, n, hits, brier, ups in self.store.db.execute(ACC_SQL):
+            self._acc_n[(kind, horizon)] = [n, hits, brier, ups or 0]
 
     def _load_pending(self) -> None:
         """Al arrancar recupera lo que quedó sin evaluar y sus precios de referencia."""
@@ -357,13 +409,25 @@ class Predictor:
             self.bt = BacktestIndex(res)
 
     def _news(self, since: int) -> list[tuple[int, dict]]:
-        """Noticias triadas desde `since`, una por historia (la última)."""
-        by: dict[str, tuple[int, dict]] = {}
-        for e in self.store.events_since(since, ("triaged",)):
+        """Noticias triadas desde `since`, una por historia (la última). Las macro o geopolíticas (no de cripto, por la
+        clase del prefiltro de su captada) solo si la cripto las confirmó (evento «reflejo», bot/reflejo.py)."""
+        by: dict[str, tuple[int, dict, str | None]] = {}
+        refl: dict[str, dict] = {}
+        for e in self.store.events_since(since, ("triaged", "reflejo")):
+            sid = e.get("story") or e.get("id")
+            if e.get("kind") == "reflejo":
+                refl[sid] = (e.get("patch") or {}).get("reflejo")
+                continue
             tr = (e.get("patch") or {}).get("triage")
             if isinstance(tr, dict):
-                by[e.get("story") or e.get("id")] = (int(e.get("ts") or 0), tr)
-        return list(by.values())
+                by[sid] = (int(e.get("ts") or 0), tr, e.get("title"))
+        try:
+            cls = reflejo.clases(self.store, list(by))
+        except Exception as e:   # sin clase se decide por el titular
+            log.warning("Predicciones: no pude leer la clase de las noticias: %s", e)
+            cls = {}
+        return [(ts, tr) for sid, (ts, tr, title) in by.items()
+                if reflejo.cuenta(title, tr, refl.get(sid), cls.get(sid))]
 
     def _context(self, now: datetime) -> dict:
         t = _ms(now)
@@ -371,10 +435,12 @@ class Predictor:
         market = self._get(self.get_market) or {}
         of = self._get(self.get_orderflow) or {}
         of_ok = not isinstance(of.get("ts"), (int, float)) or t - of["ts"] <= OF_STALE_MS
+        news = self._news(t - NEWS_BIAS_H * H)
         return {"now": now, "t": t, "trend": (self._get(self.get_trend) or {}).get("markets") or {},
                 "of": (of.get("coins") or {}) if of_ok else {},
                 "prices": self._fresh_prices(market, t), "flow": market.get("flow") or {},
-                "news": self._news(t - NEWS_BOLSA_H * H)}
+                "news": news, "news_bias": news_bias(news, t - NEWS_BIAS_H * H),
+                "reaccion": (self._get(self.get_reaccion) if self.get_reaccion else None) or {}}
 
     def _fresh_prices(self, market: dict, t: int) -> dict:
         """Precios de market solo si son recientes; si no, ninguno (no se fija referencia ni se evalúa con ellos).
@@ -489,10 +555,11 @@ class Predictor:
                 drivers.append({"factor": f"Futuros {fut_txt}", "raw_pp": raw,
                                 "source": "futuro: cambio sobre el cierre anterior (escala fija, sin validar en el backtest)"})
         # (iii) Noticias de las últimas 12 h que nombran esta bolsa.
-        raw, k, top = news_pressure(ctx["news"], lambda rep: m.key in (rep.get("bolsas") or []), ctx["t"] - NEWS_BOLSA_H * H)
+        raw, k, top = news_pressure(ctx["news"], lambda rep: m.key in (rep.get("bolsas") or []), ctx["t"] - NEWS_BOLSA_H * H,
+                                    ctx.get("news_bias", 0.0))
         if k and abs(raw) >= MIN_PP:
             drivers.append({"factor": f"{k} noticia{'s' if k > 1 else ''} sobre {m.name} (12 h)", "raw_pp": raw,
-                            "source": f"triaje de la IA local; la de más peso: «{_short(top[1])}»"})
+                            "source": f"triaje de la IA local; la de más peso: «{_short(top[1])}»" + _bias_txt(ctx)})
         prob, drv = combine(base, drivers)
         parts = [f"Tasa base {_num(base * 100)} % (sesiones {MEASURE_TXT[measure]} en el backtest)" if measure
                  else "Sin backtest todavía: se parte del 50 %"]
@@ -521,35 +588,61 @@ class Predictor:
                     log.exception("Predicción de %s (%s)", c, name or "próxima hora")
         return out
 
-    def _stock_signals(self, coin: str, wkey: str, wname: str, when: datetime, ctx: dict, ignored: list) -> list[dict]:
-        """Cierre de las bolsas asiáticas ya conocido antes de la apertura de Londres o Nueva York (bolsa_a_cripto).
-        Como en el backtest, un cierre se conoce 15 min después (Hong Kong cierra en subasta)."""
-        if wkey not in ("londres", "nuevayork"):
+    def _reaction_signal(self, coin: str, when: datetime, ctx: dict, ignored: list) -> list[dict]:
+        """Reacción de la cripto en la apertura anterior: la última del motor cuyas 4 h ya terminaron al empezar esta
+        ventana (y ahora), con el encadenamiento de bot/reaccion.py medido igual, sin mirar el futuro (la siguiente es la
+        primera que empieza cuando ya se sabe ese resultado). Solo pesa si mueve ≥ 2 puntos con p < 0,05; con las cifras
+        del 28-10-2026 (49,0 % tras subida frente al 50,1 %) no predice y sale en la nota con peso 0."""
+        ra = ctx.get("reaccion") or {}
+        ch = ra.get("chain") or {}
+        if ch.get("base_rate") is None:
             return []
-        d = when.astimezone(ZoneInfo(M[wkey].tz)).date()
-        closed = {}
-        for k in ASIA:
-            ls = (ctx["trend"].get(k) or {}).get("last_session") or {}
-            if (ls.get("date") == d.isoformat() and ls.get("change_pct")
-                    and _ms(regions.close_utc_on(M[k], d)) + CLOSE_MARGIN_MS <= _ms(when)):
-                closed[k] = ls["change_pct"]
-        cands = [(k, M[k].name, ch > 0, f"{M[k].name} cerró {_signed(ch, 2)} %") for k, ch in closed.items()]
-        ups = sum(1 for ch in closed.values() if ch > 0)
-        if len(closed) >= 3 and (ups >= 3 or len(closed) - ups >= 3):   # como en el backtest: 3 o más en el mismo sentido
-            cands.append(("asia", "Asia", ups >= 3, f"Asia: {ups} de {len(closed)} bolsas en positivo"))
-        out = []
-        for sig, name, up, text in cands:
-            s = self.bt.get(f"bolsa_a_cripto-{sig}-{coin.lower()}-{wkey}-{'compra' if up else 'venta'}")
-            if not s:
+        limit = min(ctx["t"], _ms(when))
+        best = None
+        for m in (ra.get("markets") or {}).values():
+            if not isinstance(m, dict) or m.get("window") not in apertura.LAB_WINDOWS:
                 continue
-            raw, w = edge_pp(s, up)
-            if not w or abs(raw) < MIN_PP:
-                ignored.append(f"{name} ({VERDICT_TXT.get(s.get('verdict'), 'sin ventaja')})")
-                continue
-            out.append({"factor": text, "raw_pp": raw, "group": "bolsa_a_cripto",
-                        "source": (f"bolsa→cripto {sig}→{coin} en la {wname.lower()}: acierta el {_num(s['hit_rate'] * 100)} % "
-                                   f"frente al {_num(s['base_rate'] * 100)} % (n = {s['n']}, {VERDICT_TXT.get(s.get('verdict'), '')})")})
-        return out
+            cands = []
+            if m.get("state") == "terminada" and isinstance(m.get("open_ms"), (int, float)):
+                cands.append((m["open_ms"], ((m.get("coins") or {}).get(coin) or {}).get("ret_pct")))
+            last = m.get("last") or {}
+            if isinstance(last.get("open_ms"), (int, float)):
+                cands.append((last["open_ms"], ((last.get("coins") or {}).get(coin) or {}).get("ret_4h_pct")))
+            for t0, r in cands:
+                if r is not None and t0 + REACT_H * H <= limit and (best is None or t0 > best[0]):
+                    best = (int(t0), float(r), m["window"])
+        if not best or not best[1]:
+            return []
+        up = best[1] > 0
+        rate, base = ch.get("after_up_rate" if up else "after_down_rate"), float(ch["base_rate"])
+        n_side = int(ch.get("n_up" if up else "n_down") or (ch.get("n") or 0) // 2)
+        if rate is None or not n_side:
+            return []
+        rate = float(rate)
+        lift = rate - base
+        hits = int(round(rate * n_side))
+        pv = binom_sf(hits, n_side, base) if lift >= 0 else binom_sf(n_side - hits, n_side, 1 - base)
+        verdict = "no_funciona" if pv >= CHAIN_P or abs(lift) * 100 < CHAIN_LIFT_PP else "dudosa"
+        w = reliability({"n": n_side, "p_value": pv, "verdict": verdict, "actionable": True})
+        wname = WIN_NAMES.get(best[2], best[2])
+        how = (f"tras una apertura en {'positivo' if up else 'negativo'} la siguiente sube el {_num(rate * 100)} % "
+               f"frente al {_num(base * 100)} % (n = {n_side})")
+        raw = lift * 100 * w
+        if not w or abs(raw) < MIN_PP:
+            ignored.append(f"la apertura anterior ({wname}, {coin} {_signed(best[1], 2)} % a las 4 h: {how}; no predice)")
+            return []
+        return [{"factor": f"Apertura anterior ({wname}): {coin} {_signed(best[1], 2)} % a las 4 h", "raw_pp": raw,
+                 "source": f"encadenamiento de aperturas en cripto, sin mirar el futuro: {how}"}]
+
+    def _window_base(self, coin: str, wkey: str, ctx: dict) -> tuple[float, int, str] | None:
+        """Tasa base de subida de la cripto a 4 h de la apertura: la de bot/reaccion.py (velas de 1 min, hora exacta de
+        la apertura y 3 años como mucho) y, si no hay, la del backtest (bolsa_a_cripto con velas de 1 h)."""
+        h = (((ctx.get("reaccion") or {}).get("markets") or {}).get(wkey) or {}).get("hist") or {}
+        c = (h.get("coins") or {}).get(coin) or {}
+        if c.get("up_rate") is not None and c.get("n"):
+            return float(c["up_rate"]), int(c["n"]), "reaccion"
+        wb = self.bt.window_base(wkey, coin)
+        return (wb[0], wb[1], "backtest") if wb else None
 
     def _trend_signal(self, coin: str, wkey: str, t: int, ignored: list) -> list[dict]:
         """ventana_cripto «tendencia»: seguir el movimiento de las 4 h previas (solo si la ventana empieza en 1 h o menos)."""
@@ -574,14 +667,15 @@ class Predictor:
         hours = WINDOW_H if window else 1
         lead_h = max(0.0, (_ms(when) - t) / H)
         drivers, ignored = [], []
-        base, n = 0.5, 0
+        base, n, src = 0.5, 0, None
         if window and wkey:
-            wb = self.bt.window_base(wkey, coin)
+            wb = self._window_base(coin, wkey, ctx)
             if wb:
-                base, n = wb[0], wb[1]
-            drivers += self._stock_signals(coin, wkey, wname, when, ctx, ignored)
+                base, n, src = wb
             if lead_h <= 1:
                 drivers += self._trend_signal(coin, wkey, t, ignored)
+        if window:
+            drivers += self._reaction_signal(coin, when, ctx, ignored)
         # Flujo de órdenes: el de ahora pierde peso si la ventana queda lejos.
         fe = flow_effect(ctx["of"].get(coin), ctx["prices"].get(coin))
         if fe:
@@ -597,17 +691,23 @@ class Predictor:
             ls = f" (ratio L/S {_num(f['ls'], 2)})" if f.get("ls") else ""
             drivers.append({"factor": f"Minorista {f['label']}{ls}", "raw_pp": -RETAIL_PP if f["label"] == "muy largo" else RETAIL_PP,
                             "source": "posicionamiento en futuros de Binance: en contra del extremo"})
-        # Noticias de la moneda.
-        raw, k, top = news_pressure(ctx["news"], lambda rep: coin in (rep.get("activos") or []), t - NEWS_CRIPTO_H * H)
+        # Noticias de la moneda (las macro, solo si la cripto las reflejó), con el tono medio del día descontado.
+        raw, k, top = news_pressure(ctx["news"], lambda rep: coin in (rep.get("activos") or []), t - NEWS_CRIPTO_H * H,
+                                    ctx.get("news_bias", 0.0))
         if k and abs(raw) >= MIN_PP:
             drivers.append({"factor": f"{k} noticia{'s' if k > 1 else ''} sobre {coin} ({NEWS_CRIPTO_H} h)", "raw_pp": raw,
-                            "source": f"triaje de la IA local; la de más peso: «{_short(top[1])}»"})
+                            "source": f"triaje de la IA local; la de más peso: «{_short(top[1])}»" + _bias_txt(ctx)})
         prob, drv = combine(base, drivers)
         if window:
-            note = (f"Tasa base {_num(base * 100)} %: {coin} subió en las {hours} h siguientes en el {_num(base * 100)} % "
-                    f"de {n} días del backtest" if n else "Sin tasa base histórica para esta ventana: se parte del 50 %")
+            if src == "reaccion":
+                note = (f"Tasa base {_num(base * 100)} %: {coin} subió en las {hours} h siguientes a la apertura en el "
+                        f"{_num(base * 100)} % de {n} aperturas (velas de 1 min, 3 años como mucho)")
+            else:
+                note = (f"Tasa base {_num(base * 100)} %: {coin} subió en las {hours} h siguientes en el "
+                        f"{_num(base * 100)} % de {n} días del backtest" if n
+                        else "Sin tasa base histórica para esta ventana: se parte del 50 %")
             loc = when.astimezone(ZoneInfo(WINDOW_TZ.get(wname, "UTC")))
-            if n and loc.minute:   # el backtest usa velas de 1 h: la ventana de las 09:30 la mide desde las 09:00
+            if n and loc.minute and src == "backtest":   # el backtest usa velas de 1 h: la de las 09:30, desde las 09:00
                 note += (f" (medida desde las {loc.hour:02d}:00 de {TZ_CITY.get(WINDOW_TZ.get(wname), 'allí')}, "
                          f"con velas de 1 h)")
             pid = f"{coin}-{wkey or 'ventana'}-{when.astimezone(timezone.utc):%Y-%m-%d}"
@@ -765,10 +865,11 @@ class Predictor:
         if not row or row[4] is None or row[4] < 0:
             return
         kind, horizon, prob, outcome, hit = row
-        c = self._acc_n.setdefault((kind, horizon), [0, 0, 0.0])
+        c = self._acc_n.setdefault((kind, horizon), [0, 0, 0.0, 0])
         c[0] += sign
         c[1] += sign * hit
         c[2] += sign * (prob - (outcome > 0)) ** 2
+        c[3] += sign * (outcome > 0)
 
     def _prune(self, t: int) -> None:
         """Borra las rondas intermedias de más de 14 días; de cada predicción se queda la última antes del evento.
@@ -781,14 +882,17 @@ class Predictor:
         self._prune_from = cut - 7 * 86400_000
 
     def accuracy(self) -> dict:
-        """Acierto de la última predicción de cada id antes de su evento (la que se habría usado para decidir)."""
+        """Acierto de la última predicción de cada id antes de su evento (la que se habría usado para decidir), con la
+        proporción de subidas (up_rate) para compararlo con las bases ingenuas «siempre sube» y «siempre baja»."""
         keys = [k for k, c in self._acc_n.items() if c[0] > 0]
 
         def total(ks) -> list:
-            return [sum(self._acc_n[k][i] for k in ks) for i in range(3)]
+            return [sum(self._acc_n[k][i] for k in ks) for i in range(4)]
 
         def agg(c) -> dict:
-            return {"evaluated": c[0], "hit_rate": round(c[1] / c[0], 4) if c[0] else 0.0}
+            # up_rate: proporción de veces que subió; «siempre sube» acierta up_rate y «siempre baja», 1 − up_rate.
+            return {"evaluated": c[0], "hit_rate": round(c[1] / c[0], 4) if c[0] else 0.0,
+                    "up_rate": round(c[3] / c[0], 4) if c[0] else None}
 
         everything = total(keys)
         acc = agg(everything)

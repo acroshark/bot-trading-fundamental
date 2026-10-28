@@ -109,7 +109,8 @@ Z90 = 1.645
 RULE_MIN_NET_PCT = 3.0     # regla del usuario: objetivo de al menos un 3 % neto (como la vigilancia)
 ROUNDTRIP_COST_PCT = 2 * (config.FEE_PCT + 0.02)   # comisión y 2 pb de deslizamiento por lado en contado (laboratorio)
 CRIPTO_TIPOS = {"exchange", "seguridad", "on-chain", "red", "regulatorio", "institucional"}
-NEWS_KINDS = ("captured", "corroborated", "triaged", "lowprio", "verified", "unverified", "impact", "noimpact")
+NEWS_KINDS = ("captured", "corroborated", "triaged", "lowprio", "verified", "unverified", "impact", "noimpact",
+              "reflejo")   # el reflejo en la cripto de una macro (bot/reflejo.py) decide si entra en la señal
 INGEST_KINDS = NEWS_KINDS + ("filtered",)
 DIMS = ("nivel", "region", "idioma", "tipo", "ventana", "fase", "rol")   # además de medio, fuente y moneda
 
@@ -657,8 +658,9 @@ def triage_coins(triage: dict | None) -> list[str]:
 
 
 def story_coins(triage: dict | None, cap_patch: dict | None, cap_coins=None) -> list[str]:
-    """Monedas afectadas: las que nombra el triaje, si no las de la mesa; si no nombra ninguna, las 4 solo si es global
-    o de cripto (las que la señal aplicaría a todas) y, si no, BTC como referencia (esa fila es solo para mostrar)."""
+    """Monedas afectadas: las que nombra el triaje, si no las de la mesa; si no nombra ninguna, las 4 si es global, de
+    cripto o macro (clase «macro» del prefiltro: desde el 28-10-2026 la mesa la capta sin monedas, y antes llevaba las
+    cuatro) y, si no, BTC como referencia (esa fila es solo para mostrar)."""
     tr = triage or {}
     named = triage_coins(tr)
     if named:
@@ -667,14 +669,21 @@ def story_coins(triage: dict | None, cap_patch: dict | None, cap_coins=None) -> 
         cs = [c for c in config.COINS if c in (src or [])]
         if cs:
             return cs
-    if (tr.get("alcance") or {}).get("nivel") == "global" or tr.get("tipo") in CRIPTO_TIPOS:
+    if ((tr.get("alcance") or {}).get("nivel") == "global" or tr.get("tipo") in CRIPTO_TIPOS
+            or (cap_patch or {}).get("clase") == "macro"):
         return list(config.COINS)
     return [config.COINS[0]]
 
 
-def in_signal(triage: dict | None, archivada, coin: str) -> int:
-    """1 si la señal del motor de aperturas (apertura._news) usaría esta noticia para esta moneda: triada y no archivada,
-    con importancia suficiente, y que nombra la moneda o, si no nombra ninguna, es global, de cripto o nombra bolsas."""
+def in_signal(triage: dict | None, archivada, coin: str, titular: str | None = None, clase: str | None = None,
+              refl: dict | None = None) -> int:
+    """¿La usaría la señal del motor de aperturas (apertura._news) para esta moneda? Triada y no archivada, con
+    importancia suficiente, y que nombra la moneda o, si no nombra ninguna, es global, de cripto, nombra bolsas o es macro
+    (clase «macro» del prefiltro: vale para las cuatro).
+    1: sí. 0: no. 2: la usaría por su triaje, pero es una macro o geopolítica que la cripto no ha confirmado (reflejo.cuenta)
+    y el motor no la usa. Para el acierto, 2 cuenta como 1: contar solo las confirmadas inflaría el acierto por
+    construcción (la «confirmada» ya se movió a favor en los 60 min que también se miden)."""
+    from . import reflejo   # perezoso, como apertura
     tr = triage or {}
     if not tr or archivada:
         return 0
@@ -683,10 +692,14 @@ def in_signal(triage: dict | None, archivada, coin: str) -> int:
         return 0
     named = triage_coins(tr)
     if named:
-        return int(coin in named)
-    rep = tr.get("repercusion") or {}
-    return int((tr.get("alcance") or {}).get("nivel") == "global" or tr.get("tipo") in CRIPTO_TIPOS
-               or bool(rep.get("bolsas")))
+        ok = coin in named
+    else:
+        rep = tr.get("repercusion") or {}
+        ok = ((tr.get("alcance") or {}).get("nivel") == "global" or tr.get("tipo") in CRIPTO_TIPOS
+              or bool(rep.get("bolsas")) or (clase == "macro" and reflejo.aplica(titular, tr, clase)))
+    if not ok:
+        return 0
+    return 1 if reflejo.cuenta(titular, tr, refl, clase) else 2
 
 
 def _last(evs: list[dict], kinds: tuple) -> dict | None:
@@ -706,6 +719,9 @@ def build_story(evs: list[dict], p: dict) -> tuple[dict, list[dict], list[str]] 
     tr = ((tri_ev or {}).get("patch") or {}).get("triage") or {}
     rep = tr.get("repercusion") or {}
     coins = story_coins(tr, cp, cap.get("coins"))
+    refl_ev = _last(evs, ("reflejo",))
+    refl = ((refl_ev or {}).get("patch") or {}).get("reflejo")
+    titular = cp.get("headline") or cap.get("title")
     direccion = _i(rep.get("direccion"))
     d = 0 if direccion is None or abs(direccion) <= p["dir_min"] else (1 if direccion > 0 else -1)
     corrob: list = []
@@ -758,7 +774,8 @@ def build_story(evs: list[dict], p: dict) -> tuple[dict, list[dict], list[str]] 
         for coin in coins:
             mag = _f(per.get(coin))
             rows.append({**common, **e, "coin": coin, "orden": k, "adelanto": lead if k == 0 else None,
-                         "adelanto_pub": lead_pub if k == 0 else None, "senal": in_signal(tr, archivada, coin),
+                         "adelanto_pub": lead_pub if k == 0 else None,
+                         "senal": in_signal(tr, archivada, coin, titular, cp.get("clase"), refl),
                          "imp_dir": _i(impact.get("dir")) if mag else None, "imp_mag": mag,
                          "ventana": win.get("ventana"), "fase": win.get("fase") or "fuera", "min_apertura": win.get("min"),
                          "apertura_ms": win.get("apertura_ms")})
@@ -893,8 +910,9 @@ SERIES = [(str(h), f"r{h}", ":thr", "", f"bh{h}") for h in HORIZONS] + [
     ("ap", "ap240", ":thr", " AND o.fase = 'previa'", "bh240"),
     ("im", "ap15", ":thr_imp", " AND o.fase = 'previa'", "bh15"),
     ("acc", "acc240", ":thr", "", "bh240")]
-# Dirección que cuenta: la prevista si la fila entra en la señal (las de antes de la columna senal: si no archivada).
-_DS = "(CASE WHEN COALESCE(o.senal, CASE WHEN o.archivada = 1 THEN 0 ELSE 1 END) = 1 THEN o.dir ELSE 0 END)"
+# Dirección que cuenta: la prevista si la fila entra en la señal por su triaje (1, o 2 = macro que la cripto no confirmó:
+# contar solo las confirmadas inflaría el acierto); las de antes de la columna senal: si no archivada.
+_DS = "(CASE WHEN COALESCE(o.senal, CASE WHEN o.archivada = 1 THEN 0 ELSE 1 END) IN (1, 2) THEN o.dir ELSE 0 END)"
 _DONE = "o.estado = 'completa'"
 
 
@@ -1249,21 +1267,35 @@ def _story_outlets(db, story: str) -> list[dict]:
 def signal_news(db, coin: str, at: int, p: dict, market: str | None = None) -> list[dict]:
     """Noticias que pudo usar la señal de una entrada en at (como la señal del motor de aperturas): las triadas (no
     archivadas) de las senal_h horas previas que no hablan de otras monedas y nombran esta, son globales o de cripto, o
-    nombran la bolsa de la operación; con su peso dirección × magnitud × credibilidad × decaimiento. Las 6 de más peso."""
+    nombran la bolsa de la operación; una macro o geopolítica solo si la cripto la confirmó antes de at (reflejo.cuenta,
+    con la clase de su captada; la confirmada vale para las cuatro monedas); con su peso dirección × magnitud ×
+    credibilidad × decaimiento. Las 6 de más peso."""
+    from . import reflejo   # perezoso, como apertura
     out = []
-    for story, ts, body in db.execute("SELECT story, ts, body FROM events WHERE kind = 'triaged' AND ts >= ? AND ts <= ? "
-                                      "ORDER BY ts", (at - int(p["senal_h"] * H), at)):
-        tr = ((_loads(body) or {}).get("patch") or {}).get("triage") or {}
+    since = at - int(p["senal_h"] * H)
+    rows = db.execute("SELECT story, ts, body FROM events WHERE kind = 'triaged' AND ts >= ? AND ts <= ? ORDER BY ts",
+                      (since, at)).fetchall()
+    refl = {}
+    for story, body in db.execute("SELECT story, body FROM events WHERE kind = 'reflejo' AND ts >= ? AND ts <= ? "
+                                  "ORDER BY ts", (since, at)):
+        refl[story] = ((_loads(body) or {}).get("patch") or {}).get("reflejo")
+    cls = reflejo.clases(db, [r[0] for r in rows])
+    for story, ts, body in rows:
+        ev = _loads(body) or {}
+        tr = (ev.get("patch") or {}).get("triage") or {}
         rep = tr.get("repercusion") or {}
         imp = _f(tr.get("importancia"))
         if imp is not None and imp < config.TRIAGE_MIN:
+            continue
+        if not reflejo.cuenta(ev.get("title"), tr, refl.get(story), cls.get(story)):
             continue
         named = {c for c in (rep.get("activos") or []) + (tr.get("monedas") or []) if c in config.COINS}
         if named and coin not in named:
             continue
         nivel = (tr.get("alcance") or {}).get("nivel")
         if not (coin in named or nivel == "global" or tr.get("tipo") in CRIPTO_TIPOS
-                or (market and market in (rep.get("bolsas") or []))):
+                or (market and market in (rep.get("bolsas") or []))
+                or reflejo.macro_confirmada(ev.get("title"), tr, refl.get(story), cls.get(story))):
             continue
         w = (_f(rep.get("direccion"), 0.0) / 100 * _f(rep.get("magnitud"), 0.0) / 100 * _f(tr.get("credibilidad"), 50.0)
              / 100 * 0.5 ** ((at - ts) / H / p["senal_vida_h"]))
@@ -1532,8 +1564,11 @@ def explain_news(r: dict, p: dict | None = None, horizonte: int = 240) -> str:
         parts.append(f"fue una confirmación ({who}), {_n(r['retraso'] / MIN, 0)} min después de la primera que captó "
                      "el bot")
     if r.get("senal") == 0 and not r.get("archivada"):
-        parts.append("no entra en la señal del motor (no nombra la moneda ni es global, de cripto o de una bolsa): "
-                     "no cuenta para el acierto del medio")
+        parts.append("no entra en la señal del motor (no nombra la moneda ni es global, de cripto, macro o de una "
+                     "bolsa): no cuenta para el acierto del medio")
+    elif r.get("senal") == 2:
+        parts.append("es macro o geopolítica y la cripto no la confirmó: el motor no la usa, pero cuenta para el acierto "
+                     "del medio como las demás")
     if r.get("verificada") is not None and r.get("verif") is not None:
         parts.append(f"la verificación la {'dio por buena' if r['verificada'] else 'puso en duda'} "
                      f"({_n(r['verif'], 2)})")
@@ -1564,7 +1599,7 @@ def best_worst(db, now: int, p: dict, cuales: str = "mejores", horizonte: int = 
     order = "DESC" if cuales != "peores" else "ASC"
     rows = db.execute(f"SELECT {NEWS_SEL}, o.dir * o.r{h} AS score FROM news_outcomes o LEFT JOIN news_stories s "
                       f"ON s.story = o.story WHERE o.rol = 'primera' AND o.dir != 0 AND o.r{h} IS NOT NULL AND o.t0 >= ? "
-                      "AND (? = 0 OR COALESCE(o.senal, CASE WHEN o.archivada = 1 THEN 0 ELSE 1 END) = 1) "
+                      "AND (? = 0 OR COALESCE(o.senal, CASE WHEN o.archivada = 1 THEN 0 ELSE 1 END) IN (1, 2)) "
                       f"ORDER BY score {order} LIMIT ?",
                       (now - int(dias * DAY), int(bool(solo_senal)), limit * 4)).fetchall()
     out, seen = [], set()

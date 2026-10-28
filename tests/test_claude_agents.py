@@ -224,12 +224,13 @@ def make_phase2(tmp_path, client, local=None, clock=None, submit=None, predictio
     return p, bus, store, calls
 
 
-def seed_story(bus, clock, sid="n1", imp=7, title="SEC approves Solana ETF", age_ms=120_000):
+def seed_story(bus, clock, sid="n1", imp=7, title="SEC approves Solana ETF", age_ms=120_000, clase="cripto"):
     t = clock() - age_ms
     bus.publish({"type": "event", "ts": t, "kind": "captured", "agent": "hunter", "story": sid, "title": title,
                  "coins": ["SOL"], "text": "SEC · T0",
                  "patch": {"headline": title, "src": "SEC · prensa", "srcId": "sec", "tier": "T0", "t0": t, "lat": 4000,
-                           "url": "https://www.sec.gov/x", "coins": ["SOL"], "pub": t - 4000, "region": "us"}})
+                           "url": "https://www.sec.gov/x", "coins": ["SOL"], "pub": t - 4000, "region": "us",
+                           "clase": clase}})
     bus.publish({"type": "event", "ts": t + 30_000, "kind": "corroborated", "agent": "hunter", "story": sid, "title": title,
                  "coins": ["SOL"], "text": "Reuters",
                  "patch": {"corrob": [{"src": "Reuters", "tier": "T1", "lat": 30_000, "title": title, "url": "u", "region": "us"}]}})
@@ -746,6 +747,31 @@ async def test_impacto_menor_o_sin_ventana_no_despierta_al_estratega(tmp_path):
     p2, bus2, *_ = make_phase2(tmp_path / "b", client2, clock=Clock(datetime(2026, 10, 26, 10, 0, tzinfo=UTC)))
     seed_story(bus2, p2.clock, "n1", imp=8)
     assert (await p2.on_triaged("n1"))["plan"] is None and [c["model"] for c in client2.calls] == [HAIKU, SONNET]
+
+
+async def test_macro_sin_reflejo_confirmado_no_despierta_al_estratega(tmp_path):
+    """Una noticia macro o geopolítica (no de cripto) con impacto grande y ventana abierta solo despierta al estratega si
+    la cripto ya la confirmó (evento «reflejo», bot/reflejo.py). Las de cripto, como siempre."""
+    strat = {"why": "x", "tickets": [STRAT_4["tickets"][3], STRAT_4["tickets"][0]]}
+    client = FakeClient(by_model(strat=strat))
+    p, bus, store, calls = make_phase2(tmp_path, client, clock=Clock(IN_LONDON))
+    title = "Fed hikes rates by 75 bp in surprise move"
+    seed_story(bus, p.clock, "m1", imp=8, title=title, clase="macro")   # la clase del prefiltro de su captada
+    bus.publish({"type": "event", "ts": p.clock() - 30_000, "kind": "triaged", "agent": "local", "story": "m1",
+                 "title": title, "coins": [], "text": "x",
+                 "patch": {"triage": {"tipo": "macro", "temas": ["banco central"], "importancia": 8, "credibilidad": 90,
+                                      "resumen": "La Fed sube los tipos 75 pb por sorpresa", "monedas": [],
+                                      "repercusion": {"direccion": -70, "magnitud": 70, "activos": [], "bolsas": []}}}})
+    out = await p.on_triaged("m1")
+    assert out["impact"]["kind"] == "impact" and out["plan"] is None and calls == []
+    assert p.recent_news() == []   # tampoco entra en el contexto del estratega
+    bus.publish({"type": "event", "ts": p.clock() - 10_000, "kind": "reflejo", "agent": "flow", "story": "m1",
+                 "title": title, "coins": [], "text": "x",
+                 "patch": {"reflejo": {"estado": "confirmada", "mov_pct": -0.7, "min": 14, "ref": "media"}}})
+    p._handled.clear()
+    out = await p.on_triaged("m1")
+    assert out["plan"] and len(calls) == 1
+    assert [n["reflejo_cripto"] for n in p.recent_news()] == ["confirmada"]
 
 
 # ---------------------------------------------------------------- bucles

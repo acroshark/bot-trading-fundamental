@@ -5,7 +5,10 @@ de cada captada, descartada y confirmación (srcState, srcWeight). Las de fuente
 igual (así se siguen midiendo y pueden volver), pero con peso 0 no cuentan en la señal ni como confirmación
 independiente, y van al final de la cola de la IA local (fuentes_vivas.prioridad_triaje; una retirada no se tría).
 Si la historia sube de estado (la confirma o la trae una fuente mejor), vuelve a la cola con la prioridad nueva cuando
-es mayor que la que tuvo (o no entró): sin triaje, la subida no llegaría nunca a la señal."""
+es mayor que la que tuvo (o no entró): sin triaje, la subida no llegaría nunca a la señal.
+
+Clase de cada captada (filters.classify, patch.clase): «cripto» y «macro» van a la IA local; el «contexto» (política,
+empresas, tecnología, sucesos, economía local) se capta y se mide, pero no se tría ni lleva monedas."""
 import logging
 import time
 from collections import Counter, defaultdict, deque
@@ -62,8 +65,11 @@ def outlet_of(item: Item, src: Source) -> str:
 
 
 def priority(d: Decision, tier: str) -> float:
-    """Orden en la cola de la IA local: lo fresco y fuerte primero; el contexto, cuando haya hueco."""
-    return (3 if d.strong else 1) + {"T0": 1.5, "T1": 1.0}.get(tier, 0) + (3 if d.fresh else 0)
+    """Orden en la cola de la IA local: lo fresco y fuerte primero; el contexto, cuando haya hueco. Lo de cripto, un
+    punto por delante de la macro del mismo nivel y frescura: la macro es unas 2,6 veces más numerosa (muchos partes de
+    guerra rutinarios) y la cola descarta lo menos prioritario y más antiguo."""
+    return ((3 if d.strong else 1) + (1 if d.clase == "cripto" else 0) + {"T0": 1.5, "T1": 1.0}.get(tier, 0)
+            + (3 if d.fresh else 0))
 
 
 def src_state(item: Item) -> tuple[str, float]:
@@ -129,7 +135,7 @@ class NewsDesk:
         base = {"headline": title, "src": name, "srcId": item.source, "via": item.via, "outlet": outlet, "tier": tier,
                 "t0": now, "lat": age_ms, "url": item.url, "coins": d.coins, "pub": item.published,
                 "region": item.region, "lang": item.lang, "fresh": d.fresh, "topics": d.topics,
-                "srcState": estado, "srcWeight": peso}
+                "srcState": estado, "srcWeight": peso, "clase": d.clase, "macro": d.macro}
         self._note(f"Último: «{title[:70]}» · {name}")
 
         if not d.relevant:
@@ -175,8 +181,9 @@ class NewsDesk:
                 self._retriage(dup)
             return "corroborated"
 
+        contexto = d.clase == "contexto"   # política, empresas, tecnología…: se capta, pero no gasta IA local
         rec = Recent(now, sid, item.source, title, d.coins, words, {outlet}, estado=estado, name=name, tier=tier,
-                     region=item.region, prio_base=priority(d, tier))
+                     region=item.region, prio_base=None if contexto else priority(d, tier))
         self._remember(rec)
         if d.fresh:
             when = f"llegó {fmt_age(age_ms)} después de publicarse" if age_ms is not None else "sin hora de publicación"
@@ -188,8 +195,9 @@ class NewsDesk:
         self.bus.publish({"type": "event", "kind": "captured", "agent": "hunter", "story": sid, "title": title,
                           "coins": d.coins, "text": f"{name} · {tier} · {when}",
                           "patch": {**base, "filter": {"ok": True, "why": why}}})
-        log.log(logging.INFO if d.fresh else logging.DEBUG, "Relevante%s [%s] %s", "" if d.fresh else " (contexto)", name, title)
-        if self.on_relevant:
+        log.log(logging.INFO if d.fresh and not contexto else logging.DEBUG, "%s%s [%s] %s",
+                "Contexto" if contexto else "Relevante", "" if d.fresh else " (de hace horas)", name, title)
+        if self.on_relevant and not contexto:
             prio = triage_priority(rec.prio_base, estado, sid)
             if prio is not None:   # una retirada se publica (para medirla) pero no gasta IA local
                 rec.enviada = prio

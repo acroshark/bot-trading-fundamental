@@ -57,12 +57,22 @@ class FakeBars:
 
 
 def captured(story, t0, url="https://www.reuters.com/a", src="Reuters", src_id="us-reuters-1", via=None, tier="T1",
-             region="us", lang="en", coins=("BTC",), headline="La Fed recorta los tipos"):
-    return {"type": "event", "kind": "captured", "agent": "hunter", "story": story, "ts": t0, "title": headline,
-            "coins": list(coins), "text": "",
-            "patch": {"headline": headline, "src": src, "srcId": src_id, "via": via, "tier": tier, "t0": t0,
-                      "lat": 2 * MIN, "url": url, "coins": list(coins), "pub": t0 - 2 * MIN, "region": region,
-                      "lang": lang, "fresh": True, "topics": ["macro"], "filter": {"ok": True, "why": "macro"}}}
+             region="us", lang="en", coins=("BTC",), headline="La Fed recorta los tipos", clase=None):
+    ev = {"type": "event", "kind": "captured", "agent": "hunter", "story": story, "ts": t0, "title": headline,
+          "coins": list(coins), "text": "",
+          "patch": {"headline": headline, "src": src, "srcId": src_id, "via": via, "tier": tier, "t0": t0,
+                    "lat": 2 * MIN, "url": url, "coins": list(coins), "pub": t0 - 2 * MIN, "region": region,
+                    "lang": lang, "fresh": True, "topics": ["macro"], "filter": {"ok": True, "why": "macro"}}}
+    if clase:
+        ev["patch"]["clase"] = clase
+    return ev
+
+
+def reflejo_ev(story, ts, estado="confirmada"):
+    """Evento «reflejo» de bot/reflejo.py: la cripto confirmó (o no) una macro."""
+    return {"type": "event", "kind": "reflejo", "agent": "flow", "story": story, "ts": ts, "title": "", "coins": [],
+            "text": "", "patch": {"reflejo": {"estado": estado, "mov_pct": 0.8, "min": 7, "ref": "media",
+                                              "umbral_pct": 0.5}}}
 
 
 def triaged(story, ts, direccion=60, activos=("BTC",), importancia=7, kind="triaged", cred=80, tipo="macro"):
@@ -257,7 +267,9 @@ async def test_filas_recuentos_y_reinicio(env):
     bl = apr.stats["medios"]["bloomberg"]   # nombre de Google News sin dominio conocido: ni directo ni candidato
     assert bl["clave_tipo"] == "nombre" and not bl["directo"] and not bl["candidato"]
     row = db.execute("SELECT senal, n_medios, ts_triaje FROM news_outcomes WHERE story = 'n1' AND rol = 'primera'").fetchone()
-    assert row == (1, 2, T + MIN)
+    # «La Fed recorta los tipos» es macro y la cripto no la ha confirmado: el motor no la usa (2), pero para el acierto
+    # del medio cuenta como las demás (contar solo las confirmadas lo inflaría por construcción)
+    assert row == (2, 2, T + MIN)
 
     # Reinicio: mismo cursor, ni filas ni recuentos repetidos.
     apr2 = make(bus, store, bars, now + MIN)
@@ -390,13 +402,47 @@ async def test_solo_cuenta_lo_que_usaria_la_senal(env):
     rows = {}
     for story, coin, senal in store.db.execute("SELECT story, coin, senal FROM news_outcomes ORDER BY story, coin"):
         rows.setdefault(story, []).append((coin, senal))
-    assert rows["l1"] == [("BTC", 0)] and rows["l2"] == [("BTC", 1)]
+    assert rows["l1"] == [("BTC", 0)] and rows["l2"] == [("BTC", 2)]   # l2: macro sin confirmar (cuenta para el acierto)
     assert sorted(rows["l3"]) == sorted((c, 0) for c in config.COINS)
     m = apr.stats["medios"]["reuters.com"]
     assert m["publicaciones"] == 3 and m["archivadas"] == 1 and m["principal"]["casos"] == 1   # solo l2
     assert {x["story"] for x in await apr.noticias("mejores", 60, dias=60)} == {"l2"}   # por defecto, las que cuentan
     todas = await apr.noticias("mejores", 60, dias=60, solo_senal=False)
     assert any("no entra en la señal" in x["explicacion"] for x in todas if x["story"] == "l1")
+
+
+def test_macro_sin_confirmar_no_entra_en_la_senal_pero_si_en_el_acierto():
+    """Hallazgo n.º 14: in_signal aplica el reflejo como el motor (1 = la usa; 2 = macro que la cripto no confirmó: no
+    la usa, pero cuenta para el acierto) y la macro de la clase nueva (captada sin monedas) se mide con las cuatro."""
+    tr = triaged("x", T, activos=())["patch"]["triage"]
+    tr["alcance"] = {"nivel": "nacional", "puntuacion": 40}
+    ok = {"estado": "confirmada"}
+    assert A.in_signal(tr, 0, "ETH", "La Fed recorta los tipos", "macro", None) == 2
+    assert A.in_signal(tr, 0, "ETH", "La Fed recorta los tipos", "macro", ok) == 1
+    assert A.in_signal(tr, 0, "ETH", "La Fed recorta los tipos", "macro", {"estado": "contraria"}) == 2
+    assert A.in_signal(tr, 0, "ETH", "Bitcoin ETF", "cripto", None) == 0          # cripto sin monedas ni alcance
+    assert A.in_signal(tr, 0, "ETH", "La Fed recorta los tipos", None, ok) == 0   # sin clase: la regla de siempre
+    assert A.in_signal(tr, 1, "ETH", "x", "macro", ok) == 0                       # archivada
+    assert A.story_coins(tr, {"clase": "macro", "coins": []}) == list(config.COINS)
+    assert A.story_coins(tr, {"clase": "contexto", "coins": []}) == ["BTC"]
+
+
+def test_la_senal_de_una_operacion_solo_usa_la_macro_confirmada_antes(tmp_path):
+    """signal_news (aportaciones de una operación a sus noticias): como el motor, una macro solo si la cripto la confirmó
+    antes de la entrada; la confirmada de la clase «macro» vale para las cuatro monedas."""
+    store = Store(tmp_path / "t.db")
+    store.db.executescript(A.SCHEMA)
+    bus = Bus(store)
+    p = A._params(None)
+    for ev in (captured("m1", T, coins=(), clase="macro"), triaged("m1", T + MIN, activos=()),
+               captured("c1", T, coins=("BTC",), clase="cripto", headline="Bitcoin ETF inflows"),
+               triaged("c1", T + MIN)):
+        bus.publish(ev)
+    ids = lambda at, coin="BTC": sorted(x["story"] for x in A.signal_news(store.db, coin, at, p))
+    assert ids(T + 30 * MIN) == ["c1"]
+    bus.publish(reflejo_ev("m1", T + 20 * MIN))
+    assert ids(T + 10 * MIN) == ["c1"] and ids(T + 30 * MIN) == ["c1", "m1"] and ids(T + 30 * MIN, "XRP") == ["m1"]
+    store.close()
 
 
 # ---------------------------------------------------------------- acierto, peso e historial
@@ -739,7 +785,9 @@ def add_trades(store):
 async def test_postmortems_y_aportaciones(env):
     store, bus = env
     up = series([(T - 3 * DAY, 100.0), (T, 100.0), (T + 60 * MIN, 101.0), (T + 20 * DAY, 101.0)])
-    for ev in (captured("n1", T), triaged("n1", T + MIN), corroborated("n1", T + 5 * MIN, [BLOOMBERG])):
+    # La cripto confirmó la macro antes de que se abrieran las dos operaciones: entra en su señal (bot/reflejo.py)
+    for ev in (captured("n1", T), triaged("n1", T + MIN), corroborated("n1", T + 5 * MIN, [BLOOMBERG]),
+               reflejo_ev("n1", T + 8 * MIN)):
         bus.publish(ev)
     add_trades(store)
     calls = []

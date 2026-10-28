@@ -1,23 +1,51 @@
-"""Filtro de relevancia por reglas (sin IA): universo, temas de mercado, frescura, opinión y detección de duplicados."""
+"""Filtro de relevancia por reglas (sin IA): universo, temas de mercado, frescura, opinión y detección de duplicados.
+
+Tres clases (28-10-2026, lo que pidió el usuario: solo cripto y lo que de verdad puede mover a la cripto):
+- «cripto»: nombra BTC, ETH, SOL o XRP (van esas monedas, y solo esas) o habla de cripto en general (sin monedas).
+- «macro»: tema macro o geopolítico fuerte (bancos centrales y tipos, inflación, aranceles, guerra, sanciones, datos de
+  empleo y PIB de las grandes economías, crisis financieras, estrechos y bloqueos, ensayos nucleares, ataques contra un
+  país, golpes de Estado, pandemias y choques del petróleo: topics.FUERTE). Va sin monedas y marcada macro; la cripto
+  tiene que reflejarla (bot/reflejo.py) para que cuente en la señal.
+- «contexto»: el resto de temas de mercado (política, empresas, tecnología, sucesos, economía local…). Se capta para
+  medir las fuentes y ver el contexto, pero ya no va a la IA local ni lleva monedas.
+Todo lo demás (ruido, opinión, antiguo, fuera del universo) se descarta como siempre."""
 import re
 from dataclasses import dataclass, field
 
 from . import config
-from .topics import TOPIC_NAMES, analyze, normalize_lang
+from .topics import _MASKS, TOPIC_NAMES, _clean, analyze, normalize_lang
 
 COIN_RX = {
     "BTC": re.compile(r"\b(?:bitcoin|btc|xbt)\b|비트코인|ビットコイン|比特币|比特幣|биткоин|биткойн|біткоїн|بيتكوين|ביטקוין", re.I),
     "ETH": re.compile(r"\b(?:ethereum|ether|eth)\b|이더리움|イーサリアム|以太坊|эфириум|ефіріум|إيثريوم", re.I),
-    "SOL": re.compile(r"\b(?:solana|sol)\b|솔라나|ソラナ|索拉纳|索拉納|солана", re.I),
+    # «sol» es también el sol del español y del portugués («acampada en Sol», el sol peruano): suelto solo cuenta en
+    # mayúsculas, como $SOL o con contexto cripto (SOL_LOOSE y CRYPTO_CTX en detect_coins)
+    "SOL": re.compile(r"\bsolana\b|(?-i:\bSOL\b)|\$sol\b|솔라나|ソラナ|索拉纳|索拉納|солана", re.I),
     "XRP": re.compile(r"\b(?:xrp|ripple)\b|리플|リップル|瑞波", re.I),
 }
-# Temas que mueven a todo el mercado cripto aunque no nombren una moneda.
+# Cripto en general, aunque no nombre una de las cuatro monedas (además del tema «cripto» de topics.py), con los
+# exchanges: «Bithumb Says Internal Mobile System Hacked» es de cripto aunque no lo diga.
+CRYPTO_RX = re.compile(
+    r"\b(?:crypto\w*|cryptocurrenc(?:y|ies)|digital assets?|stablecoins?|tether|usdt|usdc|spot (?:bitcoin |ether )?etfs?|"
+    r"crypto etfs?|mica|defi|altcoins?|memecoins?|binance|coinbase|kraken(?! robotics)|okx|bybit|bitget|upbit|bithumb|"
+    r"bitvavo|bitstamp|bitfinex|kucoin|coinone|korbit)\b", re.I)
+# Contexto que hace de «sol» suelto la moneda SOL.
+SOL_LOOSE = re.compile(r"\bsol\b", re.I)
+CRYPTO_CTX = re.compile(r"\b(?:tokens?|cripto\w*|crypto\w*|altcoins?|memecoins?|etfs?|blockchain|staking|defi)\b", re.I)
+# Macro en inglés que mueve a todo el mercado aunque el titular no traiga idioma (los temas de topics.py la cubren en 14).
 MACRO_RX = re.compile(
-    r"\b(?:cpi|inflation|fomc|federal reserve|the fed|fed's|powell|rate cuts?|rate hikes?|interest rates?|payrolls?|"
-    r"nonfarm|jobless claims|unemployment rate|gdp|pce|treasury yields?|tariffs?|recession|crypto|cryptocurrenc(?:y|ies)|"
-    r"digital assets?|stablecoins?|tether|usdt|usdc|spot etfs?|crypto etfs?|mica|cftc|liquidations?)\b", re.I)
-# Temas fuertes (mueven a todo el mercado en horas) frente al resto, que es contexto de cada bolsa.
-STRONG_TOPICS = {"banco_central", "inflacion", "empleo", "aranceles", "guerra", "sanciones", "cripto", "regulacion"}
+    r"\b(?:inflation|fomc|federal reserve|the fed|fed's|powell|rate cuts?|rate hikes?|interest rates?|payrolls?|"
+    r"nonfarm|jobless claims|unemployment rate|gdp|pce|treasury yields?|tariffs?|recession)\b", re.I)
+INFLACION_MASK = _MASKS["inflacion"]
+# «CPI» solo en inglés: en portugués es una comisión parlamentaria y en español, la Corte Penal Internacional.
+CPI_RX = re.compile(r"\bcpi\b", re.I)
+# Temas de topics.py que son macro o geopolítica fuerte enteros. De empleo, macro y banca solo cuentan las clases de
+# topics.FUERTE (datos de empleo, macro fuerte, crisis financiera); la regulación solo si es de cripto (clase cripto).
+MACRO_TOPICS = {"banco_central", "inflacion", "aranceles", "guerra", "sanciones"}
+STRONG_TOPICS = MACRO_TOPICS | {"cripto"}   # compatibilidad: temas que van antes a la IA local
+FUERTE_NAMES = {"datos_empleo": "datos de empleo", "macro_fuerte": "macro fuerte", "crisis_financiera": "crisis financiera",
+                "geopolitica_fuerte": "geopolítica fuerte", "energia_shock": "choque de energía"}
+CLASES = ("cripto", "macro", "contexto")
 # Fuentes oficiales: solo cuenta lo que mueve mercados, no cada nota institucional.
 OFFICIAL_RX = {
     "fed": re.compile(r"fomc|monetary policy|federal funds|interest rate|discount rate|minutes|balance sheet|"
@@ -48,11 +76,14 @@ class Decision:
     macro: bool = False
     fresh: bool = True
     topics: list[str] = field(default_factory=list)
-    strong: bool = False   # monedas, macro o tema fuerte: va antes a la IA local
+    strong: bool = False   # cripto o macro fuerte: va antes a la IA local
+    clase: str | None = None   # cripto | macro | contexto (solo las relevantes); el contexto no va a la IA local
 
 
 def detect_coins(text: str, hints: list[str] = ()) -> list[str]:
     found = [c for c, rx in COIN_RX.items() if rx.search(text)]
+    if "SOL" not in found and SOL_LOOSE.search(text) and (found or CRYPTO_RX.search(text) or CRYPTO_CTX.search(text)):
+        found.append("SOL")   # «sol» con contexto cripto (otra moneda, un exchange, token, ETF…)
     for h in hints:
         if h in config.COINS and h not in found:
             found.append(h)
@@ -81,15 +112,24 @@ def classify(title: str, source_id: str, age_s: float | None, hints: list[str] =
     if family and not OFFICIAL_RX[family].search(title):
         return Decision(False, [], "Nota institucional sin efecto previsible en el mercado", fresh=fresh, topics=tps)
     coins = detect_coins(title, hints)
-    macro = bool(MACRO_RX.search(title)) or family in ("fed", "bls", "ecb")
+    lang_key = normalize_lang(lang)
+    plain = INFLACION_MASK.sub(" ", _clean(title))   # «taxes indexées à l'inflation» no es un dato de inflación
+    macro = (bool(MACRO_RX.search(plain)) or family in ("fed", "bls", "ecb")
+             or (lang_key in (None, "en") and bool(CPI_RX.search(plain))))
     if coins:
-        return Decision(True, coins, "Menciona " + ", ".join(coins), macro, fresh, tps, strong=True)
-    if macro:
-        return Decision(True, list(config.COINS), "Tema macro o regulatorio: afecta a todo el universo", True, fresh, tps, strong=True)
+        return Decision(True, coins, "Menciona " + ", ".join(coins), macro, fresh, tps, strong=True, clase="cripto")
+    if "cripto" in tps or CRYPTO_RX.search(title):
+        return Decision(True, [], "Cripto en general (no nombra una de las cuatro monedas)", macro, fresh, tps,
+                        strong=True, clase="cripto")
+    fuerte = [t for t in tps if t in MACRO_TOPICS] + list(info.get("fuerte") or [])
+    if fuerte or macro:
+        names = ", ".join(dict.fromkeys(TOPIC_NAMES.get(t, FUERTE_NAMES.get(t, t)).lower() for t in fuerte[:3]))
+        return Decision(True, [], f"Macro o geopolítica fuerte ({names or 'macro'}): la cripto tiene que reflejarla",
+                        True, fresh, tps, strong=True, clase="macro")
     if info["relevant"]:
         names = ", ".join(TOPIC_NAMES[t].lower() for t in tps[:3])
-        strong = bool(STRONG_TOPICS & set(tps))
-        return Decision(True, list(config.COINS), f"Tema de mercado: {names}", strong, fresh, tps, strong=strong)
+        return Decision(True, [], f"Contexto ({names}): no es cripto ni macro fuerte; se guarda sin IA", False, fresh,
+                        tps, strong=False, clase="contexto")
     if info["noise"]:
         return Decision(False, [], info["noise"], fresh=fresh, topics=tps)
     others = [s for s in list(symbols) + TICKER_RX.findall(title) if s not in config.COINS]

@@ -10,7 +10,8 @@ import pytest
 
 from bot import backtest, predict
 from bot.bus import Bus
-from bot.predict import BacktestIndex, Predictor, combine, confidence, flow_effect, news_pressure, reliability
+from bot.predict import (BacktestIndex, Predictor, combine, confidence, flow_effect, news_bias, news_pressure,
+                         reliability)
 from bot.store import Store
 
 UTC = timezone.utc
@@ -120,10 +121,15 @@ def item(msg, pid):
     return next(i for i in msg["items"] if i["id"] == pid)
 
 
-def news(bus, story, ts, rep, cred=80, resumen="Titular"):
+def news(bus, story, ts, rep, cred=80, resumen="Titular", reflejo="confirmada"):
+    """Triada; las que no son de cripto necesitan el reflejo de la cripto para contar (por defecto, confirmada)."""
     bus.publish({"type": "event", "kind": "triaged", "agent": "local", "story": story, "ts": ts, "title": resumen,
                  "coins": [], "text": "", "patch": {"triage": {"credibilidad": cred, "repercusion": rep, "resumen": resumen,
                                                                 "importancia": 7}}})
+    if reflejo:
+        bus.publish({"type": "event", "kind": "reflejo", "agent": "flow", "story": story, "ts": ts + 60_000,
+                     "title": resumen, "coins": [], "text": "",
+                     "patch": {"reflejo": {"estado": reflejo, "mov_pct": 0.6, "min": 20, "ref": "media"}}})
 
 
 # ---- Combinación de factores
@@ -186,7 +192,15 @@ def test_flujo_y_noticias():
                    "resumen": "Débil"}),
              (0, {"credibilidad": 90, "repercusion": {"direccion": 90, "magnitud": 90, "bolsas": ["frankfurt"]}})]
     raw, k, top = news_pressure(items, lambda r: "frankfurt" in r["bolsas"], 5)
-    assert (raw, k, top[1]) == (-10.0, 2, "Fuerte")               # −24 + 3 → tope de −10; la de ts 0 queda fuera
+    # Media ponderada por credibilidad (−0,3 · 0,8 + 0,06 · 0,5) / 1,3 por la confianza 1,3 / 2,3; la de ts 0 queda
+    # fuera. Antes era una suma con tope: una sola noticia ya llegaba a −10 (hallazgo n.º 3 de la auditoría).
+    assert k == 2 and top[1] == "Fuerte" and raw == pytest.approx(10 * (-0.24 + 0.03) / 2.3)
+    # Cien noticias iguales no valen cien veces una: la confianza se acerca a 1, no se suma.
+    many = [(10, items[0][1])] * 100
+    assert news_pressure(many, lambda r: True, 5)[0] == pytest.approx(10 * -0.3 * 80 / 81)
+    # El tono medio del día se descuenta: si todo es igual de bajista, no queda nada.
+    assert news_pressure(many, lambda r: True, 5, bias=-0.3)[0] == pytest.approx(0.0, abs=1e-9)
+    assert news_bias(many, 5) == pytest.approx(-0.3) and news_bias(many[:19], 5) == 0.0   # con menos de 20, nada
 
 
 # ---- Bolsas
@@ -221,7 +235,8 @@ def test_bolsa_encadenamiento_y_sesion_anterior_de_nueva_york(store):
 
 def test_cierre_con_margen_como_en_el_backtest(store):
     """En invierno Hong Kong cierra a las 08:00 UTC, cuando abren Fráncfort y Londres: su cierre no se conoce a tiempo
-    (subasta hasta las 16:10), ni para la bolsa ni para la ventana cripto de Londres."""
+    (subasta hasta las 16:10) para la bolsa. Las predicciones cripto ya no usan los cierres de los índices (28-10-2026):
+    ni Shanghái ni Hong Kong salen como factor de la ventana cripto de Londres, aunque el backtest tenga la estrategia."""
     now = datetime(2026, 11, 4, 7, 30, tzinfo=UTC)
     bt = {**BACKTEST, "strategies": BACKTEST["strategies"] + [
         strat(f"bolsa_a_cripto-{k}-btc-londres-compra", "bolsa_a_cripto", 1100, 0.55, 0.49, 0.004, "dudosa",
@@ -232,8 +247,8 @@ def test_cierre_con_margen_como_en_el_backtest(store):
     fr = item(msg, "frankfurt-2026-11-04")
     assert fr["when_utc"] == ms(datetime(2026, 11, 4, 8, 0, tzinfo=UTC)) and "Hong Kong" not in fr["note"]
     w = item(msg, "BTC-londres-2026-11-04")
-    factors = {d["factor"] for d in w["drivers"]}
-    assert "Shanghái cerró +0,50 %" in factors and not any("Hong Kong" in f for f in factors)
+    assert not any("cerró" in d["factor"] for d in w["drivers"])
+    assert "Shanghái" not in w["note"] and "Hong Kong" not in w["note"]
 
 
 def test_bolsa_peso_cero_si_no_funciona(store):
@@ -272,9 +287,42 @@ def test_bolsa_noticias_con_tope_y_12_horas(store):
     news(bus, "n3", t - 13 * H, {"direccion": 90, "magnitud": 90, "activos": [], "bolsas": ["frankfurt"]})
     it = item(p.run_round(NOW), "frankfurt-2026-10-21")
     assert [d["factor"] for d in it["drivers"]] == ["1 noticia sobre Fráncfort (12 h)"]
-    assert it["prob_up"] == pytest.approx(0.42) and "aranceles" in it["drivers"][0]["source"]
+    # Una noticia de tono −0,3 y credibilidad 0,8: −3 puntos por la confianza 0,8 / 1,8 (antes, −24 con tope de −10).
+    assert it["prob_up"] == pytest.approx(0.52 - 0.03 * 0.8 / 1.8, abs=1e-4)
+    assert "aranceles" in it["drivers"][0]["source"]
     tk = item(bus.state["predictions"], "tokio-2026-10-22")
-    assert tk["drivers"][0]["effect_pp"] == pytest.approx(20 * 30 * 50 / 1e4, abs=0.01)
+    assert tk["drivers"][0]["effect_pp"] == pytest.approx(10 * 0.06 * 0.5 / 1.5, abs=0.01)
+
+
+def test_noticias_macro_solo_con_reflejo_confirmado_y_sin_saturar(store):
+    """Hallazgo n.º 3: con la suma y el tope de ±10, una sola noticia bajista dejaba toda predicción en −10 puntos. Ahora
+    una macro sin reflejo confirmado en la cripto no cuenta (bot/reflejo.py), las de cripto sí, y el tono medio de las
+    noticias del día se descuenta."""
+    p, bus, _ = make(store)
+    t = ms(NOW)
+    rep = {"direccion": -80, "magnitud": 70, "activos": ["BTC"], "bolsas": ["frankfurt"]}
+    news(bus, "m1", t - H, rep, resumen="Rusia lanza más de 100 misiles contra Kiev", reflejo=None)
+    news(bus, "m2", t - H, rep, resumen="Irán cierra el estrecho de Ormuz", reflejo="sin_reflejo")
+    news(bus, "m3", t - H, rep, resumen="Israel ataca terminales petroleras iraníes", reflejo="contraria")
+    msg = p.run_round(NOW_CR)
+    assert not any("noticia" in d["factor"] for it in msg["items"] for d in it["drivers"])
+    news(bus, "m4", t - H, rep, resumen="EE. UU. impone aranceles del 100 % a China", reflejo="confirmada")
+    news(bus, "c1", t - H, {**rep, "direccion": 60}, resumen="Hackeo en un exchange: roban ETH, BTC estable",
+         reflejo=None)   # de cripto: cuenta sin reflejo
+    w = item(p.run_round(NOW_CR), "BTC-londres-2026-10-21")
+    d = next(x for x in w["drivers"] if x["factor"].startswith("2 noticias sobre BTC"))
+    # Tonos −0,56 y +0,42 con credibilidad 0,8: media −0,07 por la confianza 1,6 / 2,6 (con menos de 20 noticias no
+    # se descuenta el tono del día). Antes: −44,8 + 33,6 → tope de −10.
+    assert d["effect_pp"] == pytest.approx(10 * -0.07 * 1.6 / 2.6, abs=0.02)
+    # Veinte noticias bajistas de ETH marcan el tono del día, que se descuenta: ETH ya casi no se mueve.
+    for k in range(20):
+        news(bus, f"b{k}", t - 2 * H, {"direccion": -60, "magnitud": 50, "activos": ["ETH"], "bolsas": []},
+             resumen=f"Ether cae {k}")
+    e = item(p.run_round(NOW_CR), "ETH-londres-2026-10-21")
+    de = next(x for x in e["drivers"] if x["factor"] == "20 noticias sobre ETH (6 h)")
+    bias = (20 * -0.24 - 0.448 + 0.336) / (22 * 0.8)
+    assert de["effect_pp"] == pytest.approx(10 * 16 / 17 * (-0.3 - bias), abs=0.02)
+    assert abs(de["effect_pp"]) < 0.3 and "descontado el tono medio de las noticias de 24 h (-0,28)" in de["source"]
 
 
 def test_bolsa_futuros(store):
@@ -328,14 +376,18 @@ def test_cripto_ventana_y_proxima_hora(store):
     src = next(d["source"] for d in w["drivers"] if "últimas 4 h" in d["factor"])
     assert "a 2 h acierta" in src and "la predicción es a 4 h" in src
     f = {d["factor"]: d["effect_pp"] for d in w["drivers"]}
-    assert set(f) == {"Tokio cerró +1,10 %", "BTC +1,00 % en las últimas 4 h", "Minorista muy largo (ratio L/S 2,80)",
+    # Sin el cierre de Tokio (los índices ya no cuentan en las predicciones cripto, aunque el backtest tenga
+    # bolsa_a_cripto-tokio-btc-londres).
+    assert set(f) == {"BTC +1,00 % en las últimas 4 h", "Minorista muy largo (ratio L/S 2,80)",
                       "1 noticia sobre BTC (6 h)",
                       "Flujo de órdenes: tendencia alcista, desequilibrio +0,50, CVD 15 min +30,0"}
     assert f["Minorista muy largo (ratio L/S 2,80)"] < 0 < f["1 noticia sobre BTC (6 h)"]
     assert sum(f.values()) == pytest.approx((w["prob_up"] - 0.49) * 100, abs=0.05)
     h = item(msg, "BTC-1h-2026-10-21T06:30")
     assert (h["horizon"], h["base_rate"], h["when_utc"]) == ("1h", 0.5, ms(NOW_CR))
-    assert len(h["drivers"]) == 3 and h["prob_up"] == pytest.approx(sigmoid(logit(0.56) + logit(0.46) + logit(0.6)), abs=1e-4)
+    news_pp = 10 * 0.2 * 0.5 / 1.5   # tono 0,5 · 0,4 y credibilidad 0,5
+    assert len(h["drivers"]) == 3
+    assert h["prob_up"] == pytest.approx(sigmoid(logit(0.56) + logit(0.46) + logit(0.5 + news_pp / 100)), abs=1e-4)
     assert p.refs["BTC-1h-2026-10-21T06:30"] == 101000.0          # la próxima hora se mide desde ahora
     assert "BTC-londres-2026-10-21" not in p.refs                 # la ventana, desde su inicio
     assert {i["target"] for i in msg["items"] if i["kind"] == "cripto"} == {"BTC", "ETH", "SOL", "XRP"}
@@ -373,7 +425,9 @@ def test_registro_y_evaluacion_cripto(store):
     assert store.db.execute("SELECT COUNT(*) FROM predictions WHERE target='ETH' AND hit=-1").fetchone()[0] == 2
     acc = p.accuracy()
     assert acc["evaluated"] == 2 and acc["hit_rate"] == 0.5
-    assert acc["by_kind"]["cripto"] == {"evaluated": 2, "hit_rate": 0.5} and acc["by_kind"]["bolsa"]["evaluated"] == 0
+    # up_rate: la mitad subió; «siempre baja» acertaría también el 50 %.
+    assert acc["by_kind"]["cripto"] == {"evaluated": 2, "hit_rate": 0.5, "up_rate": 0.5}
+    assert acc["by_kind"]["bolsa"]["evaluated"] == 0 and acc["up_rate"] == 0.5
     assert set(acc["by_horizon"]) == {"1h", "4h"} and 0 < acc["brier"] < 1
     assert "BTC-londres-2026-10-21" not in p.pending
     assert store.db.execute("SELECT COUNT(*) FROM prediction_refs WHERE id LIKE 'BTC%'").fetchone()[0] == 0
@@ -501,7 +555,7 @@ def test_evaluacion_bolsa_de_apertura_a_cierre_y_de_cierre_a_cierre(store):
     assert fr == (pytest.approx(1.0), 1)                           # 24 000 → 24 240, de apertura a cierre
     assert lo == (pytest.approx(-0.4), 0)                          # cierre a cierre, aunque haya velas
     acc = p.accuracy()
-    assert acc["by_kind"]["bolsa"] == {"evaluated": 2, "hit_rate": 0.5}
+    assert acc["by_kind"]["bolsa"] == {"evaluated": 2, "hit_rate": 0.5, "up_rate": 0.5}
 
 
 def test_apertura_a_cierre_sin_apertura_no_se_evalua(store):
@@ -516,7 +570,7 @@ def test_apertura_a_cierre_sin_apertura_no_se_evalua(store):
     fr = store.db.execute("SELECT outcome_pct, hit FROM predictions WHERE id='frankfurt-2026-10-21'").fetchone()
     lo = store.db.execute("SELECT outcome_pct, hit FROM predictions WHERE id='londres-2026-10-21'").fetchone()
     assert fr == (None, -1) and lo == (pytest.approx(-0.4), 0)
-    assert p.accuracy()["by_kind"]["bolsa"] == {"evaluated": 1, "hit_rate": 0.0}
+    assert p.accuracy()["by_kind"]["bolsa"] == {"evaluated": 1, "hit_rate": 0.0, "up_rate": 0.0}
 
 
 def test_bolsa_sin_sesion_caduca(store):
@@ -539,7 +593,7 @@ def test_el_acierto_cuenta_la_ultima_ronda_antes_del_evento(store):
     p.tick(datetime(2026, 10, 21, 20, 21, tzinfo=UTC))
     hits = [r[0] for r in store.db.execute("SELECT hit FROM predictions WHERE id='nuevayork-2026-10-21' ORDER BY ts")]
     assert hits == [0, 1]                                         # cada ronda marca su acierto
-    assert p.accuracy()["by_kind"]["bolsa"] == {"evaluated": 1, "hit_rate": 1.0}
+    assert p.accuracy()["by_kind"]["bolsa"] == {"evaluated": 1, "hit_rate": 1.0, "up_rate": 1.0}
 
 
 # ---- Registro, formato y robustez
@@ -629,3 +683,72 @@ def test_getter_de_resultados_lee_solo_si_cambia(mtmp, monkeypatch):
     path.write_text(json.dumps({"generated": 2}), encoding="utf-8")
     os.utime(path, (path.stat().st_atime, path.stat().st_mtime + 5))
     assert get() == {"generated": 2}
+
+
+# ---- Cripto sin los índices de bolsa: la reacción de la cripto en las aperturas (bot/reaccion.py)
+
+CHAIN_REAL = {"after_up_rate": 0.49, "after_down_rate": 0.511, "base_rate": 0.5006, "n": 15076, "n_up": 7464,
+              "n_down": 7612, "nota": "no predice"}   # medido el 28-10-2026 con 3.771 aperturas (3 años)
+
+
+def reaccion_state(chain, extra=None):
+    """«cripto_aperturas» a las 06:30 UTC del 21-10-2026, media hora antes de Londres: Tokio y China terminadas, Dubái
+    (no es ventana del motor) en curso y una apertura de las 03:00 cuyas 4 h aún no han terminado."""
+    markets = {
+        "tokio": {"window": "tokio-seul", "state": "terminada", "open_ms": ms(datetime(2026, 10, 21, 0, 0, tzinfo=UTC)),
+                  "coins": {"BTC": {"ret_pct": -0.5}}, "last": None},
+        "hongkong": {"window": "china", "state": "terminada", "open_ms": ms(datetime(2026, 10, 21, 1, 30, tzinfo=UTC)),
+                     "coins": {"BTC": {"ret_pct": 0.8}}, "last": None},
+        "dubai": {"window": None, "state": "terminada", "open_ms": ms(datetime(2026, 10, 21, 2, 0, tzinfo=UTC)),
+                  "coins": {"BTC": {"ret_pct": -3.0}}, "last": None},
+        "nuevayork": {"window": "nuevayork", "state": "por_abrir", "open_ms": ms(datetime(2026, 10, 20, 13, 30, tzinfo=UTC)),
+                      "coins": None, "last": {"open_ms": ms(datetime(2026, 10, 20, 13, 30, tzinfo=UTC)),
+                                              "coins": {"BTC": {"ret_4h_pct": 1.5, "range_4h_pct": 2.2}}}},
+        "londres": {"window": "europa", "state": "terminada", "open_ms": ms(datetime(2026, 10, 20, 7, 0, tzinfo=UTC)),
+                    "coins": {"BTC": {"ret_pct": 2.0}}, "last": None,
+                    "hist": {"n": 754, "desde": "2023-10-30", "coins": {"BTC": {"up_rate": 0.5133, "n": 754}}}},
+    }
+    markets.update(extra or {})
+    return {"type": "cripto_aperturas", "ts": ms(NOW_CR), "markets": markets, "chain": chain}
+
+
+def make_reac(store, state):
+    bus = Bus(store)
+    box = {"r": state}
+    p = Predictor(bus, store, lambda: None, lambda: None, lambda: None, lambda: BACKTEST, get_reaccion=lambda: box["r"])
+    return p, bus, box
+
+
+def test_cripto_la_apertura_anterior_que_no_predice_pesa_cero(store):
+    """La última apertura del motor ya completa antes de Londres es la de China (01:30 UTC, +0,8 %). Con el
+    encadenamiento real (49,0 % frente al 50,1 %) no predice: peso 0 y se dice en la nota. La tasa base sale de la
+    reacción de la cripto en la apertura de Londres (velas de 1 min), no del backtest de bolsa_a_cripto."""
+    p, _, _ = make_reac(store, reaccion_state(CHAIN_REAL))
+    w = item(p.run_round(NOW_CR), "BTC-londres-2026-10-21")
+    assert not any("Apertura anterior" in d["factor"] or "cerró" in d["factor"] for d in w["drivers"])
+    assert "la apertura anterior (Shanghái y Hong Kong, BTC +0,80 % a las 4 h" in w["note"]
+    assert "la siguiente sube el 49,0 % frente al 50,1 %" in w["note"] and "no predice" in w["note"]
+    assert w["base_rate"] == 0.5133 and w["n_samples"] == 754
+    assert w["note"].startswith("Tasa base 51,3 %: BTC subió en las 4 h siguientes a la apertura en el 51,3 % de 754 "
+                                "aperturas (velas de 1 min")
+    # La próxima hora no usa la apertura anterior
+    h = item(p.run_round(NOW_CR + timedelta(minutes=5)), "BTC-1h-2026-10-21T06:35")
+    assert "apertura anterior" not in h["note"]
+
+
+def test_cripto_la_apertura_anterior_solo_pesa_si_es_significativa_y_sin_mirar_el_futuro(store):
+    fuerte = {**CHAIN_REAL, "after_up_rate": 0.60, "base_rate": 0.50, "n_up": 5000}
+    p, _, box = make_reac(store, reaccion_state(fuerte))
+    w = item(p.run_round(NOW_CR), "BTC-londres-2026-10-21")
+    d = next(x for x in w["drivers"] if x["factor"] == "Apertura anterior (Shanghái y Hong Kong): BTC +0,80 % a las 4 h")
+    assert 3 < d["effect_pp"] < 10 and "sin mirar el futuro" in d["source"] and "60,0 %" in d["source"]
+    # Una apertura cuyas 4 h aún no han terminado (03:00 → 07:00) no se usa, aunque sea la más reciente
+    box["r"] = reaccion_state(fuerte, {"seul": {"window": "tokio-seul", "state": "terminada",
+                                                "open_ms": ms(datetime(2026, 10, 21, 3, 0, tzinfo=UTC)),
+                                                "coins": {"BTC": {"ret_pct": -2.0}}}})
+    w = item(p.run_round(NOW_CR + timedelta(minutes=5)), "BTC-londres-2026-10-21")
+    assert any(x["factor"].startswith("Apertura anterior (Shanghái y Hong Kong)") for x in w["drivers"])
+    # Sin encadenamiento (la historia aún no se ha calculado), nada
+    box["r"] = reaccion_state(None)
+    w = item(p.run_round(NOW_CR + timedelta(minutes=10)), "BTC-londres-2026-10-21")
+    assert not any("Apertura anterior" in x["factor"] for x in w["drivers"]) and "apertura anterior" not in w["note"]

@@ -293,11 +293,19 @@ def test_sesiones_anteriores_saltan_el_fin_de_semana():
 
 # ---------------------------------------------------------------- señal
 
-def news_ev(ts, d, mag=60, cred=80, bolsas=(), activos=(), nivel="nacional", tipo="macro", imp=7):
-    return {"ts": ts, "kind": "triaged", "story": f"n{ts}", "patch": {"triage": {
+def news_ev(ts, d, mag=60, cred=80, bolsas=(), activos=(), nivel="nacional", tipo="macro", imp=7, reflejo="confirmada",
+            clase=None):
+    """Triada de una noticia macro (por defecto, ya confirmada por la cripto: bot/reflejo.py; reflejo=None, sin medir).
+    clase: la del prefiltro de su captada (la pone signal_getter con story_sources); sin ella, la regla del titular."""
+    ev = {"ts": ts, "kind": "triaged", "story": f"n{ts}", "patch": {"triage": {
         "tipo": tipo, "credibilidad": cred, "alcance": {"nivel": nivel, "puntuacion": 50}, "importancia": imp,
         "repercusion": {"direccion": d, "magnitud": mag, "activos": list(activos), "bolsas": list(bolsas)},
         "monedas": [a for a in activos if a in ("BTC", "ETH", "SOL", "XRP")], "resumen": f"Noticia {ts}"}}}
+    if reflejo:
+        ev["reflejo"] = {"estado": reflejo, "mov_pct": 0.6 if d > 0 else -0.6, "min": 12, "ref": "media"}
+    if clase:
+        ev["clase"] = clase
+    return ev
 
 
 def plan_ev(ts, coin, side, win="Apertura Londres", llm=None, src="Estratega · Reglas"):
@@ -324,6 +332,16 @@ def test_senal_con_plan_noticias_y_predicciones():
     assert e["dir"] == 0 and 0.1 < e["strength"] < 0.2 and any("no incluye ETH" in d["factor"] for d in e["drivers"])
     none = ap.signal_from("XRP", ["nuevayork"], T0, [], [], None, now)
     assert none["dir"] == 0 and "Sin señal clara" in none["why"]
+    # La predicción de la bolsa (el índice) ya no cuenta: solo la de la ventana cripto de la moneda
+    assert s["drivers"][2]["factor"] == "Predicción de subida: BTC · Apertura Londres 66 %"
+    assert s["drivers"][2]["peso"] == pytest.approx(ap.W_PRED * 0.32 * 0.8)
+    solo_bolsa = {"items": [pred["items"][1]]}
+    assert ap.signal_from("BTC", markets, T0, [], [], solo_bolsa, now)["drivers"] == []
+    # Una macro de la clase nueva (captada sin monedas) confirmada vale para las cuatro y para cualquier ventana
+    macro = [news_ev(now - 10 * 60_000, -50, bolsas=["tokio"], clase="macro")]
+    assert "1 noticia" in ap.signal_from("ETH", markets, T0, [], macro, None, now)["drivers"][0]["factor"]
+    sin = [news_ev(now - 10 * 60_000, -50, bolsas=["tokio"], clase="macro", reflejo="pendiente")]
+    assert ap.signal_from("ETH", markets, T0, [], sin, None, now)["drivers"] == []
 
 
 def test_senal_roja_globales_decaimiento_y_eventos_propios():
@@ -1382,9 +1400,11 @@ def _publish_news(bus, sid, ts, d, estado="activa", peso=1.0, url="https://www.b
     """Captada (con medio y estado de la fuente) y triada de una noticia global con dirección d."""
     bus.publish({"type": "event", "kind": "captured", "agent": "hunter", "story": sid, "ts": ts - 1000, "title": sid,
                  "patch": {"headline": sid, "src": "x", "srcId": "f", "url": url, "srcState": estado, "srcWeight": peso}})
-    ev = {**news_ev(ts, d, mag=80, cred=80, nivel="global"), "type": "event", "story": sid, "agent": "local"}
+    ev = {**news_ev(ts, d, mag=80, cred=80, nivel="global", reflejo=None), "type": "event", "story": sid, "agent": "local"}
     ev["patch"]["triage"]["resumen"] = sid
     bus.publish(ev)
+    bus.publish({"type": "event", "kind": "reflejo", "agent": "flow", "story": sid, "ts": ts + 500, "title": sid,
+                 "patch": {"reflejo": {"estado": "confirmada", "mov_pct": 0.7, "min": 9, "ref": "media"}}})
     for e in extra:
         bus.publish({"type": "event", "agent": "hunter", "story": sid, "ts": ts + 1000, **e})
 

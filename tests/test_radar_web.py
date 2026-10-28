@@ -4,6 +4,7 @@ Cada prueba arranca la página (en directo con un WebSocket falso, o la simulaci
 y mira lo que pinta o lo que envía al bot. Sin Node, se saltan."""
 import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -1276,3 +1277,317 @@ def test_resultados_muestran_la_cartera_de_prueba_en_euros():
       S.tab = "results"; renderAll(true); renderResults(); return {k: H.el("#resKpis").innerHTML};""")
     assert "≈ 100,00 €" in r["k"] and "Cartera de prueba de 100 € &lt;x&gt; (ficticia)" in r["k"]
     _sin_null(r["k"])
+
+
+# Mensaje «cripto_aperturas» del bot (contrato 28-10-2026): cómo reacciona la cripto en la apertura de cada bolsa.
+CRIPTO_AP = r"""
+const MIN = 60e3, HORA = 3600e3;
+const coinsNow = () => ({BTC: {ret_pct: 0.42, range_pct: 1.1, high_pct: 0.8, low_pct: -0.3, spark: [[now - 60*MIN, 0], [now - 30*MIN, 0.2], [now - MIN, 0.42]]},
+  ETH: {ret_pct: -0.2, range_pct: 1.85, high_pct: 0.9, low_pct: -0.95, spark: [[now - 60*MIN, 0], [now - MIN, -0.2]]},
+  SOL: {ret_pct: 1.3, range_pct: 2.4, high_pct: 1.5, low_pct: -0.9, spark: []},
+  XRP: {ret_pct: null, range_pct: null, high_pct: null, low_pct: null, spark: null}});
+const hist = {n: 377, desde: "2023-11-01", any_range_ge2_rate: 0.76, any_range_ge2_8h_rate: 0.93, coins: {
+  BTC: {up_rate: 0.5, mean_ret_pct: 0.02, mean_range_pct: 1.6, range_ge2_rate: 0.3, range_ge2_8h_rate: 0.53},
+  ETH: {up_rate: 0.49, mean_ret_pct: 0, mean_range_pct: 2.1, range_ge2_rate: 0.5, range_ge2_8h_rate: 0.77},
+  SOL: {up_rate: 0.51, mean_ret_pct: 0.1, mean_range_pct: 2.6, range_ge2_rate: 0.69, range_ge2_8h_rate: 0.89},
+  XRP: {up_rate: null, mean_ret_pct: null, mean_range_pct: null, range_ge2_rate: null, range_ge2_8h_rate: null}}};
+const ca = (mk = {}, o = {}) => ({type: "cripto_aperturas", ts: now, coins: ["BTC", "ETH", "SOL", "XRP"], markets: {
+  tokio: {name: "Tokio", window: "tokio-seul", state: "en_curso", open_ms: now - 70*MIN, next_open_ms: now + 23*HORA, minutes_since_open: 70,
+          coins: coinsNow(), last: null, hist},
+  seul: {name: "Seúl", window: "tokio-seul", state: "en_curso", open_ms: now - 70*MIN, next_open_ms: null, minutes_since_open: null,
+         coins: null, last: null, hist: {n: null, desde: null, coins: null}},
+  londres: {name: "Londres", window: "europa", state: "terminada", open_ms: now - 5*HORA, next_open_ms: now + 19*HORA, minutes_since_open: 300,
+            coins: {BTC: {ret_pct: -0.8, range_pct: 2.2, high_pct: 0.4, low_pct: -1.8, spark: [[now - 5*HORA, 0], [now - HORA, -0.8]]}}, last: null, hist},
+  nuevayork: {name: "Nueva York", window: "nuevayork", state: "por_abrir", open_ms: now - 30*HORA, next_open_ms: now + 2*HORA, minutes_since_open: null,
+              coins: null, last: {open_ms: now - 30*HORA, coins: {BTC: {ret_4h_pct: 0.6, range_4h_pct: 1.9}, ETH: {ret_4h_pct: 1.2, range_4h_pct: 2.5}}}, hist},
+  dubai: {name: "Dubái <img src=x onerror=alert(1)>", window: null, state: "por_abrir", open_ms: null, next_open_ms: null, minutes_since_open: null,
+          coins: null, last: null, hist: {n: 0, desde: null, coins: null, nota: "Sin calendario de festivos <i>"}},
+  ...mk},
+  chain: {after_up_rate: 0.49, after_down_rate: 0.511, base_rate: 0.501, n: 7464, nota: "Medido sin mirar el futuro <b>"},
+  total: {...hist, n: 3771}, ...o});
+const INDICE = {tokio: {name: "Tokio", index: "Nikkei 225", state: "abierta", change_pct: 5.55, last_session: {change_pct: -7.77}, spark: [1, 2], price: 62693.16},
+  londres: {name: "Londres", index: "FTSE 100", state: "cerrada", change_pct: 3.33, last_session: {change_pct: 3.33}, futures: {change_pct: 4.44}}};
+"""
+SIN_INDICES = ("Nikkei", "KOSPI", "DAX", "FTSE", "IBEX", "S&amp;P", "Hang Seng", "Ibovespa", "SSE Composite", "DFM", "5,55", "7,77", "3,33",
+               "4,44", "62.693")
+
+
+def _sin_indices(*htmls, solo_nombres=False):
+    """Ni los nombres de los índices ni (con el escenario INDICE) sus cifras. En la demostración solo los nombres: sus
+    precios son aleatorios y un «rango 4,44 %» de la cripto puede salir por azar."""
+    bads = SIN_INDICES[:10] if solo_nombres else SIN_INDICES
+    for html in htmls:
+        for bad in bads:
+            assert bad not in html, bad
+
+
+def test_paneles_de_bolsas_rotulados_como_cripto():
+    """Los paneles que molestaban ya no hablan de índices: Mercado, Predicciones y Mando se rotulan como cripto."""
+    page = HTML.read_text(encoding="utf-8")
+    assert "Bolsas del mundo: cómo reacciona la cripto en cada apertura" in page and "Cripto en las próximas aperturas" in page
+    assert "Bolsas · próximas sesiones" not in page and "Índice de cada bolsa" not in page
+    assert "Probabilidad de que la sesión cierre por encima de su apertura" not in page
+
+
+def test_bolsas_del_mundo_ensenan_la_cripto_y_no_el_indice():
+    """Mercado y aperturas: cada tarjeta enseña BTC, ETH, SOL y XRP en la apertura de esa bolsa según su estado (en curso,
+    terminada, por abrir), con su minicurva y lo histórico; sin datos avisa, nunca pinta el índice ni huecos."""
+    r = run(CRIPTO_AP + """H.open(); reset();
+      H.recv({type: "trend", ts: now, markets: INDICE});
+      renderWorldMarkets(); const vacio = H.el("#mkTiles").innerHTML, note0 = H.el("#mkNote").hidden;
+      H.recv({type: "cripto_aperturas", ts: null, estado: "arrancando", coins: ["BTC"], markets: {}, chain: null});
+      renderWorldMarkets(); const arr = H.el("#mkNote").textContent, arrTiles = H.el("#mkTiles").innerHTML;
+      H.recv(ca()); renderWorldMarkets(); const html = H.el("#mkTiles").innerHTML;
+      const part = name => html.split('<div class="mtile ca">').find(x => x.includes("<b>" + name + "</b>")) || "";
+      return {vacio, note0, arr, arrTiles, html, tokio: part("Tokio"), seul: part("Seúl"), londres: part("Londres"), ny: part("Nueva York"),
+              dubai: part("Dubái"), madrid: part("Madrid"), note: H.el("#mkNote").hidden, noteTxt: H.el("#mkNote").textContent};""")
+    assert r["vacio"].count("Aún sin datos de la cripto en esta apertura") == 10 and r["note0"] is True
+    assert "El bot está calculando lo histórico" in r["arr"] and r["arrTiles"].count("Aún sin datos de la cripto en esta apertura") == 10
+    assert ("Todas las aperturas juntas (3771 desde el 01-11-2023): rango ≥ 2 % en 4 h: BTC 30 % · ETH 50 % · SOL 69 % · XRP – · "
+            "alguna de las 4 76 %; en 8 h: BTC 53 % · ETH 77 % · SOL 89 % · XRP – · alguna de las 4 93 %.") in r["noteTxt"].replace("3.771", "3771")
+    assert "Que se mueva no dice hacia dónde: sube en 4 h BTC 50 %" in r["noteTxt"] and r["note"] is False
+    t = r["tokio"]
+    assert "en curso" in t and "Desde la apertura" in t and "<b>BTC</b>" in t and "+0,42 %" in t and "rango 1,10 %" in t
+    assert "-0,20 %" in t and "rango 2,40 %" in t and 'title="máximo +0,80 % · mínimo -0,30 %"' in t
+    assert re.search(r"quedan 2 h (49|50) min de las 4 h", t) and t.count("<path") == 2   # minicurvas de BTC y ETH (SOL y XRP sin puntos)
+    assert "En esta apertura: rango ≥ 2 % en 4 h el 69 % de las veces (SOL) · sube 51 %" in t
+    assert "<small>≥ 2 % en 8 h</small><b>53 %</b><b>77 %</b><b>89 %</b><b>–</b>" in t
+    assert "377 aperturas desde el 01-11-2023" in t and "no una previsión" in t
+    assert "Alguna de las 4 con rango ≥ 2 %: 76 % en 4 h · 93 % en 8 h" in t
+    assert "<b>XRP</b><b class=\"\">–</b>" in t and "rango –" in t
+    lo = r["londres"]
+    assert "terminada" in lo and "Resultado a las 4 h" in lo and "-0,80 %" in lo and "rango 2,20 %" in lo and "próxima en 1" in lo
+    ny = r["ny"]
+    assert "por abrir" in ny and "Su última apertura" in ny and "+0,60 %" in ny and "rango 1,90 %" in ny and "+1,20 %" in ny
+    assert re.search(r"abre en (1 h 59|2 h 00) min", ny)
+    assert "Aún sin datos de su última apertura" in r["dubai"] and "Sin histórico de la cripto en esta apertura" in r["dubai"]
+    assert "sin próxima sesión conocida" in r["dubai"] and "img" not in r["html"] and "Sin calendario de festivos &lt;i&gt;" in r["dubai"]
+    assert "Aún sin datos de la cripto en esta apertura" in r["seul"] and "Sin histórico" in r["seul"]
+    assert "Aún sin datos de la cripto en esta apertura" in r["madrid"]
+    _sin_indices(r["vacio"], r["html"], r["noteTxt"])
+    _sin_null(r["vacio"], r["html"], r["noteTxt"], r["arr"])
+
+
+def test_mundo_y_mando_pintan_la_reaccion_de_la_cripto():
+    """La barra verde y roja de cada ciudad (vista Mundo) y la lista de bolsas de Mando usan la media de las 4 criptos en
+    esa apertura (discontinua: su apertura anterior), no el índice ni su previsión."""
+    r = run(CRIPTO_AP + """H.open(); reset();
+      H.recv({type: "trend", ts: now, markets: INDICE});
+      H.recv({type: "predictions", ts: now, items: [{id: "tokio-x", kind: "bolsa", target: "tokio", label: "Tokio (Nikkei 225)", event: "apertura",
+              when_utc: now + 3600e3, horizon: "sesión", prob_up: 0.9, expected_pct: 1, confidence: "alta", drivers: []}], accuracy: {}});
+      const before = World.marketInfo(MKBY.tokio, {open: true, next: null}), lineBefore = marketLine(MKBY.tokio);
+      H.recv(ca());
+      const info = k => World.marketInfo(MKBY[k], {open: false, next: now + 3600e3});
+      S.tab = "mando"; renderMando();
+      return {before, lineBefore, tokio: info("tokio"), londres: info("londres"), ny: info("nuevayork"), dubai: info("dubai"), madrid: info("madrid"),
+              lines: MK.map(m => marketLine(m).txt), md: H.el("#mdMarkets").innerHTML, pred: H.el("#mdPred").innerHTML};""")
+    assert r["before"].get("val") is None and "5,55" not in r["before"]["sub"] and "aún sin datos de la cripto" in r["lineBefore"]["txt"]
+    assert r["tokio"]["sub"].startswith("cripto +0,51 %") and abs(r["tokio"]["val"] - 0.2533) < 0.01 and not r["tokio"].get("pred")
+    assert r["londres"]["sub"] == "cripto -0,80 % a las 4 h" and abs(r["londres"]["val"] + 0.4) < 1e-9
+    assert r["ny"]["sub"].startswith("última: cripto +0,90 %") and r["ny"]["pred"] is True
+    assert r["dubai"].get("val") is None and r["madrid"].get("val") is None
+    assert r["lines"][0].startswith("en curso · cripto +0,51 %") and "quedan" in r["lines"][0]
+    assert any(x.startswith("última apertura: cripto +0,90 %") for x in r["lines"])
+    _sin_indices(r["md"], r["pred"], " ".join(r["lines"]), r["tokio"]["sub"], r["londres"]["sub"])
+    _sin_null(r["md"], r["pred"])
+
+
+def test_predicciones_cripto_en_las_proximas_aperturas():
+    """Predicciones: «Cripto en las próximas aperturas» con la probabilidad histórica de subir y de un rango ≥ 2 % por
+    moneda, la nota honesta del encadenamiento (no predice) y, en «próxima ventana», los factores del bot sin índices."""
+    r = run(CRIPTO_AP + """H.open(); reset();
+      S.tab = "pred"; renderAll(true); const vacio = H.el("#predMk").innerHTML, chain0 = H.el("#predChain").innerHTML;
+      H.recv({type: "predictions", ts: now, items: [
+        {id: "tokio-x", kind: "bolsa", target: "tokio", label: "Tokio (Nikkei 225)", event: "apertura", when_utc: now + 3600e3, horizon: "sesión",
+         prob_up: 0.9, expected_pct: 1, confidence: "alta", drivers: [{factor: "Hong Kong cerró −0,28 %", effect_pp: -6.3, source: "encadenamiento"}]},
+        {id: "BTC-1h", kind: "cripto", target: "BTC", label: "BTC · próxima hora", event: "ventana", when_utc: now, horizon: "1h", prob_up: 0.55,
+         expected_pct: 0.1, confidence: "baja", drivers: [{factor: "Flujo de órdenes <b>", effect_pp: 2.5, source: "libro"}]}],
+        accuracy: {evaluated: 10, hit_rate: 0.6, by_kind: {bolsa: {evaluated: 5, hit_rate: 0.8}, cripto: {evaluated: 5, hit_rate: 0.4}}}});
+      H.recv(ca()); renderPred();
+      const a = {mk: H.el("#predMk").innerHTML, chain: H.el("#predChain").innerHTML, cr: H.el("#predCr").innerHTML, kpi: H.el("#predKpis").innerHTML};
+      H.recv(ca({}, {chain: null})); renderPred();
+      return {...a, vacio, chain0, chainNull: H.el("#predChain").innerHTML};""")
+    mk, ch = r["mk"], r["chain"]
+    assert "Aún sin datos de la cripto en las aperturas" in r["vacio"] and r["chain0"] == ""
+    assert mk.index("Tokio") < mk.index("Nueva York") < mk.index("Londres") and "Dubái" not in mk
+    assert "Sube en 4 h" in mk and "Rango ≥ 2 % en 4 h" in mk and "<b>69 %</b>" in mk and 'class="pos">51 %</b>' in mk and 'class="neg">49 %</b>' in mk
+    assert 'aria-label="sin datos"' in mk and "1.0000" not in mk
+    assert "A 8 h el rango ≥ 2 % llega a: BTC 53 % · ETH 77 % · SOL 89 %." in mk and "377 aperturas desde el 01-11-2023" in mk
+    assert "Frecuencia pasada, no una previsión" in mk and "En curso: abrió" in mk and "Apertura " in mk
+    assert "Tras una apertura en positivo, la siguiente sube el 49 % de las veces: no predice." in ch
+    assert "Tras una en negativo, el 51 %; de media, el 50 %" in ch and "casos)" in ch and ("7464" in ch or "7.464" in ch)
+    assert "espejismo del solape" in ch and "Medido sin mirar el futuro &lt;b&gt;" in ch
+    assert "aún sin datos" in r["chainNull"]
+    assert "BTC · próxima hora" in r["cr"] and "Flujo de órdenes &lt;b&gt;" in r["cr"]
+    k = r["kpi"]
+    assert "Predicciones cripto</small><b>1</b>" in k and "Acierto en cripto</small><b>40 %</b>" in k and "Acierto en bolsas" not in k
+    assert "<small>Próxima apertura</small><b>Nueva York</b>" in k and "Tras una en positivo</small><b>49 %</b>" in k and "no predice" in k
+    _sin_indices(mk, ch, r["cr"], k)
+    assert "Hong Kong cerró" not in mk + r["cr"]
+    _sin_null(mk, ch, r["cr"], k, r["chainNull"], r["vacio"])
+
+
+def test_cripto_aperturas_y_reflejo_toleran_campos_rotos():
+    """Campos ausentes, nulos o de otro tipo en «cripto_aperturas» y en el reflejo no rompen ninguna pestaña ni dejan huecos."""
+    r = run(CRIPTO_AP + """H.open(); reset();
+      const out = [];
+      const pinta = () => { renderWorldMarkets(); renderPred(); S.tab = "mando"; renderMando();
+        out.push(H.el("#mkTiles").innerHTML, H.el("#predMk").innerHTML, H.el("#predChain").innerHTML, H.el("#predKpis").innerHTML, H.el("#mdMarkets").innerHTML,
+                 MK.map(m => World.marketInfo(m, {open: true, next: null}).sub).join(" | ")); };
+      H.recv({type: "cripto_aperturas", ts: now, markets: null, chain: "x"}); pinta();
+      H.recv({type: "cripto_aperturas", ts: now, markets: {tokio: "x", seul: {state: "<b>raro</b>", open_ms: "ayer", next_open_ms: now + HORA,
+        coins: {BTC: "x", ETH: {ret_pct: "1", range_pct: {}, spark: [[1], "a", [null, 2], [now, "3"]]}}, hist: {n: "mucho", desde: 5, coins: {BTC: {up_rate: "0.5"}, ETH: null}}},
+        londres: {state: "terminada", open_ms: now - 5*HORA, coins: [], last: "x", hist: []},
+        nuevayork: {state: "por_abrir", next_open_ms: now + HORA, last: {open_ms: "x", coins: {BTC: {ret_4h_pct: null}}}, hist: {coins: {}}}},
+        chain: {after_up_rate: "49 %", after_down_rate: null, n: "x", nota: 5}}); pinta();
+      H.recv(ev("captured", "z1", {headline: "Macro rara", src: "AP", tier: "T1", t0: now, coins: []}),
+             ev("triaged", "z1", {triage: {tipo: "macro", importancia: 7, credibilidad: 80, sentimiento: "alcista", repercusion: {direccion: 60, magnitud: 70, activos: []}}}),
+             ev("reflejo", "z1", {reflejo: {estado: "rara", mov_pct: "x", min: null, ref: null}}),
+             ev("captured", "z2", {headline: "Reflejo de otro tipo", src: "AP", tier: "T1", t0: now, coins: []}),
+             ev("triaged", "z2", {triage: {tipo: "macro", importancia: 7, credibilidad: 80, sentimiento: "bajista", repercusion: {direccion: -60, magnitud: 70, activos: []}}}),
+             ev("reflejo", "z2", {reflejo: "x"}), ev("reflejo", "z3", null));
+      const nb = newsBalance(Date.now());
+      S.sel = "z1"; S.tab = "live"; renderTrace(); renderFeed(); out.push(H.el("#trace").innerHTML, H.el("#feed").innerHTML);
+      S.sel = "z3"; renderTrace(); out.push(H.el("#trace").innerHTML);
+      H.fire("click", {"data-tab": "world"}); World.panes(); out.push(H.el("#wRight").innerHTML);
+      return {out, items: nb.items.map(x => x.st.id), wait: nb.waiting.map(x => x.st.id)};""")
+    assert r["items"] == ["z2"] and r["wait"] == ["z1"]
+    assert "Reflejo sin estado" in r["out"][-4] and "estado del reflejo desconocido" in r["out"][-4]
+    assert "<b>raro</b>" not in "".join(r["out"])
+    _sin_indices(*r["out"])
+    _sin_null(*r["out"])
+
+
+def test_cripto_aperturas_por_la_api_si_no_llega_por_el_websocket():
+    """Al conectar se pide GET /api/cripto_aperturas; un bot sin esa ruta (404) no rompe nada y se espera al mensaje."""
+    r = run(CRIPTO_AP + """H.fetchReply = url => url === "/api/cripto_aperturas" ? {ok: true, json: async () => ca()} : {ok: false};
+      H.open(); reset(); await loadApi();
+      const a = {has: !!(S.criptoAp && S.criptoAp.markets.tokio), f: H.fetches.slice()};
+      H.fetchReply = null; reset(); await loadApi();
+      return {...a, none: S.criptoAp === null};""")
+    assert r["has"] and "/api/cripto_aperturas" in r["f"] and r["none"]
+
+
+def test_reflejo_de_noticias_macro_en_la_balanza_y_el_expediente():
+    """Evento «reflejo»: una noticia macro o geopolítica solo pesa en la balanza y en la señal de Mundo si la cripto la
+    confirma; pendiente, contraria o sin reflejo se enseñan aparte con su etiqueta. Las noticias cripto cuentan como siempre."""
+    r = run("""H.open(); reset();
+      const tr = dir => ({tipo: "macro", importancia: 7, credibilidad: 80, sentimiento: dir > 0 ? "alcista" : "bajista",
+        repercusion: {direccion: 60*dir, magnitud: 70, activos: ["BTC", "ETH", "SOL", "XRP"]}, monedas: ["BTC"]});
+      H.recv(ev("captured", "m1", {headline: "La Fed recorta <tipos>", src: "Reuters", tier: "T1", t0: now, coins: []}), ev("triaged", "m1", {triage: tr(1)}),
+             ev("reflejo", "m1", {reflejo: {estado: "pendiente", mov_pct: 0.1, min: 5, ref: "media"}}, {agent: "mercado"}));
+      H.recv(ev("captured", "m2", {headline: "Guerra comercial", src: "AP", tier: "T1", t0: now, coins: []}), ev("triaged", "m2", {triage: tr(-1)}),
+             ev("reflejo", "m2", {reflejo: {estado: "contraria", mov_pct: 0.7, min: 22, ref: "media"}}));
+      H.recv(ev("captured", "m3", {headline: "PIB de la eurozona", src: "AP", tier: "T1", t0: now, coins: []}), ev("triaged", "m3", {triage: tr(1)}),
+             ev("reflejo", "m3", {reflejo: {estado: "sin_reflejo", mov_pct: 0.2, min: 60, ref: "BTC"}}));
+      H.recv(ev("captured", "c1", {headline: "ETF de SOL aprobado", src: "CoinDesk", tier: "T2", t0: now, coins: ["SOL"]}),
+             ev("triaged", "c1", {triage: {...tr(1), tipo: "regulatorio", repercusion: {direccion: 60, magnitud: 70, activos: ["SOL"]}}}));
+      const t = () => Date.now(), nb1 = newsBalance(t()), s1 = coinSignal("BTC", nb1, t());
+      H.fire("click", {"data-tab": "world"}); World.panes(); const right1 = H.el("#wRight").innerHTML;
+      S.tab = "live"; S.sel = "m1"; renderTrace(); const tr1 = H.el("#trace").innerHTML;
+      renderFeed(); const feed1 = H.el("#feed").innerHTML;
+      H.recv(ev("reflejo", "m1", {reflejo: {estado: "confirmada", mov_pct: 0.62, min: 18, ref: "media"}}));
+      const nb2 = newsBalance(t()), s2 = coinSignal("BTC", nb2, t());
+      S.tab = "world"; World.panes(); const right2 = H.el("#wRight").innerHTML;
+      S.tab = "live"; renderTrace(); const tr2 = H.el("#trace").innerHTML;
+      S.sel = "m2"; renderTrace(); const tr3 = H.el("#trace").innerHTML;
+      S.sel = "m3"; renderTrace(); const tr4 = H.el("#trace").innerHTML;
+      renderFeed();
+      const ids = a => a.map(x => x.st.id).sort();
+      return {items1: ids(nb1.items), wait1: ids(nb1.waiting), btc1: nb1.by.BTC.n, items2: ids(nb2.items), wait2: ids(nb2.waiting), btc2: nb2.by.BTC.n,
+              why1: s1.why[0], why2: s2.why[0], tilt1: newsTilt(S.stories.get("m2"), t()), right1, right2, tr1, tr2, tr3, tr4, feed1,
+              feed2: H.el("#feed").innerHTML, agent: S.events.find(e => e.kind === "reflejo").agent,
+              tones: S.events.filter(e => e.kind === "reflejo").map(e => e.tone), final: S.stories.get("m1").final || null, counts: S.counts.reflejo};""")
+    assert r["items1"] == ["c1"] and r["wait1"] == ["m1", "m2", "m3"] and r["btc1"] == 0
+    assert r["items2"] == ["c1", "m1"] and r["wait2"] == ["m2", "m3"] and r["btc2"] == 1
+    assert r["why1"].startswith("Sin noticias que inclinen BTC") and r["why2"].startswith("Noticias: ▲") and r["tilt1"] is None
+    assert "Macro y geopolítica que la cripto no confirma · no cuentan" in r["right1"] and "Esperando al mercado" in r["right1"]
+    assert "La cripto dice lo contrario" in r["right1"] and "Sin reflejo en la cripto" in r["right1"] and "La Fed recorta &lt;tipos&gt;" in r["right1"]
+    assert "La cripto lo confirma · +0,62 %" in r["right2"]
+    assert "Reflejo en la cripto" in r["tr1"] and "Esperando al mercado" in r["tr1"] and "No cuenta todavía" in r["tr1"] and "5 min de 60" in r["tr1"]
+    assert "La cripto lo confirma" in r["tr2"] and "Cuenta en la señal" in r["tr2"] and "+0,62 %" in r["tr2"]
+    assert "La cripto dice lo contrario" in r["tr3"] and "se movió en contra" in r["tr3"]
+    assert "Sin reflejo en la cripto" in r["tr4"] and "BTC (faltan datos de las demás)" in r["tr4"]
+    assert "Esperando al mercado" in r["feed1"] and "La cripto dice lo contrario" in r["feed1"] and "La cripto lo confirma" in r["feed2"]
+    assert r["agent"] == "flow" and r["tones"] == ["warn", "bad", "muted", "good"] and r["final"] is None and r["counts"] == 4
+    _sin_null(r["right1"], r["right2"], r["tr1"], r["tr2"], r["tr3"], r["tr4"], r["feed1"], r["feed2"])
+
+
+def test_demostracion_cripto_aperturas_y_reflejo_simulados():
+    """La demostración genera un «cripto_aperturas» con los precios simulados (marcado como simulación) y mide el reflejo
+    de las noticias macro igual que el bot; todas las pestañas se pintan sin índices ni huecos."""
+    r = run("""const A = S.criptoAp, ms = Object.values(A.markets);
+      S.tab = "market"; renderAll(true); const mk = H.el("#mkTiles").innerHTML, note = H.el("#mkNote");
+      S.tab = "pred"; renderAll(true); const pred = H.el("#predMk").innerHTML + H.el("#predChain").innerHTML + H.el("#predKpis").innerHTML;
+      S.tab = "mando"; renderAll(true); const md = H.el("#mdMarkets").innerHTML + H.el("#mdPred").innerHTML;
+      H.fire("click", {"data-tab": "world"}); World.panes(); const right = H.el("#wRight").innerHTML;
+      const info = MK.map(m => World.marketInfo(m, {open: false, next: S.vnow + 7200e3}));
+      // una noticia macro alcista: la cripto sube un 1 % y el reflejo la confirma al minuto siguiente
+      emit({kind: "captured", story: "dm1", title: "La Fed recorta tipos", coins: [],
+            patch: {headline: "La Fed recorta tipos", src: "Fed", tier: "T0", t0: S.vnow, px0: {...S.prices}}});
+      simReflejo("dm1", 1); const r0 = S.stories.get("dm1").reflejo.estado;
+      const um = S.stories.get("dm1").reflejo.umbral_pct;   // el mayor de 0,5 % y 2σ de 60 min, como el bot
+      for (const c of COINS) S.prices[c] *= 1 + Math.max(1, um + 0.3)/100;
+      S.vnow += 61000; S.queue.sort((a, b) => a.at - b.at); while (S.queue.length && S.queue[0].at <= S.vnow) S.queue.shift().fn();
+      const r1 = S.stories.get("dm1").reflejo;
+      return {demo: A.demo, n: ms.length, states: ms.map(x => x.state), keys: Object.keys(A.markets), chain: A.chain, mk, note: note.hidden,
+              noteTxt: note.textContent, pred, md, right, info, r0, r1, sent: H.sockets.length};""", live=False)
+    assert r["demo"] is True and r["n"] == 10 and set(r["states"]) <= {"por_abrir", "en_curso", "terminada"}
+    assert set(r["keys"]) == {"tokio", "seul", "shanghai", "hongkong", "dubai", "frankfurt", "londres", "madrid", "nuevayork", "saopaulo"}
+    assert r["chain"]["after_up_rate"] == 0.49 and r["note"] is False and "Simulación" in r["noteTxt"]
+    assert "En esta apertura: rango ≥ 2 % en 4 h el 69 % de las veces (SOL)" in r["mk"]
+    assert "Tras una apertura en positivo, la siguiente sube el 49 % de las veces: no predice." in r["pred"]
+    assert all("cripto" in x["sub"] or x.get("val") is None for x in r["info"])
+    assert r["r0"] == "pendiente" and r["r1"]["estado"] == "confirmada" and r["sent"] == 0
+    assert r["r1"]["umbral_pct"] >= 0.5 and r["r1"]["mov_pct"] > r["r1"]["umbral_pct"]
+    _sin_indices(r["mk"], r["pred"], r["md"], solo_nombres=True)
+    _sin_null(r["mk"], r["pred"], r["md"], r["right"])
+
+
+def test_reflejo_con_la_clase_de_la_captada_umbral_y_direccion_del_triaje():
+    """Revisión del 28-10-2026: (10) una macro (patch.clase de la captada) con dirección no cuenta hasta que la cripto la
+    confirme, aunque el «reflejo» aún no haya llegado, y una de cripto cuenta siempre; (11) en una macro confirmada manda
+    la dirección del triaje, no la del impacto; (6) el expediente enseña el umbral y lo que saldría por azar; (9) el aviso
+    de velas incompletas se ve escapado; (8) el solape es de 30 a 90 min."""
+    r = run(CRIPTO_AP + """H.open(); reset();
+      const tr = dir => ({tipo: "macro", importancia: 7, credibilidad: 80, sentimiento: dir > 0 ? "alcista" : "bajista",
+        repercusion: {direccion: 60*dir, magnitud: 70, activos: []}, monedas: []});
+      H.recv(ev("captured", "m5", {headline: "EE. UU. impone aranceles", src: "AP", tier: "T1", t0: now, coins: [], clase: "macro"}),
+             ev("triaged", "m5", {triage: tr(-1)}));
+      H.recv(ev("captured", "n5", {headline: "Reunión rutinaria", src: "AP", tier: "T1", t0: now, coins: [], clase: "macro"}),
+             ev("triaged", "n5", {triage: {...tr(1), repercusion: {direccion: 10, magnitud: 70, activos: []}}}));
+      H.recv(ev("captured", "c5", {headline: "Hackeo en Bithumb", src: "CoinDesk", tier: "T2", t0: now, coins: [], clase: "cripto"}),
+             ev("triaged", "c5", {triage: {...tr(-1), tipo: "seguridad"}}),
+             ev("reflejo", "c5", {reflejo: {estado: "sin_reflejo", mov_pct: 0.1, min: 60, ref: "media"}}));
+      H.recv(ev("captured", "m6", {headline: "Irán cierra Ormuz", src: "Reuters", tier: "T1", t0: now, coins: [], clase: "macro"}),
+             ev("triaged", "m6", {triage: tr(-1)}),
+             ev("impact", "m6", {impact: {dir: 1, mag: 2, conf: 0.8, per: {BTC: 2}, main: "BTC", hz: "horas"}}),
+             ev("reflejo", "m6", {reflejo: {estado: "confirmada", mov_pct: -1.2, min: 9, ref: "media", umbral_pct: 0.93}}));
+      const t = Date.now(), nb = newsBalance(t), ids = a => a.map(x => x.st.id).sort();
+      const tilt = newsTilt(S.stories.get("m6"), t), ok = ["m5", "n5", "c5", "m6"].map(id => reflejoOk(S.stories.get(id)));
+      H.fire("click", {"data-tab": "world"}); World.panes(); const right = H.el("#wRight").innerHTML;
+      S.tab = "live"; S.sel = "m6"; renderTrace(); const tr6 = H.el("#trace").innerHTML;
+      H.recv(ca({londres: {name: "Londres", window: "europa", state: "terminada", open_ms: now - 5*HORA, next_open_ms: now + 19*HORA,
+        minutes_since_open: 300, coins: null, last: null, hist: null, aviso: "Faltan velas de <b>BTC</b> para completar las 4 h"}},
+        {chain: {after_up_rate: 0.49, after_down_rate: 0.51, base_rate: 0.5, n: 100, nota: "sin mencionarlo"}}));
+      renderWorldMarkets(); const mk = H.el("#mkTiles").innerHTML; const chain = caChain();
+      return {items: ids(nb.items), wait: ids(nb.waiting), tilt, ok, right, tr6, mk, chain};""")
+    assert r["ok"] == [False, True, True, True]
+    assert r["items"] == ["c5", "m6", "n5"] and r["wait"] == ["m5"]
+    assert r["tilt"]["dir"] == -1 and r["tilt"]["why"] == "triaje local"   # el impacto alcista no vale en una macro bajista
+    assert "Esperando al mercado" in r["right"]
+    assert "Umbral" in r["tr6"] and "0,93 %" in r["tr6"] and "Por puro azar" in r["tr6"] and "5 %" in r["tr6"]
+    assert "Puede ser casualidad" in r["tr6"] and "2σ" in r["tr6"]
+    assert "Faltan velas de &lt;b&gt;BTC&lt;/b&gt;" in r["mk"] and "<b>BTC</b> para" not in r["mk"]
+    assert "entre 30 y 90 min" in r["chain"] and "30 min de diferencia" not in r["chain"]
+    _sin_null(r["right"], r["tr6"], r["mk"], r["chain"])
+
+
+def test_demostracion_terminada_solo_si_hoy_hay_sesion():
+    """Hallazgo n.º 15: en la demostración, Tokio el sábado a la 01:00 (hora de Tokio) ya no sale «terminada» con la
+    sesión del viernes (el bot dice «por_abrir»); el viernes a las 15:00, sí."""
+    r = run("""const sab = Date.UTC(2026, 9, 30, 16, 0), vie = Date.UTC(2026, 9, 30, 6, 0);
+      const a = simCriptoAp(sab).markets.tokio, b = simCriptoAp(vie).markets.tokio;
+      return {sab: a.state, sabLast: a.last === null || typeof a.last === "object", vie: b.state, um: simUmbral(S.vnow)};""",
+            live=False)
+    assert r["sab"] == "por_abrir" and r["sabLast"] and r["vie"] == "terminada" and r["um"] >= 0.5

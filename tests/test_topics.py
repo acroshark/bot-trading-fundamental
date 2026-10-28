@@ -389,10 +389,34 @@ def test_idioma_desconocido_busca_en_todos():
 
 def test_analyze_para_el_patch():
     a = analyze("Fed signals rate cut", "en")
-    assert a == {"topics": ["banco_central"], "relevant": True, "noise": None}
+    assert a == {"topics": ["banco_central"], "relevant": True, "noise": None, "fuerte": []}
     b = analyze("Real Madrid gana la Liga", "es")
     assert b["topics"] == [] and not b["relevant"] and b["noise"].startswith("Deportes")
-    assert analyze("") == {"topics": [], "relevant": False, "noise": None}
+    assert analyze("") == {"topics": [], "relevant": False, "noise": None, "fuerte": []}
+
+
+@pytest.mark.parametrize("title,lang,kinds", [
+    ("Nonfarm payrolls rise by 150,000 in October", "en", ["datos_empleo"]),
+    ("美国10月非农就业人数增加15万", "zh", ["datos_empleo"]),
+    ("미국 실업률 4.5%로 상승", "ko", ["datos_empleo"]),
+    ("米雇用統計、非農業部門雇用者数が予想を下回る", "ja", ["datos_empleo"]),
+    ("Arbeitslosenquote in den USA steigt überraschend", "de", ["datos_empleo"]),
+    ("Taxa de desemprego no Brasil cai para 5,6%", "pt", ["datos_empleo"]),
+    ("US GDP grows 2.1% in third quarter", "en", ["macro_fuerte"]),
+    ("Moody's downgrades France's credit rating", "en", ["macro_fuerte"]),
+    ("La economía alemana entra en recesión técnica", "es", ["macro_fuerte"]),
+    ("Regional lender collapses as banking crisis fears grow", "en", ["crisis_financiera"]),
+    ("Корейский рынок: обвал рынка после банкротства банка", "ru", ["crisis_financiera"]),
+    # Lo que no es macro fuerte: despidos de una empresa, huelgas, presupuesto de una provincia, un ministro de viaje.
+    ("Amazon anuncia 14.000 despidos en todo el mundo", "es", []),
+    ("Greve dos metroviários paralisa São Paulo", "pt", []),
+    ("전북 핵심 현안 예산 반드시 확보해야", "ko", []),
+    ("Finanzielle Notbremse: Landkreis Augsburg erlässt eine Haushaltssperre", "de", []),
+    ("Japan's economy minister visits Osaka", "en", []),
+])
+def test_macro_fuerte_en_varios_idiomas(title, lang, kinds):
+    assert T.strong_kinds(title, lang) == kinds
+    assert analyze(title, lang)["fuerte"] == kinds
 
 
 def test_analyze_busca_los_temas_una_sola_vez(monkeypatch):
@@ -433,3 +457,42 @@ def test_cjk_sin_limites_de_palabra():
     for lang in ("ja", "zh", "ko"):
         for rx in T._BY_LANG[lang].values():
             assert r"\b" not in rx.pattern
+
+
+@pytest.mark.parametrize("title,lang,kinds", [
+    ("Iran closes Strait of Hormuz", "en", ["geopolitica_fuerte"]),
+    ("North Korea test-fires an intercontinental ballistic missile", "en", ["geopolitica_fuerte"]),
+    ("Military coup in Niger, president detained", "en", ["geopolitica_fuerte"]),
+    ("Oil prices surge 8% after OPEC+ announces surprise output cut", "en", ["energia_shock"]),
+    ("OPEC+ agrees to cut output by 2 million barrels", "en", ["energia_shock"]),
+    ("Brent sube un 6 % tras el ataque", "es", ["energia_shock"]),
+    ("Alista EU posible ofensiva contra Irán tras elecciones", "es", ["geopolitica_fuerte"]),
+    ("Il nuovo attacco di Usa e Israele all\u2019Iran", "it", ["geopolitica_fuerte"]),
+    ("핵실험 징후 포착", "ko", ["geopolitica_fuerte"]),
+    # Sin cifra o con una pequeña no es un choque; ni una ofensiva comercial
+    ("Oil prices rise 1% on demand hopes", "en", []),
+    ("La CFTC demanda a Utah para frenar su ofensiva contra los mercados de predicción", "es", []),
+])
+def test_geopolitica_y_energia_fuertes(title, lang, kinds):
+    assert T.strong_kinds(title, lang) == kinds
+
+
+def test_falsos_positivos_de_macro_fuerte_y_de_guerra():
+    assert T.strong_kinds("ブレイブリーデフォルト II", "ja") == []
+    assert T.strong_kinds("ロシアのデフォルト危機", "ja") == ["macro_fuerte"]
+    assert T.strong_kinds("퇴직연금 디폴트옵션", "ko") == [] and T.strong_kinds("미국 디폴트 우려", "ko") == ["macro_fuerte"]
+    assert T.strong_kinds("VfB Lübeck: Fanstreit und Finanzkrise", "de") == []
+    assert T.strong_kinds("Angst vor einer neuen Finanzkrise", "de") == ["crisis_financiera"]
+    assert "guerra" not in T.topics("Zookeeper dies after being attacked by leopard", "en")
+    assert "guerra" in T.topics("Village attacked by drones overnight", "en")
+    assert "inflacion" not in T.topics("Vers des taxes municipales à l\u2019inflation à Lévis", "fr")
+    assert "inflacion" in T.topics("L\u2019inflation ralentit en octobre", "fr")
+    assert "inflacion" not in T.topics("CPI a mandatos de Luís Neves na PJ", "pt")
+
+
+def test_cripto_en_chino_y_coreano_sin_falsos_amigos():
+    assert "cripto" in T.topics("加密市场普遍上涨", "zh") and "cripto" in T.topics("Robinhood 加密營收年減", "zh")
+    assert "cripto" not in T.topics("加密通信技术取得突破", "zh")
+    assert "cripto" in T.topics("주식·코인·보험도 털렸다", "ko") and "cripto" in T.topics("코인베이스 해킹", "ko")
+    assert "cripto" not in T.topics("코인노래방 매출 회복", "ko") and "cripto" not in T.topics("코인마켓캡 순위", "ko")
+    assert "cripto" in T.topics("Bithumb hacked", "en") and "cripto" in T.topics("Upbit halts deposits", "en")

@@ -124,7 +124,9 @@ TERMS["en"] = {
               r"missiles|drones) pound(?:s|ed|ing)|border clash\w*|clash(?:es|ed)? (?:at|on|along) (?:the |their )?"
               r"borders?|armed clash\w*|"
               r"shelling|invasion|invade[sd]?|ceasefire|cease-fire|truce|(?-i:NATO|Nato)|hamas|hezbollah|houthis?|idf|"
-              r"pentagon|nuclear weapons?|warships?|navy|naval|artillery|front ?lines?|attacks? on|attacked|"
+              r"pentagon|nuclear weapons?|warships?|navy|naval|artillery|front ?lines?|attacks? on|"
+              r"attacked by (?:drones?|missiles?|rockets?|militants|gunmen|troops|forces|soldiers|jets|warplanes|"
+              r"russia|israel|iran|ukraine|hamas|hezbollah|houthis)|"
               r"terror\w*|insurgents?|militants?|offensive against|hostages?|war crimes",
     "geopolitica": r"geopolitic\w*|tensions|diplomac(?:y|ies)|diplomats?|diplomatic|summits?|(?-i:NATO|Nato)|"
                    r"united nations|"
@@ -147,7 +149,8 @@ TERMS["en"] = {
                   r"deepseek|robot\w*|tech|technolog(?:y|ies)|big tech|nvidia|tsmc|asml",
     "cripto": r"crypto\w*|bitcoin\w*|btc|ethereum|ether|eth|solana|xrp|ripple(?! effects?)|stablecoins?|tether|"
               r"usdt|usdc|blockchain\w*|defi|nfts?|binance|coinbase|kraken (?:exchange|crypto)|exchange kraken|okx|"
-              r"bybit|altcoins?|tokens?|tokeni[sz]ation|halving|"
+              r"bybit|bitget|upbit|bithumb|bitvavo|bitstamp|bitfinex|kucoin|coinone|korbit|altcoins?|tokens?|"
+              r"tokeni[sz]ation|halving|"
               r"cbdcs?|digital (?:euro|yuan|dollar|currenc(?:y|ies)|assets?)|spot etfs?|memecoins?",
     "regulacion": r"antitrust|regulat(?:or|ors|ion|ions|ory|e|es|ed|ing)|watchdogs?|(?-i:SEC)|cftc|finra|fca|esma|"
                   r"bafin|"
@@ -768,7 +771,10 @@ TERMS["zh"] = {
                   "数据中心|數據中心|資料中心|量子|机器人|機器人|智能手机|智慧型手機|手机|手機|英伟达|輝達|台积电|"
                   "台積電|DeepSeek|OpenAI",
     "cripto": "加密货币|加密貨幣|虚拟货币|虛擬貨幣|比特币|比特幣|以太坊|稳定币|穩定幣|区块链|區塊鏈|数字货币|"
-              "數字貨幣|数字人民币|數字人民幣|币安|幣安|加密资产|加密資產",
+              "數字貨幣|数字人民币|數字人民幣|币安|幣安|加密资产|加密資產|币圈|幣圈|虚拟资产|虛擬資產|"
+              # «加密» suelto es también «cifrado» (加密通信): solo con lo que lo hace cripto
+              "加密(?:市场|市場|行业|行業|业务|業務|营收|營收|交易所|企业|企業|公司|资金|資金|投资|投資|领域|領域|"
+              "产业|產業|板块|板塊|概念股|圈)",
     "regulacion": "监管|監管|证监会|證監會|金融监管总局|金融監管總局|金管会|金管會|反垄断|反壟斷|罚款|罰款|处罚|"
                   "處罰|被调查|被調查|接受调查|接受調查|展开调查|展開調查|启动调查|啟動調查|反垄断调查|反壟斷調查|"
                   "反倾销调查|反傾銷調查|法院|起诉|起訴|诉讼|訴訟|新规|新規|法规|法規|禁令|立案",
@@ -822,7 +828,9 @@ TERMS["ko"] = {
     "tecnologia": "인공지능|AI|반도체|AI 칩|칩 수출|기술|테크|사이버 공격|해킹|해커|소프트웨어|데이터센터|양자|로봇|"
                   "스마트폰|엔비디아|HBM|파운드리",
     "cripto": "가상자산|가상화폐|암호화폐|비트코인|이더리움|솔라나|리플|스테이블코인|블록체인|업비트|빗썸|알트코인|"
-              "코인 시장",
+              # «코인» es la cripto en los titulares coreanos (코인거래소, 코인베이스, «주식·코인·보험»), salvo la
+              # lavandería, el karaoke y las taquillas de monedas, y 코인마켓캡, que es ruido de precios
+              "코인(?!마켓캡|노래|세탁|빨래|로커|락커)",
     "regulacion": "규제|금융위|금융위원회|금감원|금융감독원|공정위|공정거래위원회|과징금|벌금|소송|법원|대법원|"
                   "헌법재판소|헌재|금지|세무조사|압수수색|검찰 조사|당국 조사|조사 착수|SEC",
     "inmobiliario": "부동산|아파트|집값|주택|전세(?![계기])|월세|주담대|주택담보대출|분양|재건축|재개발|PF|프로젝트파이낸싱|임대",
@@ -1117,10 +1125,313 @@ _MASKS = {
         r"всемирн\w* банк\w*|народн\w* банк\w*|национальн\w* банк\w*|нацбанк\w*|національн\w* банк\w*|"
         r"світов\w* банк\w*", re.I),
     "sanciones": re.compile(r"sin embargo|embargos? de declaraç[aã]o|embargos infringentes", re.I),
+    # Impuestos, alquileres o salarios que se actualizan con la inflación no son un dato de inflación
+    "inflacion": re.compile(
+        r"(?:index[ée]e?s?|indexad[oa]s?|indexed|linked|tied|pegged|ajustad[oa]s?|vinculad[oa]s?) (?:\w+ ){0,2}"
+        r"(?:à|a|sur|to|on|with|al|a la|à la) ?(?:l'|la |the )?infla(?:tion|ci[oó]n|ç[aã]o)|(?:taxes?|loyers?|salaires?|pensions?|"
+        r"tarifs?|impuestos?|alquileres?|salarios?|pensiones?) (?:\w+ ){0,3}(?:à l'|a la |al ritmo de la )infla(?:tion|ci[oó]n|ç[aã]o)",
+        re.I),
     "aranceles": re.compile(
         r"(?:energy|electricity|gas|power|water|feed-in|broadband|mobile|phone|rail|train|bus|transport|taxi|"
         r"utility) tariffs?", re.I),
 }
+
+# Macro fuerte (28-10-2026): lo que, sin ser de cripto, puede mover a la cripto y a las bolsas en horas. Los temas
+# banco_central, inflacion, aranceles, guerra y sanciones ya lo son enteros; de empleo, macroeconomía y banca solo
+# cuentan los datos de las grandes economías y las crisis, no los despidos de una empresa, el presupuesto de una
+# provincia ni los resultados de un banco (eso es contexto). Mismas reglas de escritura que TERMS.
+FUERTE_KINDS = ("datos_empleo", "macro_fuerte", "crisis_financiera", "geopolitica_fuerte", "energia_shock")
+FUERTE: dict[str, dict[str, str]] = {
+    "en": {
+        "datos_empleo": r"jobs reports?|jobs data|payrolls?|nonfarm|non-farm|unemployment (?:rate|claims|benefits)|"
+                        r"jobless (?:rate|claims)|initial claims|jolts|job openings|adp (?:report|employment|jobs)",
+        "macro_fuerte": r"gdp|gross domestic product|recessions?|recessionary|stagflation|debt ceiling|"
+                        r"government shutdown|sovereign (?:debt|default)|debt (?:default|crisis)|defaults? on "
+                        r"(?:its |their )?debt|treasury yields?|bond (?:rout|sell-?off|market turmoil)|"
+                        r"currency (?:crisis|intervention)|(?:yen|yuan|currency) intervention|pmi|ism (?:manufacturing|"
+                        r"services)|retail sales|sovereign (?:rating|credit rating) (?:cut|downgrade)s?|"
+                        r"downgrades? (?:the )?(?:us|u\.s\.|united states|china|japan|uk|britain|france|germany|italy)"
+                        r"(?:'s)?(?: (?:sovereign|credit) rating)?|(?:us|u\.s\.) (?:presidential )?elections?|"
+                        r"presidential election in the (?:us|u\.s\.|united states)",
+        "crisis_financiera": r"financial crisis|banking crisis|bank runs?|bank (?:collapse|failure)s?|banks? collapse|"
+                             r"systemic risk|credit crunch|liquidity crisis|bailouts?|lehman|"
+                             r"(?:stock )?market crash|flash crash|circuit breakers?|margin calls?|black monday",
+    },
+    "es": {
+        "datos_empleo": r"datos de (?:empleo|paro)|tasa de (?:paro|desempleo)|paro registrado|(?-i:EPA)|"
+                        r"n[oó]minas no agr[ií]colas|empleo no agr[ií]cola|afiliaci[oó]n a la seguridad social|"
+                        r"solicitudes de (?:subsidio|desempleo)|informe de empleo",
+        "macro_fuerte": r"pib|producto interior bruto|recesi[oó]n|estanflaci[oó]n|techo de (?:la )?deuda|"
+                        r"cierre del gobierno|impago|crisis de (?:la )?deuda|prima de riesgo|"
+                        r"rebaja de (?:la )?calificaci[oó]n|intervenci[oó]n cambiaria|pmi|ventas minoristas|"
+                        r"elecciones (?:presidenciales )?(?:de|en) (?:ee\.? ?uu\.?|estados unidos)",
+        "crisis_financiera": r"crisis financiera|crisis bancaria|p[aá]nico bancario|quiebra (?:de un |del )?banco|"
+                             r"rescate bancario|crac (?:burs[aá]til|financiero)|desplome burs[aá]til|"
+                             r"crisis de liquidez|riesgo sist[eé]mico",
+    },
+    "pt": {
+        "datos_empleo": r"taxa de desemprego|caged|payroll|pnad|pedidos de seguro-desemprego|"
+                        r"dados de emprego|relat[oó]rio de emprego",
+        "macro_fuerte": r"pib|produto interno bruto|recess[aã]o|estagflaç[aã]o|teto da d[ií]vida|calote|"
+                        r"crise da d[ií]vida|rebaixamento (?:da nota|do rating)|pmi|vendas no varejo",
+        "crisis_financiera": r"crise financeira|crise banc[aá]ria|corrida banc[aá]ria|quebra (?:de|do) banco|"
+                             r"resgate banc[aá]rio|circuit breaker|crise de liquidez",
+    },
+    "de": {
+        "datos_empleo": r"arbeitslosenquote|arbeitslosenzahl\w*|arbeitsmarktdaten|arbeitsmarktbericht\w*|"
+                        r"us-arbeitsmarkt\w*|erstanträge|stellenzuwachs",
+        "macro_fuerte": r"bip|bruttoinlandsprodukt\w*|rezession\w*|stagflation|schuldenobergrenze|shutdown|"
+                        r"staatspleite|zahlungsausfall|schuldenkrise|herabstufung|einkaufsmanagerindex|pmi|"
+                        r"einzelhandelsumsatz\w*",
+        # «Finanzkrise» suelta es a menudo la de un club o un ayuntamiento («VfB Lübeck: … Finanzkrise»)
+        "crisis_financiera": r"(?:globale|weltweite|neue|internationale|europäische)[nr]? finanzkrise|weltfinanzkrise|"
+                             r"bankenkrise|bank-?run|bankenpleite|bankenrettung|börsencrash|"
+                             r"liquiditätskrise|systemrisiko",
+    },
+    "fr": {
+        "datos_empleo": r"taux de ch[oô]mage|chiffres du ch[oô]mage|cr[eé]ations d'emplois|emplois non agricoles|"
+                        r"inscriptions au ch[oô]mage|rapport sur l'emploi",
+        "macro_fuerte": r"pib|r[eé]cession|stagflation|plafond de la dette|shutdown|d[eé]faut de paiement|"
+                        r"crise de la dette|d[eé]gradation de la note|pmi|ventes au d[eé]tail",
+        "crisis_financiera": r"crise financi[eè]re|crise bancaire|panique bancaire|faillite bancaire|krach|"
+                             r"sauvetage bancaire|crise de liquidit[eé]",
+    },
+    "it": {
+        "datos_empleo": r"tasso di disoccupazione|dati sull'occupazione|buste paga non agricole|"
+                        r"richieste di sussidi",
+        "macro_fuerte": r"pil|recessione|stagflazione|tetto del debito|shutdown|default|crisi del debito|"
+                        r"declassamento|pmi|vendite al dettaglio",
+        "crisis_financiera": r"crisi finanziaria|crisi bancaria|corsa agli sportelli|crac|salvataggio bancario|"
+                             r"crollo di borsa|crisi di liquidit[aà]",
+    },
+    "nl": {
+        "datos_empleo": r"werkloosheidscijfer\w*|banencijfers|banenrapport|werkgelegenheidsrapport",
+        "macro_fuerte": r"bbp|recessie|stagflatie|schuldenplafond|shutdown|wanbetaling|schuldencrisis|"
+                        r"afwaardering|pmi|detailhandelsverkopen",
+        "crisis_financiera": r"financi[eë]le crisis|bankencrisis|bankrun|beurscrash|bankfaillissement",
+    },
+    "ja": {
+        "datos_empleo": "雇用統計|失業率|非農業部門雇用者数|新規失業保険申請|雇用報告",
+        # «デフォルト» suelta es también un videojuego (ブレイブリーデフォルト) o un ajuste: solo con deuda o país
+        "macro_fuerte": "GDP|国内総生産|景気後退|リセッション|スタグフレーション|債務上限|政府機関閉鎖|債務デフォルト|"
+                        "デフォルト(?:危機|リスク|懸念|宣言|回避|寸前|に陥)|(?:国債|米国|政府|国家|ロシア|中国|アルゼンチン)"
+                        "(?:の)?デフォルト|債務不履行|"
+                        "格下げ|為替介入|PMI|日銀短観",
+        "crisis_financiera": "金融危機|金融不安|取り付け騒ぎ|銀行破綻|株価暴落|ブラックマンデー|サーキットブレーカー|流動性危機",
+    },
+    "zh": {
+        "datos_empleo": "非农|非農|失业率|失業率|就业数据|就業數據|初请失业金|初請失業金|就业报告|就業報告",
+        "macro_fuerte": "GDP|国内生产总值|國內生產總值|经济衰退|經濟衰退|滞胀|滯脹|债务上限|債務上限|政府停摆|政府停擺|"
+                        "债务违约|債務違約|债务危机|債務危機|主权评级|主權評級|下调评级|下調評級|PMI|汇率干预|匯率干預",
+        "crisis_financiera": "金融危机|金融危機|银行危机|銀行危機|挤兑|擠兌|银行倒闭|銀行倒閉|股灾|股災|熔断机制|熔斷機制|"
+                             "流动性危机|流動性危機",
+    },
+    "ko": {
+        "datos_empleo": "고용지표|고용보고서|실업률|비농업|신규 실업수당|실업수당 청구",
+        # «디폴트» suelta es también la opción por defecto de las pensiones (디폴트옵션): solo con deuda o país
+        "macro_fuerte": "GDP|국내총생산|경기침체|경기 침체|스태그플레이션|부채한도|셧다운|(?:국가|채무|미국|정부|러시아|중국) ?디폴트|"
+                        "디폴트 ?(?:위기|우려|위험|선언)|채무불이행|국가부도|"
+                        "신용등급 강등|외환위기|PMI|환율 개입",
+        "crisis_financiera": "금융위기|금융 위기|뱅크런|은행 파산|서킷브레이커|유동성 위기",
+    },
+    "ar": {
+        "datos_empleo": r"معدل البطالة|الوظائف غير الزراعية|بيانات الوظائف|طلبات إعانة البطالة",
+        "macro_fuerte": r"الناتج المحلي|ركود|تضخم ركودي|سقف الدين|إغلاق الحكومة|تخلف عن السداد|أزمة ديون|خفض التصنيف",
+        "crisis_financiera": r"أزمة مالية|أزمة مصرفية|انهيار البورصة|انهيار بنك|إفلاس بنك",
+    },
+    "he": {
+        "datos_empleo": r"שיעור האבטלה|נתוני התעסוקה|דוח התעסוקה",
+        "macro_fuerte": r'תמ"ג|תמ״ג|מיתון|תקרת החוב|השבתת הממשל|חדלות פירעון|הורדת דירוג',
+        "crisis_financiera": r"משבר פיננסי|משבר בנקאי|ריצה לבנקים|קריסת הבורסה|קריסת בנק",
+    },
+    "ru": {
+        "datos_empleo": r"уровень безработицы|безработиц\w* в сша|данные по рынку труда|рабочих мест вне сельского "
+                        r"хозяйства|заявк\w* на пособи\w* по безработице",
+        "macro_fuerte": r"ввп|рецесси\w*|стагфляци\w*|потол\w* госдолга|шатдаун|дефолт\w*|долгов\w* кризис\w*|"
+                        r"понижени\w* рейтинг\w*|девальваци\w*",
+        "crisis_financiera": r"финансов\w* кризис\w*|банковск\w* кризис\w*|банкротств\w* банк\w*|обвал\w* рынк\w*|"
+                             r"набег\w* на банк\w*|кризис\w* ликвидност\w*",
+    },
+    "uk": {
+        "datos_empleo": r"рівень безробіття|дані (?:про|щодо) ринк\w* праці|заявк\w* на допомог\w* з безробіття",
+        "macro_fuerte": r"ввп|рецесі\w*|стагфляці\w*|дефолт\w*|боргов\w* криз\w*|зниженн\w* рейтинг\w*|"
+                        r"девальваці\w*",
+        "crisis_financiera": r"фінансов\w* криз\w*|банківськ\w* криз\w*|банкрутств\w* банк\w*|обвал\w* ринк\w*",
+    },
+}
+
+# Geopolítica y energía de gran impacto (28-10-2026, hallazgo n.º 2 de la revisión): estrechos y bloqueos, ensayos
+# nucleares y misiles balísticos, ataques u ofensivas contra un país, golpes de Estado, ley marcial, pandemias y choques
+# del petróleo (recortes de la OPEP o subidas o caídas del crudo de un 4 % o más). Sin esto, «Iran closes Strait of
+# Hormuz», «Nuclear test by North Korea» u «Oil prices surge 8% after OPEC+…» quedaban como contexto y no se triaban.
+# La macro necesita que la cripto la refleje para contar: ser generoso aquí cuesta poco.
+_PCT4 = r"(?:[4-9]|[1-9]\d)(?:[.,]\d+)? ?(?:%|per ?cent|percent)"
+_PAISES = {
+    "en": r"(?:iran|israel|russia|ukraine|china|taiwan|north korea|south korea|japan|lebanon|syria|yemen|saudi arabia|"
+          r"venezuela|the us|the u\.s\.|the united states|america|europe|nato|kyiv|kiev|moscow|tehran|beijing|taipei)",
+    "es": r"(?:ir[aá]n|israel|rusia|ucrania|china|taiw[aá]n|corea del norte|jap[oó]n|l[ií]bano|siria|yemen|"
+          r"arabia saud[ií]|venezuela|ee\.? ?uu\.?|estados unidos|europa|la otan|kiev|mosc[uú]|teher[aá]n)",
+    "pt": r"(?:ir[aã]|israel|r[uú]ssia|ucr[aâ]nia|china|taiwan|coreia do norte|jap[aã]o|l[ií]bano|s[ií]ria|venezuela|"
+          r"eua|estados unidos|europa|otan|kiev|moscou|teer[aã])",
+    "de": r"(?:iran|israel|russland|ukraine|china|taiwan|nordkorea|japan|libanon|syrien|venezuela|usa|europa|"
+          r"die nato|kiew|moskau|teheran)",
+    "fr": r"(?:l'iran|iran|isra[eë]l|la russie|russie|l'ukraine|ukraine|la chine|chine|ta[iï]wan|la cor[eé]e du nord|"
+          r"cor[eé]e du nord|le japon|japon|le liban|liban|la syrie|syrie|le venezuela|venezuela|les [eé]tats-unis|"
+          r"[eé]tats-unis|l'europe|europe|l'otan|otan|kiev|moscou|t[eé]h[eé]ran)",
+    "it": r"(?:l'iran|iran|israele|la russia|russia|l'ucraina|ucraina|la cina|cina|taiwan|la corea del nord|"
+          r"corea del nord|il giappone|giappone|il libano|libano|la siria|siria|il venezuela|venezuela|gli usa|usa|"
+          r"gli stati uniti|stati uniti|l'europa|europa|la nato|nato|kiev|mosca|teheran)",
+    "nl": r"(?:iran|isra[eë]l|rusland|oekra[iï]ne|china|taiwan|noord-korea|japan|libanon|syri[eë]|venezuela|de vs|"
+          r"amerika|europa|de navo|navo|kiev|moskou|teheran)",
+}
+FUERTE_EXTRA: dict[str, dict[str, str]] = {
+    "en": {
+        "geopolitica_fuerte": r"(?:strait of )?hormuz|bab[ -]el[ -]mandeb|(?:naval |sea )?blockades? (?:of|on)|"
+                              r"blockades? (?:the )?(?:strait|island|ports?)|nuclear (?:tests?|strikes?|attacks?|war|"
+                              r"escalation|threats?|alert)|(?:tests?|test-fires?|launch(?:es|ed)?|fires?|fired) "
+                              r"(?:an? |two |three |several |multiple )?(?:\w+ )?(?:ballistic|hypersonic|"
+                              r"intercontinental|nuclear) (?:missiles?|weapons?|devices?|bombs?)|icbms?|"
+                              r"(?:attacks?|strikes?|offensive|invasion|invades?|airstrikes?|bombing|war) (?:on|against) "
+                              + _PAISES["en"] + r"|(?:goes|go|went|going) on (?:the )?offensive|"
+                              r"(?:new|major|fresh|large-scale|counter-?) ?offensive|launch(?:es|ed)? (?:an? )?(?:\w+ )?"
+                              r"offensive|declares? war|declaration of war|martial law|coup(?: d'[ée]tat| attempt)?|"
+                              r"military coup|general mobili[sz]ation|pandemic (?:declared|declaration)|declares? "
+                              r"(?:a |the )?(?:global )?pandemic|new pandemic|global pandemic|"
+                              r"public health emergency of international concern",
+        "energia_shock": r"opec\+? (?:\w+ ){0,4}(?:cuts?|slash(?:es)?|reduc(?:es|ed|tion)|hikes?|boosts?|raises?|"
+                         r"increases?) (?:\w+ ){0,2}(?:output|production|supply|quotas?)|(?:output|production|supply) "
+                         r"cuts? by opec\+?|surprise (?:oil |output |production )?cuts?|(?:oil|crude|brent|wti|gas) "
+                         r"(?:prices? )?(?:surges?|soars?|spikes?|jumps?|plunges?|plummets?|crash(?:es)?|tumbles?|"
+                         r"sinks?|skyrockets?|rockets?)(?: by)?(?: more than| over)? " + _PCT4 + r"|oil (?:price )?shock|"
+                         r"energy crisis|oil embargo|oil supply (?:shock|disruption)|record (?:high )?oil prices?",
+    },
+    "es": {
+        "geopolitica_fuerte": r"(?:estrecho de )?ormuz|bloqueo (?:naval|del estrecho|de los puertos)|"
+                              r"(?:prueba|ensayo)s? nucleare?s?|misil(?:es)? (?:bal[ií]stic|hipers[oó]nic|"
+                              r"intercontinental)\w*|(?:ataques?|ofensiva|invasi[oó]n|bombardeos?|guerra) "
+                              r"(?:contra|a|sobre|en|entre|de) " + _PAISES["es"] + r"|(?:nueva|gran) ofensiva|"
+                              r"lanza (?:una )?ofensiva|contraofensiva|declara(?:ci[oó]n de)? (?:la )?guerra|"
+                              r"ley marcial|golpe de estado|movilizaci[oó]n general|declaran? (?:una )?pandemia|"
+                              r"nueva pandemia|emergencia sanitaria (?:mundial|internacional)",
+        "energia_shock": r"(?:la )?opep\+? (?:\w+ ){0,3}(?:recorta|reduce|rebaja|aumenta|sube|eleva) (?:la |su )?"
+                         r"(?:producci[oó]n|oferta|bombeo|cuotas?)|recortes? de (?:la )?producci[oó]n de (?:la )?"
+                         r"opep\+?|recorte sorpresa|(?:el )?(?:petr[oó]leo|crudo|brent|gas) (?:se )?(?:dispara|"
+                         r"desploma|hunde|sube|cae|salta)(?: un| m[aá]s de un| hasta un)? " + _PCT4 + r"|"
+                         r"crisis energ[eé]tica|crisis del petr[oó]leo|(?:shock|choque) petrolero|embargo petrolero",
+    },
+    "pt": {
+        "geopolitica_fuerte": r"(?:estreito de )?ormuz|bloqueio naval|testes? nucleare?s?|m[ií]sse(?:l|is) "
+                              r"bal[ií]stic\w*|(?:ataques?|ofensiva|invas[aã]o|bombardeios?|guerra) (?:contra|a|ao|à|"
+                              r"sobre|no|na) " + _PAISES["pt"] + r"|nova ofensiva|lan[cç]a (?:uma )?ofensiva|"
+                              r"contraofensiva|declara(?:ç[aã]o de)? guerra|lei marcial|golpe de estado|"
+                              r"mobiliza[cç][aã]o geral|declaram? (?:uma )?pandemia|nova pandemia|"
+                              r"emerg[eê]ncia (?:sanit[aá]ria|de sa[uú]de) (?:global|internacional)",
+        "energia_shock": r"(?:a )?opep\+? (?:\w+ ){0,3}(?:corta|reduz|aumenta|eleva) (?:a |sua )?(?:produ[cç][aã]o|"
+                         r"oferta)|corte (?:surpresa )?(?:de|na) produ[cç][aã]o|(?:o )?(?:petr[oó]leo|brent|g[aá]s) "
+                         r"(?:dispara|despenca|sobe|cai|salta)(?: mais de)? " + _PCT4 + r"|crise energ[eé]tica|"
+                         r"choque do petr[oó]leo",
+    },
+    "de": {
+        "geopolitica_fuerte": r"(?:straße von )?hormus|seeblockade|atomtest\w*|atomwaffentest\w*|nukleartest\w*|"
+                              r"ballistische\w* rakete\w*|interkontinentalrakete\w*|hyperschallrakete\w*|"
+                              r"(?:angriffe?|offensive|invasion|krieg) (?:auf|gegen|in) (?:den |die |das )?"
+                              + _PAISES["de"] + r"|(?:neue|große) offensive|gegenoffensive|startet (?:eine )?offensive|"
+                              r"kriegserklärung|erklärt (?:den )?krieg|kriegsrecht|militärputsch|putsch|"
+                              r"generalmobilmachung|pandemie ausgerufen|ruft (?:eine )?pandemie aus|neue pandemie|"
+                              r"gesundheitsnotstand",
+        "energia_shock": r"opec\+? (?:\w+ ){0,3}(?:kürzt|senkt|drosselt|erhöht|steigert) (?:die )?(?:förderung|"
+                         r"produktion|fördermenge\w*)|förderkürzung\w*|produktionskürzung\w*|(?:ölpreis|ölpreise|"
+                         r"gaspreis\w*|brent) (?:\w+ )?(?:steigt|steigen|springt|springen|schießt|schießen|bricht|"
+                         r"brechen|fällt|fallen|stürzt|stürzen)(?: \w+){0,2} (?:um )?" + _PCT4 + r"|energiekrise|"
+                         r"ölkrise|ölschock|ölembargo",
+    },
+    "fr": {
+        "geopolitica_fuerte": r"(?:d[eé]troit d')?ormuz|blocus (?:naval|du d[eé]troit)|essais? nucl[eé]aires?|"
+                              r"missiles? (?:balistiques?|hypersoniques?|intercontinentaux)|(?:attaques?|offensive|"
+                              r"invasion|frappes?|guerre) (?:contre|sur|en|de) " + _PAISES["fr"] + r"|"
+                              r"nouvelle offensive|lance (?:une )?offensive|contre-offensive|d[eé]claration de guerre|"
+                              r"d[eé]clare la guerre|loi martiale|coup d'[eé]tat|mobilisation g[eé]n[eé]rale|"
+                              r"d[eé]clar[eé]e? (?:une )?pand[eé]mie|nouvelle pand[eé]mie|"
+                              r"urgence sanitaire (?:mondiale|internationale)",
+        "energia_shock": r"l'opep\+? (?:\w+ ){0,3}(?:r[eé]duit|baisse|augmente|rel[eè]ve) (?:sa |la )?(?:production|"
+                         r"offre)|baisse (?:surprise )?de (?:la )?production|(?:le )?(?:p[eé]trole|brut|brent|gaz) "
+                         r"(?:s'envole|flambe|bondit|chute|plonge|s'effondre|grimpe)(?: de)? " + _PCT4 + r"|"
+                         r"crise [eé]nerg[eé]tique|choc p[eé]trolier|embargo p[eé]trolier",
+    },
+    "it": {
+        "geopolitica_fuerte": r"(?:stretto di )?hormuz|blocco navale|test nucleari?|missil[ei] (?:balistic|"
+                              r"ipersonic)[oi]|(?:attacc[oh]i?|offensiva|invasione|raid|bombardament[oi]|guerra) "
+                              r"(?:\S+ ){0,4}?(?:contro (?:l')?|all'|al |alla |sull'|su |in |a )" + _PAISES["it"] + r"|"
+                              r"nuova offensiva|lancia (?:una )?offensiva|controffensiva|dichiarazione di guerra|"
+                              r"dichiara guerra|legge marziale|colpo di stato|golpe|mobilitazione generale|"
+                              r"dichiarat[ao] (?:una )?pandemia|nuova pandemia|emergenza sanitaria (?:globale|"
+                              r"internazionale)",
+        "energia_shock": r"l'opec\+? (?:\w+ ){0,3}(?:taglia|riduce|aumenta|alza) (?:la )?(?:produzione|offerta)|"
+                         r"taglio (?:a sorpresa )?(?:della|alla) produzione|(?:il )?(?:petrolio|greggio|brent|gas) "
+                         r"(?:vola|crolla|balza|sale|scende|precipita|schizza)(?: del| di oltre il| oltre il)? " + _PCT4
+                         + r"|crisi energetica|shock petrolifero|embargo petrolifero",
+    },
+    "nl": {
+        "geopolitica_fuerte": r"(?:straat van )?hormuz|zeeblokkade|kernproef|kernproeven|atoomproef|"
+                              r"ballistische raket\w*|(?:aanval(?:len)?|offensief|invasie|oorlog) (?:op|tegen) "
+                              + _PAISES["nl"] + r"|nieuw offensief|tegenoffensief|oorlogsverklaring|"
+                              r"verklaart (?:de )?oorlog|staat van beleg|staatsgreep|algemene mobilisatie|"
+                              r"pandemie uitgeroepen|nieuwe pandemie",
+        "energia_shock": r"opec\+? (?:\w+ ){0,3}(?:verlaagt|verhoogt|schroeft) (?:de )?(?:productie|olieproductie)|"
+                         r"productieverlaging|(?:olieprijs|olieprijzen|gasprijs|gasprijzen|brent) (?:\w+ )?(?:stijgt|"
+                         r"stijgen|schiet|schieten|daalt|dalen|keldert|kelderen)(?: \w+){0,2} " + _PCT4 + r"|"
+                         r"energiecrisis|oliecrisis",
+    },
+    "ja": {
+        "geopolitica_fuerte": "ホルムズ|核実験|弾道ミサイル|極超音速ミサイル|大陸間弾道|ICBM|戒厳令|クーデター|総動員|宣戦布告|"
+                              "パンデミック宣言|新たなパンデミック|海上封鎖|侵攻開始|大規模攻撃",
+        "energia_shock": "OPEC|原油減産|協調減産|原油(?:価格)?(?:が)?(?:急騰|急落|暴落|高騰|暴騰)|石油危機|エネルギー危機|"
+                         "オイルショック",
+    },
+    "zh": {
+        "geopolitica_fuerte": "霍尔木兹|霍爾木茲|核试验|核試驗|核试爆|核試爆|弹道导弹|彈道導彈|洲际导弹|洲際導彈|高超音速导弹|"
+                              "高超音速導彈|ICBM|戒严令|戒嚴令|政变|政變|总动员|總動員|宣战|宣戰|海上封锁|海上封鎖|全面进攻|"
+                              "全面進攻|大流行",
+        "energia_shock": "欧佩克|歐佩克|OPEC|(?:石油|原油)(?:减产|減產|增产|增產)|油价(?:暴涨|暴跌|飙升|大涨|大跌|狂飙)|"
+                         "油價(?:暴漲|暴跌|飆升|大漲|大跌|狂飆)|石油危机|石油危機|能源危机|能源危機",
+    },
+    "ko": {
+        "geopolitica_fuerte": "호르무즈|핵실험|탄도미사일|극초음속 미사일|대륙간탄도|ICBM|계엄령 선포|비상계엄 선포|쿠데타|"
+                              "총동원령|선전포고|팬데믹 선언|새로운 팬데믹|해상봉쇄|전면 공격|침공 개시",
+        "energia_shock": "OPEC|감산 합의|원유 감산|석유 감산|증산 합의|유가 (?:급등|급락|폭등|폭락)|유가(?:급등|급락|폭등|폭락)|"
+                         "석유 위기|에너지 위기|오일쇼크",
+    },
+    "ar": {
+        "geopolitica_fuerte": r"هرمز|تجربة نووية|اختبار نووي|صاروخ باليستي|صواريخ باليستية|إعلان الحرب|"
+                              r"الأحكام العرفية|انقلاب عسكري|التعبئة العامة|إعلان جائحة|جائحة جديدة",
+        "energia_shock": r"أوبك|خفض إنتاج النفط|أزمة الطاقة|صدمة نفطية",
+    },
+    "he": {
+        "geopolitica_fuerte": r"הורמוז|ניסוי גרעיני|טיל בליסטי|טילים בליסטיים|הכרזת מלחמה|משטר צבאי|הפיכה צבאית|"
+                              r"גיוס כללי|מגפה עולמית",
+        "energia_shock": r'אופ"ק|אופ״ק|קיצוץ בתפוקה|משבר אנרגיה',
+    },
+    "ru": {
+        "geopolitica_fuerte": r"ормуз\w*|ядерн\w* испытани\w*|межконтинентальн\w* ракет\w*|гиперзвуков\w* ракет\w*|"
+                              r"объявлени\w* войны|объявил\w* войну|военн\w* положени\w*|военн\w* переворот\w*|"
+                              r"госпереворот\w*|всеобщ\w* мобилизаци\w*|объявлен\w* пандеми\w*|нов\w* пандеми\w*|"
+                              r"(?:конфликт\w*|войн\w*|удар\w*|атак\w*|наступлени\w*) (?:с|против|на|по) (?:иран\w*|"
+                              r"израил\w*|росси\w*|украин\w*|кита\w*|тайван\w*|сша|америк\w*|европ\w*|нато)",
+        "energia_shock": r"опек\+?|сокращени\w* добычи нефти|нефтян\w* шок\w*|энергетическ\w* кризис\w*|"
+                         r"(?:нефть|brent|газ) (?:подорожал\w*|подешевел\w*|взлетел\w*|обвалил\w*|рухнул\w*) (?:на )?"
+                         + _PCT4,
+    },
+    "uk": {
+        "geopolitica_fuerte": r"ормуз\w*|ядерн\w* випробуванн\w*|міжконтинентальн\w* ракет\w*|оголошенн\w* війни|"
+                              r"оголосил\w* війну|військов\w* переворот\w*|загальн\w* мобілізаці\w*|"
+                              r"оголошен\w* пандемі\w*|нов\w* пандемі\w*|"
+                              r"(?:конфлікт\w*|війн\w*|удар\w*|атак\w*|наступ\w*) (?:з|проти|на|по) (?:іран\w*|ізраїл\w*|"
+                              r"росі\w*|україн\w*|кита\w*|тайван\w*|сша|америк\w*|європ\w*|нато)",
+        "energia_shock": r"опек\+?|скороченн\w* видобутк\w* нафти|енергетичн\w* криз\w*|нафтов\w* шок\w*",
+    },
+}
+for _lang, _extra in FUERTE_EXTRA.items():
+    FUERTE[_lang].update(_extra)
 
 _GROUPS = {lang: (lang, "en") for lang in LANGS}
 _GROUPS.update({"en": ("en",), "ru": ("ru", "uk", "en"), "uk": ("uk", "ru", "en")})   # ruso y ucraniano se mezclan
@@ -1130,9 +1441,9 @@ _GROUPS.update({"en": ("en",), "ru": ("ru", "uk", "en"), "uk": ("uk", "ru", "en"
 _FALSE_FRIENDS = {
     "de": "war|gilt|bund|stock|probe|coup|chef|chefs|golf",
     "fr": "premier|coup|stock|stocks|chef|chefs",
-    "it": "modi|albanese|crude|stock|stocks|opera|anime",
-    "es": "terror|fiscal|boe|stock|stocks|opera|anime",
-    "pt": "terror|stock|stocks|opera|anime",
+    "it": "modi|albanese|crude|stock|stocks|opera|anime|cpi",   # CPI: centri per l'impiego
+    "es": "terror|fiscal|boe|stock|stocks|opera|anime|cpi",   # CPI: la Corte Penal Internacional
+    "pt": "terror|stock|stocks|opera|anime|cpi",   # CPI: comissão parlamentar de inquérito
     "nl": "rent|ether|chef|chefs|golf",
 }
 
@@ -1183,6 +1494,8 @@ _BY_LANG = {lang: _compile(TERMS, TOPICS, g, _FALSE_FRIENDS.get(lang, "")) for l
 _BY_SCRIPT = {s: _compile(TERMS, TOPICS, langs) for s, (_, langs) in _SCRIPTS.items()}
 _NOISE_BY_LANG = {lang: _compile(NOISE, NOISE_REASONS, g, _FALSE_FRIENDS.get(lang, "")) for lang, g in _GROUPS.items()}
 _NOISE_BY_SCRIPT = {s: _compile(NOISE, NOISE_REASONS, langs) for s, (_, langs) in _SCRIPTS.items()}
+_FUERTE_BY_LANG = {lang: _compile(FUERTE, FUERTE_KINDS, g, _FALSE_FRIENDS.get(lang, "")) for lang, g in _GROUPS.items()}
+_FUERTE_BY_SCRIPT = {s: _compile(FUERTE, FUERTE_KINDS, langs) for s, (_, langs) in _SCRIPTS.items()}
 
 
 def normalize_lang(lang: str | None) -> str | None:
@@ -1249,11 +1562,24 @@ def noise_reason(title: str, lang: str | None = None) -> str | None:
     return _noise(text, key)
 
 
+def _fuerte(text: str, key: str | None) -> list[str]:
+    """Clases de macro fuerte (FUERTE_KINDS) de un texto ya limpio."""
+    tables = _tables(text, key, _FUERTE_BY_LANG, _FUERTE_BY_SCRIPT)
+    return [k for k in FUERTE_KINDS if any(k in t and t[k].search(text) for t in tables)]
+
+
+def strong_kinds(title: str, lang: str | None = None) -> list[str]:
+    """Datos de empleo de las grandes economías, macro fuerte (PIB, recesión, deuda soberana…) o crisis financiera."""
+    text = _clean(title)
+    return _fuerte(text, normalize_lang(lang)) if text else []
+
+
 def analyze(title: str, lang: str | None = None) -> dict:
-    """Todo junto, listo para el `patch` de los eventos captured/filtered: {topics, relevant, noise}.
-    Limpia el texto y busca los temas una sola vez."""
+    """Todo junto, listo para el `patch` de los eventos captured/filtered: {topics, relevant, noise, fuerte}.
+    Limpia el texto y busca los temas una sola vez. «fuerte»: las clases de FUERTE_KINDS que aparecen."""
     text = _clean(title)
     key = normalize_lang(lang)
     found = _topics(text, key) if text else []
-    noise = _noise(text, key) if text and not found else None
-    return {"topics": found, "relevant": is_market_relevant(found), "noise": noise}
+    fuerte = _fuerte(text, key) if text else []
+    noise = _noise(text, key) if text and not found and not fuerte else None
+    return {"topics": found, "relevant": is_market_relevant(found), "noise": noise, "fuerte": fuerte}

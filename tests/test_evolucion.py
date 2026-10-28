@@ -138,6 +138,21 @@ def test_registrar_y_leer_con_filtros_y_nada_se_borra(env):
     assert len(E.leer(store)) == 3
 
 
+def test_cambio_del_filtro_de_noticias_se_apunta_una_sola_vez(env):
+    """Revisión del 28-10-2026 (hallazgo n.º 4): el cambio del filtro de noticias entra con un reinicio y cambia lo que
+    filtra la estrategia en paper; queda en el historial (no reversible desde la web) una sola vez, aunque se reinicie."""
+    store, _, _ = env
+    ev = evo(env)
+    [e] = ev.apuntar_cambios_codigo()
+    assert e["id"] == "codigo-noticias-2026-10-28" and e["tipo"] == "filtro_cambiado" and e["origen"] == "codigo"
+    assert e["etiqueta"] == "Filtro de noticias cambiado" and "dos regímenes" in e["motivo"]
+    assert "nueva_cartera_paper.py" in e["motivo"] and e["evidencia"]["azar_confirmada_pct"]["umbral_2sigma"] == 5.0
+    assert ev.apuntar_cambios_codigo() == [] and E.apuntar_cambios_codigo(store) == []   # reinicio: no se repite
+    assert evo(env).apuntar_cambios_codigo() == []
+    assert [x["id"] for x in E.leer(store, tipo="filtro_cambiado")] == ["codigo-noticias-2026-10-28"]
+    assert "filtro_cambiado" in E.NO_REVERSIBLES and "filtro_cambiado" not in E.PROPIOS
+
+
 def test_registrar_desde_otra_conexion_tipos_nuevos_y_errores(env, tmp_path):
     store, _, _ = env
     other = sqlite3.connect(store.path)   # como lo haría otro módulo desde un hilo

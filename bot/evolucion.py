@@ -124,9 +124,35 @@ TIPOS = {"fuente_añadida": "Medio añadido", "fuente_silenciada": "Medio silenc
          "peso_cambiado": "Peso cambiado", "estrategia_promovida": "Estrategia promovida",
          "estrategia_degradada": "Estrategia degradada", "parametro_cambiado": "Parámetro cambiado",
          "informe_semanal": "Informe semanal", "veredicto_medio": "Veredicto de un medio",
-         "propuesta_descartada": "Propuesta descartada"}
+         "propuesta_descartada": "Propuesta descartada", "filtro_cambiado": "Filtro de noticias cambiado"}
 PROPIOS = ("estrategia_promovida", "estrategia_degradada", "parametro_cambiado")   # los revierte este módulo
-NO_REVERSIBLES = ("informe_semanal", "veredicto_medio", "propuesta_descartada")   # apuntes, no cambios que deshacer
+NO_REVERSIBLES = ("informe_semanal", "veredicto_medio", "propuesta_descartada",
+                  "filtro_cambiado")   # apuntes, no cambios que deshacer (el del código se deshace con el código)
+# Cambios del código que alteran la operativa en paper sin pasar por la evolución: entran con un reinicio. Se apuntan una
+# sola vez (id fijo) al arrancar, para que el historial y el informe de la cartera de prueba digan desde cuándo cambió.
+CAMBIOS_CODIGO = [{
+    "id": "codigo-noticias-2026-10-28", "tipo": "filtro_cambiado",
+    "sujeto": "Señal de noticias del motor de aperturas (filtro news_mode de la estrategia en paper)",
+    "antes": {"macro": "contaban todas las noticias macro y de temas de mercado con dirección, con las cuatro monedas",
+              "contexto": "política, empresas y tecnología también iban a la IA local y contaban",
+              "predicciones": "60 % la de la ventana cripto y 40 % las de los índices de la ventana"},
+    "despues": {"macro": "una noticia macro o geopolítica solo cuenta si la cripto la confirma (reflejo: a su favor al "
+                         "menos el mayor de 0,5 % y 2σ de 60 min, en los 60 min siguientes); confirmada, vale para las "
+                         "cuatro monedas",
+                "contexto": "política, empresas, tecnología y sucesos se captan y se miden, pero no se trían ni cuentan",
+                "predicciones": "solo la de la ventana cripto de la moneda (las de los índices ya no cuentan)"},
+    "motivo": ("Lo pidió el usuario: solo le interesan las noticias de cripto y, de las demás (guerras, bancos centrales, "
+               "aranceles…), las que se ven reflejadas en la cripto; el índice de cada bolsa no le importa. Cambia lo "
+               "que filtra la estrategia en paper (news_mode «no_contra»): la cartera de prueba de 100 € (desde el "
+               "28-10-2026) mezcla dos regímenes desde este reinicio. Para medirla limpia, empezar otra con "
+               "scripts/nueva_cartera_paper.py."),
+    "evidencia": {"cambio_codigo": "noticias-2026-10-28",
+                  "triadas_con_direccion_24h": 3379, "contexto_que_sale_de_la_senal_24h": 1091,
+                  "macro_con_direccion_24h": 1555,
+                  "azar_confirmada_pct": {"umbral_fijo_0_5": 18.7, "umbral_2sigma": 5.0},
+                  "macro_reales_5_dias": {"n": 1892, "confirmada_pct": 2.9, "contraria_pct": 5.1,
+                                          "misma_hora_direccion_al_azar_pct": 3.5},
+                  "nota": "La dirección del triaje no se cumple más que al azar: una «confirmada» no prueba causa."}}]
 # Acciones de fuentes_vivas → tipos del historial («activar» = una fuente en prueba pasa a activa: sube su peso)
 FUENTE_TIPO = {"anadir": "fuente_añadida", "silenciar": "fuente_silenciada", "retirar": "fuente_retirada",
                "restaurar": "fuente_restaurada", "activar": "peso_cambiado", "a_prueba": "peso_cambiado"}
@@ -385,6 +411,18 @@ def registrar(destino, tipo: str, sujeto, antes=None, despues=None, motivo: str 
                        now_ms() if ts is None else int(ts), id_)
     _insertar(_db(destino), [e])
     return e
+
+
+def apuntar_cambios_codigo(destino, ts: int | None = None, cambios=None) -> list[dict]:
+    """Apunta en el historial los cambios del código (CAMBIOS_CODIGO) que aún no estén (por su id fijo). Devuelve los
+    apuntados ahora. Nunca dos veces el mismo, aunque el bot se reinicie."""
+    out = []
+    for c in (CAMBIOS_CODIGO if cambios is None else cambios):
+        if leer(destino, id_=c["id"], limite=1):
+            continue
+        out.append(registrar(destino, c["tipo"], c["sujeto"], c.get("antes"), c.get("despues"), c["motivo"],
+                             c.get("evidencia"), "codigo", ts=ts, id_=c["id"]))
+    return out
 
 
 def desde_fuentes(entrada: dict) -> dict:
@@ -1614,6 +1652,15 @@ class Evolucion:
         e = registrar(self.store, tipo, sujeto, antes, despues, motivo, evidencia, origen, revierte, ts=self.clock())
         self._publicar_pronto()
         return e
+
+    def apuntar_cambios_codigo(self) -> list[dict]:
+        """Al arrancar: los cambios del código que alteran la operativa en paper, una sola vez (CAMBIOS_CODIGO)."""
+        out = apuntar_cambios_codigo(self.store, ts=self.clock())
+        for e in out:
+            log.warning("Evolución: apuntado «%s» (%s)", e["etiqueta"], e["sujeto"])
+        if out:
+            self._publicar_pronto()
+        return out
 
     def registrar_fuente(self, entrada: dict) -> None:
         """registrar= de FuentesVivas: apunta su cambio en el historial (se llama en el bucle; rápido)."""

@@ -477,6 +477,29 @@ async def test_briefing_se_reintenta_hasta_publicarlo():
     assert calls == ["Apertura Nueva York"] * local_ai.BRIEF_TRIES   # un error que se repite: se rinde
 
 
+def test_contexto_del_briefing_sin_macro_no_confirmada():
+    """El briefing de la IA local antes de cada apertura usa las noticias como la señal: una macro o geopolítica solo si
+    la cripto la confirmó (bot/reflejo.py); las de cripto, como siempre."""
+    from bot.models import now_ms
+    bus = mem_bus()
+    ai = LocalAI(bus, None)
+    t = now_ms() - 30 * 60_000
+    tri = lambda d, res, imp: {"tipo": "macro", "importancia": imp, "sentimiento": "bajista", "monedas": [],
+                               "resumen": res, "repercusion": {"direccion": d, "magnitud": 70, "activos": []}}
+    for sid, clase, title, triage in (("m1", "macro", "Rusia lanza misiles", tri(-70, "Misiles sobre Kiev", 9)),
+                                      ("m2", "macro", "La Fed sube tipos", tri(-60, "La Fed sube los tipos", 8)),
+                                      ("c1", "cripto", "Hackeo en Bithumb", tri(-50, "Hackeo en un exchange", 6))):
+        bus.publish({"type": "event", "kind": "captured", "agent": "hunter", "story": sid, "ts": t, "title": title,
+                     "coins": [], "text": "", "patch": {"headline": title, "clase": clase}})
+        bus.publish({"type": "event", "kind": "triaged", "agent": "local", "story": sid, "ts": t + 60_000, "title": title,
+                     "coins": [], "text": "", "patch": {"triage": triage}})
+    bus.publish({"type": "event", "kind": "reflejo", "agent": "flow", "story": "m2", "ts": t + 120_000, "title": "x",
+                 "coins": [], "text": "", "patch": {"reflejo": {"estado": "confirmada", "mov_pct": -1.0, "min": 9,
+                                                                "ref": "media", "umbral_pct": 0.9}}})
+    txt = ai.brief_context("Apertura Londres", datetime(2026, 10, 26, 7, 40, tzinfo=timezone.utc))
+    assert "La Fed sube los tipos" in txt and "Hackeo en un exchange" in txt and "Misiles sobre Kiev" not in txt
+
+
 async def test_bolsa_de_la_region_solo_si_el_modelo_nombra_alguna():
     bus = mem_bus()
     q = bus.subscribe()
