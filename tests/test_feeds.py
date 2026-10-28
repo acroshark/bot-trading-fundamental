@@ -1062,37 +1062,45 @@ async def test_sin_red_no_suma_fallos_y_al_volver_reprograma_todo(tmp_path):
         await p.sem.acquire()
         await p._poll(p.states["f10"])
     assert p.states["f10"].fails == 0 and p.states["f10"].err == "Sin red en este PC"
-    # el planificador solo deja salir una prueba cada 15 s
+    # el planificador solo deja salir una prueba cada 15 s (sin reloj real: el bucle se para tras unas vueltas)
     p.sched = feeds.Scheduler()
     for sp in specs:
         p.sched.push(sp.id, 0)
     sent = []
-    real_poll = p._poll
 
     async def contar(st):
         sent.append(st.spec.id)
-        await real_poll(st)
+        p.inflight.discard(st.spec.id)
+        p.sem.release()
+        p.gate.done(st.host)
 
-    p._poll = contar
+    vueltas = {"n": 0}
+
+    async def dormir(_s):
+        vueltas["n"] += 1
+        if vueltas["n"] >= 3:
+            p._closed = True
+        await asyncio.sleep(0)
+
+    async def ronda(ahora):
+        t[0], vueltas["n"], p._closed = ahora, 0, False
+        await p._dispatch()
+        await asyncio.sleep(0)
+
+    p._poll, p.sleep = contar, dormir
     p.next_probe = 1010.0
-    disp = asyncio.create_task(p._dispatch())
-    await asyncio.sleep(0.6)
+    await ronda(1005.0)
     assert sent == []          # aún no toca probar: todos esperan a la prueba
-    t[0] = 1026.0              # pasada la hora de la prueba (y la de todos los que esperaban)
-    await asyncio.sleep(0.6)
-    assert len(sent) == 1      # una sola prueba, que sigue fallando: sigue sin red
-    assert p.offline_since == 1000.0
-    # vuelve la red: la siguiente prueba responde y todo se pone a cero y se reprograma
-    modo["falla"] = False
-    t[0] = 1060.0
-    await asyncio.sleep(0.6)
-    p._closed = True
-    await asyncio.sleep(0.6)
-    disp.cancel()
-    assert len(sent) >= 2
+    await ronda(1026.0)        # pasada la hora de la prueba (y la de todos los que esperaban)
+    assert len(sent) == 1      # una sola prueba
+    assert p.offline_since == 1000.0 and p.next_probe == 1041.0 and len(p.sched) == 11
+    # vuelve la red (la prueba responde): fallos y pausas de red a cero y todos reprogramados en el tiempo del arranque
+    p.gate.next["host0.example"] = 5000.0
+    t[0] = 1050.0
+    p._net_result("host0.example", False)
     assert p.offline_since is None and p.offline_episodes == 1
-    assert all(p.states[s.id].fails == 0 for s in specs) and not p.gate.fails
-    assert all(v <= 1060.0 + p.gate.gap("x") for v in p.gate.next.values())   # sin pausas de host: solo el espaciado
+    assert all(p.states[s.id].fails == 0 for s in specs) and not p.gate.fails and not p.gate.next
+    assert len(p.sched) == 12 and all(1050.0 <= due <= 1050.0 + p.start_spread_s for due, _, _ in p.sched.heap)
     store.close()
 
 
