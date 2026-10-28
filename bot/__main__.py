@@ -14,7 +14,9 @@ import ssl
 import sys
 import tempfile
 import time
-from logging.handlers import RotatingFileHandler
+from datetime import datetime
+from logging.handlers import TimedRotatingFileHandler
+from zoneinfo import ZoneInfo
 
 import aiohttp
 import truststore
@@ -42,7 +44,7 @@ from .predict import Predictor, results_getter
 from .reaccion import Reaccion
 from .reflejo import Reflejo
 from .server import Services, make_app
-from .store import Store, in_batches
+from .store import Store, copia_diaria, in_batches
 from .trend import Trend
 from .vigilancia import Vigilancia
 
@@ -95,6 +97,20 @@ async def supervise(name: str, factory, min_s: float = SUPERVISE_MIN_S, max_s: f
         wait = min(max_s, wait * 2)
 
 
+def db_health(path, carpeta) -> dict:
+    """Tamaño de bot.db y de su WAL en MB y la última copia diaria (para /health; hallazgos n.º 39 y 51)."""
+    def mb(p) -> float | None:
+        try:
+            return round(os.path.getsize(p) / 1e6, 1)
+        except OSError:
+            return None
+    try:
+        copias = sorted(p.name for p in carpeta.glob("bot-????-??-??.db"))
+    except OSError:
+        copias = []
+    return {"mb": mb(path), "wal_mb": mb(f"{path}-wal"), "copias": len(copias), "ultima_copia": copias[-1] if copias else None}
+
+
 def observe_bus(bus: Bus, fn) -> None:
     """Gancho síncrono tras cada mensaje del bus (el aprendizaje anota al momento el medio de cada captada)."""
     publish = bus.publish
@@ -110,7 +126,9 @@ def observe_bus(bus: Bus, fn) -> None:
 def setup_logging() -> None:
     config.LOG_DIR.mkdir(parents=True, exist_ok=True)
     fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
-    fh = RotatingFileHandler(config.LOG_DIR / "bot.log", maxBytes=5_000_000, backupCount=5, encoding="utf-8")
+    # Un archivo por día, LOG_KEEP_DAYS días (n.º 50): con 5 MB × 5 solo cabían unos 4 días (unos 7,3 MB al día)
+    fh = TimedRotatingFileHandler(config.LOG_DIR / "bot.log", when="midnight", backupCount=config.LOG_KEEP_DAYS,
+                                  encoding="utf-8")
     fh.setFormatter(fmt)
     sh = logging.StreamHandler(sys.stdout)
     sh.setFormatter(fmt)
@@ -119,18 +137,32 @@ def setup_logging() -> None:
 
 
 async def maintenance(store: Store) -> None:
-    """Cada hora: borra los descartes viejos, las captadas y demás eventos masivos de más de 30 días y las claves de
-    piezas ya vistas que ningún feed va a repetir."""
+    """Cada hora: borra los descartes viejos, las captadas de más de KEEP_CAPTURED_S (7 días) y demás eventos masivos
+    de más de 30 días y las claves de piezas ya vistas que ningún feed va a repetir. Una vez al día (día de Madrid):
+    copia en caliente de bot.db en DATA_DIR/copias (7 copias; hallazgo n.º 39) y PRAGMA optimize (n.º 51)."""
+    hecho = None
     while True:
         try:
             now = now_ms()
             gone = await in_batches(store.prune, ("filtered",), now - config.KEEP_FILTERED_S * 1000)
+            cap = await in_batches(store.prune, config.PRUNE_CAPTURED_KINDS, now - config.KEEP_CAPTURED_S * 1000)
             old = await in_batches(store.prune, config.PRUNE_EVENT_KINDS, now - config.KEEP_EVENTS_S * 1000)
             seen = await in_batches(store.prune_seen, now - config.KEEP_SEEN_S * 1000)
-            if gone or old or seen:
-                log.info("Limpieza: %d descartes, %d eventos antiguos y %d claves vistas borrados", gone, old, seen)
+            if gone or cap or old or seen:
+                log.info("Limpieza: %d descartes, %d captadas, %d eventos antiguos y %d claves vistas borrados",
+                         gone, cap, old, seen)
         except Exception:
             log.exception("La limpieza de la base falló")
+        dia = datetime.now(ZoneInfo("Europe/Madrid")).date().isoformat()
+        if hecho != dia:
+            try:
+                dest = await asyncio.to_thread(copia_diaria, store.path, config.COPIAS_DIR, dia)
+                if dest is not None:
+                    log.info("Copia de bot.db hecha en %s (%.0f MB)", dest, dest.stat().st_size / 1e6)
+                store.db.execute("PRAGMA optimize")
+                hecho = dia
+            except Exception:
+                log.exception("La copia diaria de bot.db falló: se reintenta en la próxima ronda")
         await asyncio.sleep(3600)
 
 
@@ -230,7 +262,8 @@ async def main() -> None:
             return {"phase": config.PHASE, "sources": [st.view() for st in states],
                     "market": {"ok": market.ok, "err": market.err, "prices": market.prices},
                     "trend": {"ok": trend.ok, "err": trend.err}, "feeds": feeds.summary(),
-                    "local_ai": {"queue": local.q.qsize(), "done": local.done},
+                    "local_ai": {"queue": local.q.qsize(), "done": local.done, "dropped": local.dropped},
+                    "db": db_health(store.path, config.COPIAS_DIR),
                     "clients": len(bus.clients)}
 
         services = Services(feeds=feeds, predictor=predictor, broker=broker, phase2=phase2, backtest=bt, openings=openings,

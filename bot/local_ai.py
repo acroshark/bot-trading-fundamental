@@ -275,6 +275,20 @@ START_MAX_S = 180    # espera máxima a que llama-server cargue el modelo
 GPU_NOTE = "La GPU la está usando la fábrica de contenidos; se reintenta con la próxima noticia."
 
 
+def rotate_log(path, max_mb: float) -> bool:
+    """Si el registro pasa de max_mb, lo renombra a .1 (pisando el anterior): llama-server.log se abría en «ab» en cada
+    arranque y crecía sin límite, unos 16,6 MB al día (hallazgo n.º 50). Nunca lanza."""
+    try:
+        if path.stat().st_size <= max_mb * 1_000_000:
+            return False
+        old = path.with_name(path.name + ".1")
+        old.unlink(missing_ok=True)
+        path.rename(old)
+        return True
+    except OSError:
+        return False
+
+
 class TriageQueue:
     """Cola con prioridad: sale antes lo más prioritario y, a igualdad, lo más NUEVO (tras un rato sin IA, lo recién
     llegado no espera detrás de lo caducado). Si se llena se descarta lo menos prioritario y, a igualdad, lo más antiguo."""
@@ -549,8 +563,10 @@ class LocalAI:
                     "--host", "127.0.0.1", "--port", str(config.LOCAL_AI_PORT), "--reasoning", "off", "--no-webui"]
             self.last_use = time.monotonic()   # la carga cuenta como uso: _idle_loop no la corta
             try:
+                llama_log = config.LOG_DIR / "llama-server.log"
+                rotate_log(llama_log, config.LLAMA_LOG_MAX_MB)
                 # Popen duplica el descriptor del log para el proceso hijo; el nuestro se cierra al salir del with.
-                with open(config.LOG_DIR / "llama-server.log", "ab") as log_file:
+                with open(llama_log, "ab") as log_file:
                     proc = self.proc = subprocess.Popen(args, cwd=str(config.LLAMA_SERVER.parent), stdout=log_file,
                                                         stderr=log_file, creationflags=NO_WINDOW)
             except OSError as e:   # exe bloqueado, sin permiso o log inaccesible

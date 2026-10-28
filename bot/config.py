@@ -29,10 +29,18 @@ HISTORY_EVENTS = 1500        # eventos que recibe la web al conectarse (sin cont
 HISTORY_FILTERED = 300       # descartes que recibe la web al conectarse
 KEEP_FILTERED_S = 48 * 3600  # los descartes se borran de la base pasado este tiempo
 KEEP_SEEN_S = 14 * 86400     # claves de piezas ya vistas (los feeds no repiten piezas tan viejas)
-# Captadas, confirmaciones, verificaciones y flujo (~2.000 filas/h): nada las lee pasadas 48 h. Los triajes, planes y
-# operaciones no se podan (el paper y el backtest los leen sin límite de tiempo).
+# Verificaciones, impactos descartados y flujo: se podan a los 30 días. Los triajes, reflejos, planes y operaciones no
+# se podan (el paper, el aprendizaje y el backtest los leen sin límite de tiempo).
 KEEP_EVENTS_S = int(os.environ.get("BOT_KEEP_EVENTS_DAYS", "30")) * 86400
 PRUNE_EVENT_KINDS = ("captured", "corroborated", "srcstate", "verified", "unverified", "noimpact", "flow")
+# Captadas, confirmaciones y subidas de estado: unas 3.600-4.100 captadas por hora medidas el 26-10-2026 (no 2.000), y
+# casi nada las lee pasadas 48 h (la web y la señal miran 6-48 h; el aprendizaje guarda lo suyo en sus tablas). 7 días
+# cubren el tope de 7 días de E2 y los huecos del bot parado (hallazgo n.º 51; antes 30 días: unos 5 GB el primer mes).
+KEEP_CAPTURED_S = int(os.environ.get("BOT_KEEP_CAPTURED_DAYS", "7")) * 86400
+PRUNE_CAPTURED_KINDS = ("captured", "corroborated", "srcstate")
+COPIAS_DIR = DATA_DIR / "copias"   # copia diaria en caliente de bot.db (hallazgo n.º 39)
+LOG_KEEP_DAYS = int(os.environ.get("BOT_LOG_DAYS", "30"))   # bot.log rota a medianoche y guarda 30 días (n.º 50)
+LLAMA_LOG_MAX_MB = 50        # llama-server.log pasa a .1 al arrancar si supera esto (n.º 50)
 FLOW_INTERVAL_S = 60
 MARKET_PUSH_S = 2.0
 

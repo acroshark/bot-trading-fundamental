@@ -872,3 +872,71 @@ def test_api_estado_resume_la_cripto_en_las_aperturas_y_no_el_indice(tmp_path):
     json.dumps(ap)
     store.close()
 
+
+
+def test_copia_diaria_en_caliente_comprobada_y_7_copias(tmp_path):
+    """Hallazgo n.º 39: copia en caliente con la API backup de sqlite3 (con el bot escribiendo a la vez), comprobada y
+    renombrada al final; se conservan 7."""
+    from bot.store import copia_diaria
+    store = Store(tmp_path / "bot.db")
+    for k in range(50):
+        store.add_event({"id": f"e{k}", "ts": k, "kind": "triaged", "story": f"s{k}", "agent": "local"})
+    otra = sqlite3.connect(tmp_path / "bot.db")
+    otra.execute("BEGIN IMMEDIATE")   # alguien escribiendo a la vez: la copia no espera ni falla
+    otra.execute("INSERT INTO events VALUES ('x', 99, 'sx', 'local', 'triaged', '{}')")
+    carpeta = tmp_path / "copias"
+    dest = copia_diaria(tmp_path / "bot.db", carpeta, "2026-10-28")
+    otra.commit()
+    otra.close()
+    assert dest.name == "bot-2026-10-28.db" and not list(carpeta.glob("*.tmp"))
+    c = sqlite3.connect(dest)
+    assert c.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 50 and c.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+    c.close()
+    assert copia_diaria(tmp_path / "bot.db", carpeta, "2026-10-28") is None   # la de ese día ya está
+    for d in range(1, 10):
+        copia_diaria(tmp_path / "bot.db", carpeta, f"2026-11-{d:02d}")
+    names = sorted(p.name for p in carpeta.glob("bot-*.db"))
+    assert len(names) == 7 and names[0] == "bot-2026-11-03.db" and names[-1] == "bot-2026-11-09.db"
+    from bot import __main__ as main
+    h = main.db_health(tmp_path / "bot.db", carpeta)
+    assert h["copias"] == 7 and h["ultima_copia"] == "bot-2026-11-09.db" and h["mb"] is not None
+    store.close()
+
+
+async def test_limpieza_poda_las_captadas_a_los_7_dias_y_hace_la_copia(tmp_path, monkeypatch):
+    """Hallazgos n.º 51 y 39: las captadas, confirmaciones y subidas de estado se podan a los 7 días (antes 30); los
+    triajes nunca. La copia diaria se hace en la misma ronda."""
+    import asyncio
+    from bot import __main__ as main
+    store = Store(tmp_path / "bot.db")
+    now = now_ms()
+    for k, (kind, dias) in enumerate([("captured", 8), ("captured", 6), ("corroborated", 8), ("triaged", 40),
+                                      ("verified", 8), ("verified", 31)]):
+        store.add_event({"id": f"e{k}", "ts": now - dias * 86_400_000, "kind": kind, "story": f"s{k}", "agent": "x"})
+    monkeypatch.setattr(config, "COPIAS_DIR", tmp_path / "copias")
+
+    real_sleep = asyncio.sleep
+
+    async def para(s):   # la espera de una hora corta la prueba; las de 0 s entre lotes, no
+        if s >= 3600:
+            raise asyncio.CancelledError
+        await real_sleep(0)
+
+    monkeypatch.setattr(main.asyncio, "sleep", para)
+    with pytest.raises(asyncio.CancelledError):
+        await main.maintenance(store)
+    left = sorted((e["kind"], e["id"]) for e in store.events_since(0, ("captured", "corroborated", "triaged", "verified")))
+    assert left == [("captured", "e1"), ("triaged", "e3"), ("verified", "e4")]
+    assert len(list((tmp_path / "copias").glob("bot-*.db"))) == 1
+    store.close()
+
+
+def test_llama_server_log_rota_al_pasar_de_50_mb(tmp_path):
+    """Hallazgo n.º 50: llama-server.log se abría en «ab» en cada arranque y crecía sin límite."""
+    from bot.local_ai import rotate_log
+    log_ = tmp_path / "llama-server.log"
+    log_.write_bytes(b"x" * 2_000)
+    assert rotate_log(log_, 0.001) and not log_.exists() and (tmp_path / "llama-server.log.1").stat().st_size == 2_000
+    log_.write_bytes(b"y" * 10)
+    assert not rotate_log(log_, 0.001) and log_.exists()
+    assert not rotate_log(tmp_path / "no-existe.log", 1)

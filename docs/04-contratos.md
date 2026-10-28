@@ -671,12 +671,16 @@ cola hasta que ya no se puedan confirmar a tiempo):
 
 | Ruta | Devuelve |
 |---|---|
+| `GET /health` | Salud del proceso: `phase`, `sources` (cazadores), `market {ok, err, prices}`, `trend {ok, err}`, `feeds` (2.1), `local_ai {queue, done, dropped}` (cola del triaje, triadas y sin triar por cola llena), `db {mb, wal_mb, copias, ultima_copia}` (tamaño de `bot.db` y su WAL y las copias diarias de `DATA_DIR/copias`, hallazgos n.º 39 y 51) y `clients`. La usa `scripts/vigilante-bot.ps1` |
 | `GET /api/estado` | Resumen para la IA local (precios, flujo, libro, agenda, fuentes, IA local y cartera). Desde el 28-10-2026, en lugar de `bolsas` (la variación de cada índice) lleva `aperturas_cripto`: por bolsa, `{nombre, estado, apertura (Madrid), minutos_desde_apertura, medida ("desde la apertura"\|"a las 4 h"\|"última apertura, a las 4 h"), cripto {moneda: {pct, rango_pct}} \| null, media_pct}` del último `cripto_aperturas` |
 | `GET /api/noticias?horas=&min=&bolsa=` | Noticias con su triaje. Cada una lleva además `medio`, `estado_fuente`, `peso_fuente`, `peso_medio`, `clase` (`cripto\|macro\|contexto`, del prefiltro) y `reflejo` (el último del evento `reflejo`, o `null`); `credibilidad_ajustada` = la del nivel y las confirmaciones × peso del medio × peso de la fuente (0 si está silenciada, y 0 si es macro o geopolítica sin reflejo confirmado en la cripto); `confirmaciones` no cuenta las de fuentes silenciadas |
 | `GET /api/fuentes?region=&estado=` | Lista de feeds (2.1) con `estado` y `peso` de su ciclo de vida (2.12); `estado=` filtra |
 | `GET /api/tendencia` | Último `trend` y `orderflow` |
 | `GET /api/predicciones` | Último `predictions` |
 | `GET /api/backtest` | Contenido de `BACKTEST_DIR/resultados.json` (3.1) |
+| `GET /api/predicciones/evaluadas?n=50` | Las últimas n predicciones ya evaluadas (hasta 500), con su acierto |
+| `GET /api/cartera` | La cartera del paper ahora (`portfolio`, 2.5) |
+| `GET /api/fase2` | Estado de la fase 2: `{claude, estado ("ok"\|"nokey"\|"apagada"…), presupuesto {limite_usd, gastado_usd}, planes}` |
 | `GET /api/backtest/aperturas` | `BACKTEST_DIR/aperturas.json`: el motor anterior (v2 «ruptura»), solo como referencia (404 sin archivo) |
 | `GET /api/backtest/impulso` | `{impulso, lab}` (`bot/resumen_backtest.py`): `impulso` = `BACKTEST_DIR/impulso_7d.json` (lo escribe `controles/compara_impulso.py`), la variante de 7 días que opera el motor, con `fuera` y `dentro` = `{n, mean_R, win_rate, salidas, horas_media, largos, cortos, desde, hasta, total_R, max_dd_R, curva_R [[ms, R acumulado]] (≤ 151 puntos)}` y `nota`; `lab` = resumen de `laboratorio.json` (`summary`, `promising`, `robust`, `avance` = cuenta honesta en avance trimestral con 0,5 % de riesgo); `seis` = `BACKTEST_DIR/seis_diarias_resumen.json` (la réplica del motor con el preset «6 diarias»), con la misma forma que `impulso` más `nombre` y `params`. Lo que falte va como `null`; 404 si faltan los tres |
 | `GET /api/noticias_fiables` | Último `noticias_fiables` (2.15); 404 si aún no hay ningún cálculo |
