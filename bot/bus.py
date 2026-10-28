@@ -1,6 +1,7 @@
 """Bus de eventos: guarda, recuerda el último estado y reparte cada mensaje a las webs conectadas."""
 import asyncio
 import json
+from pathlib import Path
 
 from . import config
 from .models import now_ms
@@ -12,8 +13,9 @@ HUECO_MIN_MS = 5 * 60_000    # con miles de feeds llegan eventos cada pocos segu
 
 
 class Bus:
-    def __init__(self, store: Store):
+    def __init__(self, store: Store, latido: Path | str | None = None):
         self.store = store
+        self.latido = Path(latido) if latido else None   # archivo que bot/salud.py toca cada minuto
         self.clients: set[asyncio.Queue] = set()
         self.state: dict[str, dict] = {}   # último mensaje de cada tipo (fuentes, mercado, agenda, agentes)
         self.started = now_ms()
@@ -21,11 +23,19 @@ class Bus:
         self.hueco = self._hueco()   # cuánto estuvo parado antes de este arranque (hallazgo n.º 0)
 
     def _hueco(self) -> dict | None:
-        """{desde, hasta, min}: del último evento guardado a este arranque, si pasan de HUECO_MIN_MS; si no, None."""
+        """{desde, hasta, min}: de la última señal de vida (el último evento guardado o el latido, lo más reciente) a
+        este arranque, si pasan de HUECO_MIN_MS; si no, None. Con el PC sin red no se guardan eventos, pero el latido
+        sigue: así un rato sin red con el bot vivo no cuenta como parado."""
         try:
             last = self.store.ultima_actividad(self.started)
         except Exception:
             return None
+        try:
+            lat = int(self.latido.stat().st_mtime * 1000) if self.latido else None
+        except OSError:
+            lat = None
+        if lat is not None and lat < self.started:
+            last = max(last or 0, lat)
         if last is None or self.started - last < HUECO_MIN_MS:
             return None
         return {"desde": last, "hasta": self.started, "min": round((self.started - last) / 60_000)}

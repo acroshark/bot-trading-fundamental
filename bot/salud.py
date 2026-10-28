@@ -14,6 +14,8 @@ log = logging.getLogger("salud")
 MAD = ZoneInfo("Europe/Madrid")
 CADA_S = 300
 LAG_CADA_S = 1.0             # el retraso del bucle se mide con una espera de 1 s
+LATIDO_S = 60                # cada minuto se toca el archivo de latido (el bus lo lee al arrancar: hueco)
+CONGELADO_S = 300            # una espera de 1 s que dura 5 min o más: el proceso estuvo congelado (PC suspendido)
 COLUMNAS = ("hora_madrid", "en_marcha_s", "mem_mb", "privada_mb", "handles", "hilos", "retraso_bucle_ms",
             "retraso_bucle_max_ms", "ia_cola", "ia_hechas", "ia_sin_triar", "db_mb", "wal_mb", "feeds_ok", "feeds_total",
             "clientes_web", "reloj_desfase_ms")
@@ -101,17 +103,39 @@ class Salud:
     """Mide el retraso del bucle (cuánto se pasa una espera de 1 s: si algo bloquea el bucle, crece) y cada 5 min
     apunta una fila en salud.csv con health() (la función de /health)."""
 
-    def __init__(self, health, path: Path, clock=time.monotonic, sleep=asyncio.sleep):
-        self.health, self.path, self.clock, self.sleep = health, Path(path), clock, sleep
+    def __init__(self, health, path: Path, clock=time.monotonic, sleep=asyncio.sleep, latido: Path | None = None,
+                 wall=time.time):
+        self.health, self.path, self.clock, self.sleep, self.wall = health, Path(path), clock, sleep, wall
+        self.latido = Path(latido) if latido else None
         self.retraso = {"ms": None, "max_ms": None}
+        self.congelado: dict | None = None   # el último tramo con el proceso congelado: {desde, hasta, min}
         self._max = 0.0
+        self._latido_at = None
+
+    def _latir(self) -> None:
+        """Toca el archivo de latido: al arrancar, el bus mide el hueco desde aquí (o desde el último evento)."""
+        if self.latido is None:
+            return
+        try:
+            self.latido.parent.mkdir(parents=True, exist_ok=True)
+            self.latido.write_text(str(int(self.wall() * 1000)), encoding="ascii")
+        except OSError as e:
+            log.debug("No se pudo tocar el latido: %s", e)
 
     async def run(self) -> None:
         prox = self.clock() + CADA_S
         while True:
-            t0 = self.clock()
+            t0, w0 = self.clock(), self.wall()
+            if self._latido_at is None or t0 - self._latido_at >= LATIDO_S:
+                self._latido_at = t0
+                self._latir()
             await self.sleep(LAG_CADA_S)
             lag = max(0.0, (self.clock() - t0 - LAG_CADA_S) * 1000)
+            parado = self.wall() - w0 - LAG_CADA_S   # en hora real: el reloj monótono puede no contar la suspensión
+            if parado >= CONGELADO_S:
+                self.congelado = {"desde": int(w0 * 1000), "hasta": int(self.wall() * 1000), "min": round(parado / 60)}
+                log.warning("El proceso estuvo congelado %d min (¿PC suspendido o hibernado?): en ese tiempo no se "
+                            "siguió nada", round(parado / 60))
             self._max = max(self._max, lag)
             self.retraso = {"ms": round(lag, 1), "max_ms": round(self._max, 1)}
             if self.clock() >= prox:

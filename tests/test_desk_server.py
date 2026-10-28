@@ -1,6 +1,7 @@
 import asyncio
 import functools
 import json
+import os
 import random
 import sqlite3
 import threading
@@ -988,6 +989,16 @@ def test_hueco_al_arrancar(tmp_path, monkeypatch):
     assert bus.snapshot()[0] == {"type": "reset", "phase": bus.snapshot()[0]["phase"], "started": t, "hueco": bus.hueco}
     store.add_event({"type": "event", "kind": "filtered", "story": "b", "ts": t - 4 * 60_000, "id": "b"})
     assert Bus(store).hueco is None                                   # 4 min: un reinicio normal
+    # Revisión: con el PC sin red no se guardan eventos, pero el latido de bot/salud.py sigue: no estuvo parado.
+    store.db.execute("DELETE FROM events WHERE id = 'b'")
+    store.db.commit()
+    latido = tmp_path / "latido"
+    latido.write_text("x")
+    os.utime(latido, (t / 1000 - 120, t / 1000 - 120))               # vivo hasta hace 2 min
+    assert Bus(store, latido=latido).hueco is None
+    os.utime(latido, (t / 1000 - 3600, t / 1000 - 3600))              # el latido, 1 h antes; el evento, 33 h antes
+    assert Bus(store, latido=latido).hueco == {"desde": t - 3_600_000, "hasta": t, "min": 60}
+    assert Bus(store, latido=tmp_path / "no-existe").hueco["min"] == 1980
     store.close()
 
 

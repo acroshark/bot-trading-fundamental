@@ -39,6 +39,7 @@ PRUNE_EVENT_KINDS = ("captured", "corroborated", "srcstate", "verified", "unveri
 KEEP_CAPTURED_S = int(os.environ.get("BOT_KEEP_CAPTURED_DAYS", "7")) * 86400
 PRUNE_CAPTURED_KINDS = ("captured", "corroborated", "srcstate")
 COPIAS_DIR = DATA_DIR / "copias"   # copia diaria en caliente de bot.db (hallazgo n.º 39)
+LATIDO = DATA_DIR / "latido"       # bot/salud.py lo toca cada minuto; al arrancar, el bus mide desde ahí el hueco (n.º 0)
 LOG_KEEP_DAYS = int(os.environ.get("BOT_LOG_DAYS", "30"))   # bot.log rota a medianoche y guarda 30 días (n.º 50)
 LLAMA_LOG_MAX_MB = 50        # llama-server.log pasa a .1 al arrancar si supera esto (n.º 50)
 FLOW_INTERVAL_S = 60

@@ -36,12 +36,12 @@ class FakeResp:
 
 
 class FakeSession:
-    def __init__(self, by_host, reloj_local):
-        self.by_host, self.reloj, self.urls = by_host, reloj_local, []
+    def __init__(self, by_host, reloj_local, ida_vuelta=(0.2,)):
+        self.by_host, self.reloj, self.urls, self.iv = by_host, reloj_local, [], list(ida_vuelta)
 
     def get(self, url, timeout=None):
         self.urls.append(url)
-        self.reloj[0] += 0.2   # 200 ms de ida y vuelta
+        self.reloj[0] += self.iv[(len(self.urls) - 1) % len(self.iv)]   # ida y vuelta de cada petición
         for host, r in self.by_host.items():
             if host in url:
                 return r
@@ -72,7 +72,20 @@ async def test_mide_con_okx_y_avisa_si_pasa_de_2_s(caplog):
     [m] = bus.msgs
     assert (m["type"], m["fuente"], m["desfase_ms"], m["ok"], m["error"]) == ("reloj", "OKX", 3000, False, None)
     assert m["ida_vuelta_ms"] == 200 and "3,0 s adelantado" in m["aviso"] and waits == [reloj.CADA_S]
-    assert "adelantado" in caplog.text and s.urls == [reloj.FUENTES[0][1]]
+    assert "adelantado" in caplog.text and s.urls == [reloj.FUENTES[0][1]] * reloj.INTENTOS
+
+
+async def test_vale_la_peticion_mas_rapida_y_una_lenta_no_avisa():
+    """Revisión: lo que tarda la conexión (o el bucle ocupado) entra de un solo lado y descuadra la medida. De 3
+    peticiones vale la de menor ida y vuelta; si todas pasan de 1 s, no se avisa."""
+    local = [1_800_000_000.0]
+    servidor = int(local[0] * 1000) + 3000          # el servidor «va» 3 s por delante... según la petición lenta
+    s = FakeSession({"okx.com": FakeResp({"data": [{"ts": str(servidor)}]})}, local, ida_vuelta=(6.0, 0.1, 0.3))
+    m = await Reloj(FakeBus(), s, clock=lambda: local[0]).medir()
+    assert m["ida_vuelta_ms"] == 100 and m["desfase_ms"] == round((6.0 + 6.1) / 2 * 1000) - 3000
+    lento = FakeSession({"okx.com": FakeResp({"data": [{"ts": str(servidor)}]})}, local, ida_vuelta=(5.0,))
+    m = await Reloj(FakeBus(), lento, clock=lambda: local[0]).medir()
+    assert (m["ok"], m["aviso"], m["ida_vuelta_ms"]) == (None, None, 5000) and "no es fiable" in m["error"]
 
 
 async def test_sin_okx_mira_binance_y_sin_nadie_reintenta_antes():

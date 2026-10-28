@@ -226,7 +226,7 @@ async def main() -> None:
     atar_hijos()
     data_tmp()
     store = Store(config.DB_PATH)
-    bus = Bus(store)
+    bus = Bus(store, latido=config.LATIDO)
     states = [SourceState(s) for s in SOURCES]
 
     # Certificados del sistema (Windows): sin ellos fallan muchas webs oficiales asiáticas (.go.jp, .gov.hk…).
@@ -323,9 +323,10 @@ async def main() -> None:
                     "db": db_health(store.path, config.COPIAS_DIR),
                     "arranque": bus.started, "en_marcha_s": round((now_ms() - bus.started) / 1000),
                     "hueco_al_arrancar": bus.hueco, "reloj": reloj.ultimo, "proceso": proceso(),
-                    "retraso_bucle": salud.retraso, "clients": len(bus.clients)}
+                    "retraso_bucle": salud.retraso, "congelado": salud.congelado, "clients": len(bus.clients)}
 
-        salud = Salud(health, config.LOG_DIR / "salud.csv")   # cada 5 min, una fila para la prueba de 72 h (n.º 40)
+        # Cada 5 min, una fila para la prueba de 72 h (n.º 40); cada minuto, el latido con el que el bus mide el hueco.
+        salud = Salud(health, config.LOG_DIR / "salud.csv", latido=config.LATIDO)
 
         services = Services(feeds=feeds, predictor=predictor, broker=broker, phase2=phase2, backtest=bt, openings=openings,
                             vigilancia=vigil, aprendizaje=learn, evolucion=evo, fuentes_vivas=vivas, reaccion=react,

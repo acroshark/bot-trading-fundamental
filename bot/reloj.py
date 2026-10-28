@@ -16,6 +16,8 @@ FUENTES = (("OKX", "https://www.okx.com/api/v5/public/time", lambda d: int(d["da
 MAX_MS = 2000                # desfase a partir del cual se avisa
 CADA_S = 3600
 REINTENTO_S = 300            # sin respuesta de nadie, se vuelve a probar a los 5 min
+INTENTOS = 3                 # por fuente: vale la medida de menor ida y vuelta (la menos asimétrica)
+MAX_IDA_VUELTA_MS = 1000     # con más, la medida no sirve (DNS, conexión o bucle ocupado la descuadran) y no se avisa
 TIMEOUT = aiohttp.ClientTimeout(total=10)
 
 
@@ -45,21 +47,32 @@ class Reloj:
             return await r.json(content_type=None)
 
     async def medir(self) -> dict:
-        """Mensaje «reloj» con el desfase frente a la primera fuente que responda (o el error de todas)."""
+        """Mensaje «reloj» con el desfase frente a la primera fuente que responda (o el error de todas). De cada fuente,
+        INTENTOS peticiones y la de menor ida y vuelta: lo que tarda la conexión antes de que el servidor ponga su hora,
+        o el bucle ocupado después, entra de un solo lado. Si aun así pasa de MAX_IDA_VUELTA_MS, no se avisa."""
         errores = []
         for nombre, url, leer in FUENTES:
-            try:
-                antes = self.clock() * 1000
-                d = await self._pedir(url)
-                despues = self.clock() * 1000
-                des = desfase_ms(leer(d), antes, despues)
-            except asyncio.CancelledError:
-                raise
-            except Exception as e:
-                errores.append(f"{nombre}: {(str(e) or type(e).__name__)[:80]}")
+            mejor = None
+            for _ in range(INTENTOS):
+                try:
+                    antes = self.clock() * 1000
+                    d = await self._pedir(url)
+                    despues = self.clock() * 1000
+                    m = (despues - antes, desfase_ms(leer(d), antes, despues))
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    errores.append(f"{nombre}: {(str(e) or type(e).__name__)[:80]}")
+                    break
+                mejor = m if mejor is None or m[0] < mejor[0] else mejor
+            if mejor is None:
                 continue
-            return {"type": "reloj", "ts": now_ms(), "fuente": nombre, "desfase_ms": des,
-                    "ida_vuelta_ms": round(despues - antes), "ok": abs(des) <= MAX_MS, "aviso": aviso(des), "error": None}
+            iv, des = round(mejor[0]), mejor[1]
+            if iv > MAX_IDA_VUELTA_MS:
+                return {"type": "reloj", "ts": now_ms(), "fuente": nombre, "desfase_ms": des, "ida_vuelta_ms": iv,
+                        "ok": None, "aviso": None, "error": f"Ida y vuelta de {iv} ms: la medida no es fiable"}
+            return {"type": "reloj", "ts": now_ms(), "fuente": nombre, "desfase_ms": des, "ida_vuelta_ms": iv,
+                    "ok": abs(des) <= MAX_MS, "aviso": aviso(des), "error": None}
         return {"type": "reloj", "ts": now_ms(), "fuente": None, "desfase_ms": None, "ida_vuelta_ms": None, "ok": None,
                 "aviso": None, "error": "; ".join(errores) or "sin fuentes"}
 

@@ -76,3 +76,26 @@ async def test_bucle_mide_el_retraso_y_apunta_cada_5_min(tmp_path):
     with (tmp_path / "salud.csv").open(encoding="utf-8") as f:
         rows = list(csv.DictReader(f, delimiter=";"))
     assert len(rows) == 2 and rows[0]["retraso_bucle_ms"] == "250,0" and rows[0]["handles"] == "1793"
+
+
+async def test_latido_cada_minuto_y_aviso_si_el_proceso_se_congela(tmp_path, caplog):
+    """Revisión: el latido (archivo que el bus lee al arrancar) se toca cada minuto; si una espera de 1 s dura 5 min
+    o más en hora real (PC suspendido, sin reinicio), queda en el registro y en /health («congelado»)."""
+    t, w, n = [0.0], [1_800_000_000.0], [0]
+
+    async def sleep(s):
+        n[0] += 1
+        t[0] += s
+        w[0] += s + (600 if n[0] == 90 else 0)   # en la vuelta 90, el PC se suspende 10 min
+        if n[0] >= 130:
+            raise asyncio.CancelledError
+
+    latido = tmp_path / "latido"
+    s = Salud(lambda: HEALTH, tmp_path / "salud.csv", clock=lambda: t[0], sleep=sleep, latido=latido,
+              wall=lambda: w[0])
+    with pytest.raises(asyncio.CancelledError):
+        await s.run()
+    assert latido.read_text() == str(int((1_800_000_000.0 + 120 + 600) * 1000))   # tocado a los 0, 60 y 120 s
+    assert s.congelado == {"desde": int((1_800_000_000.0 + 89) * 1000), "hasta": int((1_800_000_000.0 + 690) * 1000),
+                           "min": 10}
+    assert "congelado 10 min" in caplog.text
