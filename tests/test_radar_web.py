@@ -1250,7 +1250,10 @@ def test_backtest_muestra_la_estrategia_en_marcha_y_el_laboratorio():
                           "oos": {"trades": 278, "mean_R": 0.1402, "win_rate": 0.52}}],
            "avance": {"days": 668, "trades": 1356, "total_pct": -61.17, "max_dd_pct": 65.28, "top": 10}}
     r = run(f"""S.btImp = {{impulso: {json.dumps(imp)}, lab: {json.dumps(lab)}}}; S.tab = "bt"; renderAll(true);
-      const a = {{live: H.el("#btLive").innerHTML + H.el("#btLiveKpis").innerHTML, lab: H.el("#btLab").innerHTML + H.el("#btLabKpis").innerHTML}};
+      const sinMotor = H.el("#btLab").innerHTML;
+      S.openings = {{strategy: "impulso", params: {{preset: "impulso"}}, windows: []}}; renderAll(true);
+      const a = {{sinMotor, live: H.el("#btLive").innerHTML + H.el("#btLiveKpis").innerHTML, lab: H.el("#btLab").innerHTML + H.el("#btLabKpis").innerHTML}};
+      S.openings = null;
       S.btImp = {{impulso: null, lab: null}}; renderBtLive();
       return {{...a, vacio: H.el("#btLive").innerHTML, vacioLab: H.el("#btLab").innerHTML}};""", live=False)
     live, lb = r["live"], r["lab"]
@@ -1259,6 +1262,7 @@ def test_backtest_muestra_la_estrategia_en_marcha_y_el_laboratorio():
     assert "La cuenta honesta en avance pierde" in live and "-61,2 %" in live and "65,3 %" in live
     assert "+0,53 R" in live and "+0,10 R" in live and "Variante elegida &lt;b&gt;después&lt;/b&gt;" in live
     assert "E2 &lt;i&gt;" in lb and "la opera el motor" in lb and "<small>Probadas</small><b>2000" in lb and "lista congelada el 2026-10-26" in lb
+    assert "la opera el motor" not in r["sinMotor"]   # sin saber qué opera el motor no se dice que es E2
     assert "<b>68 de 1358</b><span>por puro azar se esperan unas 68" in lb
     assert "no trae el backtest del motor" in r["vacio"] and "no trae el laboratorio" in r["vacioLab"]
     _sin_null(live, lb)
@@ -1797,9 +1801,13 @@ def test_backtest_estrategia_en_marcha_seis_o_impulso():
               "<small>Fuera de muestra</small>", "<small>Por jornada</small>", "con funding -0,12 R", "-184,60 R", "sin interés compuesto"):
         assert t in h, t
     assert "-0,30 %" in h and "-0,22 %" in h   # 5,0 operaciones por jornada y 3,6 por día natural con 0,5 % de riesgo
-    for x in (i, n):
-        assert x["title"] == "Estrategia en marcha: impulso de los primeros minutos (E2)" and x["sub"].startswith("Lo que opera ahora")
-        assert x["top"] is True and x["alt"] is False and "Si la activas, será por tu decisión" in x["seis"] and "-0,12 R" in x["seis"]
+    assert i["title"] == "Estrategia en marcha: impulso de los primeros minutos (E2)" and i["sub"].startswith("Lo que opera ahora")
+    assert i["top"] is True and i["alt"] is False and "Si la activas, será por tu decisión" in i["seis"] and "-0,12 R" in i["seis"]
+    # sin «openings» (la copia publicada, o antes del primer mensaje) no se sabe qué opera: ni E2 ni «6 diarias» «en marcha»
+    assert n["title"] == "Estrategia E2 (impulso de los primeros minutos): backtest de referencia"
+    assert n["sub"].startswith("Todavía no se sabe qué estrategia opera el motor") and "en marcha" not in n["title"]
+    assert n["top"] is True and n["alt"] is False and "La activa o la quita solo tu decisión" in n["seis"]
+    assert "Si la activas" not in n["seis"] and "-0,12 R" in n["seis"]
     assert r["vacio"]["top"] is False and "no trae el backtest de «6 diarias»" in r["vacio"]["html"]
     assert r["vacio"]["title"].startswith("Estrategia anterior (E2)")
     _sin_null(h, s["e2"], i["seis"], n["seis"], r["vacio"]["html"])
@@ -1887,7 +1895,7 @@ def test_entrada_con_la_forma_del_backend_y_operacion_enlaza_la_noticia():
       S.tab = "results"; renderAll(true); const res = H.el("#resRows").innerHTML;
       S.tab = "trades"; renderAll(true);
       return {trace, res, cl: H.el("#closedRows").innerHTML};""")
-    assert "Espera hasta" in r["trace"] and "11:01:00 UTC" in r["trace"]
+    assert "Espera hasta" in r["trace"] and "12:01 Madrid" in r["trace"]   # 11:01 UTC, en hora de Madrid como el motivo
     assert "72 % en 9 noticias distintas (36 historias×moneda) · a 4 h desde el triaje, ajustado al mercado" in r["trace"]
     assert "con «6 diarias», 6 entradas y 3 % de riesgo; con E2, el motor cuenta también estas entradas en su tope de 4 y 2 %" in r["trace"]
     assert 'data-story="n1"' in r["res"] and 'data-story="nf-n1-btc"' not in r["res"]
@@ -1937,3 +1945,33 @@ def test_la_curva_de_capital_va_sobre_la_cartera_de_prueba_y_no_sobre_10000():
       return {n: H.el("#eqNote").textContent, aviso: H.el("#avisoDemo").hidden};""", live=False)
     assert "100 € ficticios" in demo["n"] and "10.000" not in demo["n"] and "10000" not in demo["n"]
     assert demo["aviso"] is False   # la copia publicada avisa de que son datos de ejemplo
+
+
+def test_revision_28_10_operacion_por_noticia_capital_sin_cartera_y_grupo():
+    """Revisión del 28-10: la operación de la entrada por noticia (nf-…, tier «Plan») no es un plan de apertura «sin
+    noticia»; en directo, sin cartera del bot, no se enseña el capital de la demostración; el grupo de Resultados sale
+    con su nombre (tags.grupo_nombre), no con la clave."""
+    r = run("""H.open(); reset(); S.tab = "trades"; renderAll(true);
+      const kpis = H.el("#kpis").innerHTML, eq = H.el("#equity").innerHTML;
+      H.recv(ev("captured", "n1", {headline: "Titular de la noticia", src: "rbc.ru", tier: "T2", t0: now - 60e3, coins: ["BTC"]}),
+             ev("entrada_noticia", "n1", {entrada_noticia: {estado: "confirmada", motivo: "ok", moneda: "BTC", dir: 1,
+               paper_story: "nf-n1-btc"}}),
+             ev("strategy", "nf-n1-btc", {headline: "Noticia fiable · Compra BTC", src: "Entrada por noticia fiable", tier: "Plan",
+               t0: now, noticia: "n1", strat: strat("BTC", "long", {origen: "noticia_fiable", noticia: "n1",
+               tags: {origen: "noticia_fiable", story: "n1"}})}));
+      S.sel = "nf-n1-btc"; renderTrace(); const op = H.el("#trace").innerHTML;
+      S.sel = "n1"; renderTrace(); const news = H.el("#trace").innerHTML;
+      const tr = {id: "t1", story: "nf-n1-btc", strategy: "noticia-fiable-largo", window: "Noticia fiable", market: "", coin: "BTC",
+        side: "long", qty: 1, entry: 100, exit: 98.5, opened: now - 3600e3, closed: now, reason: "Stop", pnl: -0.5, pnl_pct: -1.5,
+        R: -1, fees: 0.1, headline: "h", instrument: "spot", funding: 0, commissions: 0.1,
+        tags: {origen: "noticia_fiable", story: "n1", grupo: "tipo_sentido:regulatorio:-1", grupo_nombre: "regulatorio · bajista"}};
+      S.results = {start_equity: 111.37, equity: 110.87, trades: [tr], by_strategy: [], by_window: [], by_coin: [],
+                   equity_curve: [[now - 7200e3, 111.37], [now, 110.87]], daily: []};
+      S.tab = "results"; renderAll(true);
+      return {kpis, eq, op, news, res: H.el("#resRows").innerHTML};""")
+    assert "111,37" not in r["kpis"] and "esperando la cartera del bot" in r["kpis"] and "Sin cartera del bot" in r["eq"]
+    assert "sin noticia que lo dispare" not in r["op"] and "Disparada por una noticia fiable" in r["op"]
+    assert 'data-story="n1"' in r["op"] and "Titular de la noticia" in r["op"]
+    assert 'data-story="nf-n1-btc"' in r["news"] and "Abrir la operación (paper)" in r["news"]
+    assert "grupo fiable regulatorio · bajista" in r["res"] and "tipo_sentido:regulatorio" not in r["res"]
+    _sin_null(r["op"], r["news"], r["res"])
