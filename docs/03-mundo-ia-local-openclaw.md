@@ -57,7 +57,7 @@ Usa tu llama.cpp y tu modelo Qwen3.5-9B de `M:\OneDrive\herramientas\IA local LL
 
 - **Agente «Analista de mercado»:**
   - Habla en español.
-  - Solo usa la skill `radar`, que lee el bot en modo solo lectura: precios, flujo minorista con percentil de 7 días, agenda, fuentes y noticias triadas.
+  - Solo usa la skill `radar`, que lee el bot en modo solo lectura: precios, flujo minorista con percentil de 7 días, agenda, fuentes y noticias triadas, y desde el 28-10-2026 también la estrategia activa (con lo que dice su backtest), el aprendizaje, los post-mortems, la evolución y sus propuestas, las fuentes vivas, la vigilancia y las noticias fiables (lista completa en `workspace/skills/radar/SKILL.md`). Tras actualizar el repositorio hay que volver a ejecutar `instalar.py` para copiar la skill y su lista de comandos permitidos.
   - No da órdenes de compra o venta, no ejecuta operaciones y no envía mensajes.
 - **Prueba real:**
   - A la pregunta «¿Cómo está el minorista en BTC y SOL y qué dato macro viene esta semana?» respondió con datos reales del bot en 20 s.
