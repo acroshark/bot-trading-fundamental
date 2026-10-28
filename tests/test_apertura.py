@@ -1688,7 +1688,8 @@ def test_v2_pasa_el_precio_de_okx_a_la_escala_de_binance():
     de OKX EU en USDC (unos 10 pb por debajo). Con la base del momento (mediana de los cierres frente a OKX visto a la
     vez, con 10 muestras como mínimo) el cruce del stop y la peor entrada se comparan en la misma escala."""
     bus = FakeBus()
-    eng = ap.OpeningEngine(bus, None, lambda c, w: {}, lambda *a: True, lambda: {}, params={"range_min": 5})
+    eng = ap.OpeningEngine(bus, None, lambda c, w: {}, lambda *a: True, lambda: {}, params={"range_min": 5},
+                           clock=lambda: T0 + 30 * MIN)
     assert not eng.impulso and eng.basis_of("BTC") is None
     now = T0 + 10 * MIN + 3000
     bar = lambda t, c: [t, c, c, c, c, 1.0, c, 0.5]
@@ -1705,6 +1706,7 @@ def test_v2_pasa_el_precio_de_okx_a_la_escala_de_binance():
     eng._basis_note("BTC", [bar(T0 + (9 + len(okx)) * MIN, 100.0)], t)
     assert len(eng.basis["BTC"]) == 13 and eng.basis_of("BTC") == pytest.approx(100 / 99.90)
     k = eng.basis_of("BTC")
+    assert eng.basis_of("BTC", T0 + 13 * 3600_000) is None                     # muestras de más de 12 h: no valen
     act = {"dir": 1, "price": 100.0, "stop_px": 99.95}
     bus.publish({"type": "market", "prices": {"BTC": 99.92}, "updated": {"BTC": t}})
     # Antes: 99,92 (USDC) < 99,95 (stop en USDT) y se daba por cruzado. En la escala de Binance es 100,02: no lo está.

@@ -587,7 +587,7 @@ class FuentesVivas:
                                     r[7] if r[7] in ("activa", "prueba") else "activa", r[8] or "",
                                     _loads(r[9]), _loads(r[10]))
         # source_health guarda (id, horas, hora de la última revisión): el inicio de la racha es esa hora menos las
-        # horas. Las filas de antes (horas de bot en marcha) dan un inicio más tardío: se cuenta de menos, nunca de más.
+        # horas. Las filas de antes (horas de bot en marcha) dan, en general, un inicio más tardío que el real.
         for i, h, ts in db.execute("SELECT id, horas, desde FROM source_health").fetchall():
             self.salud[i] = float(h)
             self.salud_inicio[i] = int(ts - float(h) * H)

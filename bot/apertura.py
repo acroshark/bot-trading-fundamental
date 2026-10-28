@@ -67,6 +67,7 @@ BASIS_N = 30                 # base Binance (USDT) / OKX EU (USDC): mediana de l
 BASIS_FRESH_MS = 15_000      # ... con el cierre y el precio de OKX de hace menos de 15 s
 BASIS_MIN_N = 10             # sin 10 muestras no se usa (con pocas, la mediana se come el movimiento del momento)
 BASIS_MAX = 0.005            # la base USDC/USDT es de unos 10 pb: una de más del 0,5 % es un error y no se usa
+BASIS_MAX_AGE_MS = 12 * H    # las muestras de hace más de 12 h no cuentan (la base se mueve despacio, pero se mueve)
 SRC = "Motor de aperturas"
 MODE = "Ruptura de apertura"          # uno de claude_agents.MODES
 STRATEGY = "motor-aperturas"
@@ -2374,11 +2375,13 @@ class OpeningEngine:
             if not xs or xs[-1][0] != bars[-1][T]:   # una muestra por vela
                 xs.append((bars[-1][T], bars[-1][C] / live))
 
-    def basis_of(self, coin: str) -> float | None:
+    def basis_of(self, coin: str, now: int | None = None) -> float | None:
         """Base Binance / OKX de la moneda (≈ 1,001 con USDC/USDT a 1,0010), o None con menos de BASIS_MIN_N muestras
-        o si se va más del 0,5 % de 1."""
-        xs = self.basis.get(coin)
-        if not xs or len(xs) < BASIS_MIN_N:
+        de las últimas 12 h o si se va más del 0,5 % de 1. Cada muestra lleva el movimiento de los segundos entre el
+        cierre y el precio de OKX: la mediana lo reduce, pero en una apertura con tendencia puede quedar algún pb."""
+        now = self.clock() if now is None else now
+        xs = [x for x in self.basis.get(coin) or () if now - x[0] <= BASIS_MAX_AGE_MS]
+        if len(xs) < BASIS_MIN_N:
             return None
         k = statistics.median(x[1] for x in xs)
         return k if abs(k - 1) <= BASIS_MAX else None
@@ -2443,7 +2446,7 @@ class OpeningEngine:
         px = act["price"]
         live = self._okx_live(coin, now)
         if live:
-            live *= self.basis_of(coin) or 1.0
+            live *= self.basis_of(coin, now) or 1.0
             if act["dir"] * (live - act["stop_px"]) <= 0:
                 return live
             px = max(px, live) if act["dir"] > 0 else min(px, live)
