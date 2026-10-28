@@ -374,6 +374,19 @@ lo dice. La tasa base de cada ventana sale de la historia de la cripto en esa ap
   captadas: política 479, empresas 255, tecnología 187 y elecciones 164, frente a 140 de cripto), entraba con las cuatro
   monedas y saturaba la cola de la IA local (hallazgo n.º 2).
 
+**Cola de la IA local** (hallazgos n.º 1 y 42, revisión del 28-10-2026 por la tarde): aun así triaba unas 570 noticias
+por hora de unas 4.300 relevantes y la cola seguía en 115-120. Ahora:
+- la cripto va siempre antes que la macro (`desk.CRIPTO_BONO`): con la cola llena lo que se pierde es macro, nunca cripto
+  (también se tría la cripto de hace horas);
+- la macro de hace horas (no fresca) se capta y se mide, pero ya no se tría: solo contaría si la cripto la reflejara en
+  los 60 min desde la captura, y ese movimiento ya pasó;
+- la macro de la región cuya bolsa abre en las próximas 3 h, o abrió hace menos de 4 h, pasa por delante de la de las
+  demás regiones (`desk.opening_bonus`);
+- `max_tokens` del triaje baja de 700 a 500 (salen unos 350) y el esquema limita el resumen a 160 caracteres y el motivo a
+  120, lo mismo que ya pedía el prompt;
+- los post-mortems tienen un hueco reservado: con triajes esperando, uno cada 10 min pasa por delante (n.º 15 y 4).
+Falta medirlo en el PC del usuario: que la cola baje de 120 y cuántas noticias por hora se tríen.
+
 **Reflejo en la cripto** (`bot/reflejo.py`): una noticia que no es de cripto (por la clase del prefiltro, nunca por los
 temas o el tipo que le ponga la IA local) y que el triaje dejó alcista o bajista solo cuenta si la cripto la confirma.
 Desde su captura, con la media de las cuatro monedas (o BTC si falta alguna), y con un umbral que es el mayor de 0,5 % y

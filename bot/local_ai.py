@@ -85,7 +85,7 @@ def _obj(props: dict) -> dict:
 
 # El orden importa: el modelo escribe primero la traducción y así entiende mejor el titular antes de puntuar.
 SCHEMA = _obj({
-    "resumen": {"type": "string", "maxLength": 200},
+    "resumen": {"type": "string", "maxLength": 160},   # lo que pide el prompt: menos tokens por triaje (n.º 1 y 42)
     "tipo": {"type": "string", "enum": TIPOS},
     "temas": {"type": "array", "items": {"type": "string", "enum": TEMAS}, "maxItems": MAX_TEMAS},
     "credibilidad": _NOTA,
@@ -100,7 +100,7 @@ SCHEMA = _obj({
         "bolsas": {"type": "array", "items": {"type": "string", "enum": BOLSAS}, "maxItems": len(BOLSAS)},
     }),
     "novedad": _NOTA,
-    "motivo": {"type": "string", "maxLength": 160},
+    "motivo": {"type": "string", "maxLength": 120},
     "importancia": {"type": "integer", "minimum": 0, "maximum": 10},
 })
 SYSTEM = (
@@ -267,6 +267,7 @@ def normalize_triage(raw: dict, title: str, coins: list[str] | None) -> dict:
 # Cola del triaje: con unos 7 s por titular (de 4 a 9 s; los globales con 14 activos, 7-7,5 s) salen unos 8 por
 # minuto, así que 120 en espera son unos 15 min de retraso como mucho.
 QUEUE_MAX = 120
+TRIAGE_MAX_TOKENS = 500   # antes 700 (n.º 1 y 42)
 TRIADAS_MAX = 5000   # historias ya triadas que se recuerdan (la mesa reenvía una si sube de estado: no se repite)
 RETRY_MIN_S, RETRY_MAX_S = 2, 60   # espera entre intentos de encender la IA local cuando no se puede
 SHARED_WAIT_S = 60   # con el servidor de la fábrica, espera máxima a que quede libre (la fábrica tiene prioridad)
@@ -605,7 +606,8 @@ class LocalAI:
     async def classify(self, title: str, src: str, tier: str, coins: list[str]) -> dict:
         """Puntúa un titular en el formato triage del contrato 2.7 (sin ms ni model, que los pone el worker)."""
         body = {
-            "model": config.LOCAL_AI_ALIAS, "temperature": 0, "max_tokens": 700,
+            # ~350 tokens por triaje (llama-server.log): 500 deja margen y corta antes una respuesta desbocada
+            "model": config.LOCAL_AI_ALIAS, "temperature": 0, "max_tokens": TRIAGE_MAX_TOKENS,
             "messages": [{"role": "system", "content": SYSTEM},
                          {"role": "user", "content": f"Titular: {title}\nFuente: {src} (nivel {tier})\n"
                                                      f"Monedas detectadas por reglas: {', '.join(coins) or 'ninguna'}"}],

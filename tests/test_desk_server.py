@@ -81,13 +81,19 @@ def test_contexto_region_idioma_y_temas(tmp_path):
     assert p["region"] == "es" and p["lang"] == "es" and p["fresh"] is False and "elecciones" in p["topics"]
     assert "Contexto" in p["filter"]["why"] and p["clase"] == "contexto" and ev["coins"] == []
     assert got == []   # política: se capta (y se mide), pero ya no gasta IA local
-    # Una macro de hace horas sí va a la IA local, detrás de lo fresco.
+    # Una macro de hace horas se capta, pero ya no gasta IA local (n.º 1 y 42): solo contaría si la cripto la reflejara
+    # en los 60 min desde la captura, y ese movimiento ya pasó
     assert desk.handle(Item("elpais", "y", "El BCE sube los tipos de interés medio punto", "https://elpais.com/b", t,
                             region="es", lang="es"), ES, warm=False) == "captured"
     [ev] = events(q)
-    assert ev["patch"]["clase"] == "macro" and ev["patch"]["macro"] is True and ev["coins"] == []
-    (args, kw), = got
-    assert args[0] == ev["story"] and kw["region"] == "es" and kw["prio"] < 6   # el contexto va detrás de lo fresco
+    assert ev["patch"]["clase"] == "macro" and ev["patch"]["macro"] is True and ev["coins"] == [] and got == []
+    # La misma macro, fresca, sí va; y la cripto de hace horas también (la cripto se tría siempre)
+    assert desk.handle(Item("elpais", "z", "Rusia lanza misiles contra Kiev", "https://elpais.com/c",
+                            now_ms(), region="es", lang="es"), ES, warm=False) == "captured"
+    assert desk.handle(Item("elpais", "w", "Bitcoin cae un 5 % tras el ataque", "https://elpais.com/d", t,
+                            region="es", lang="es"), ES, warm=False) == "captured"
+    (a1, k1), (a2, k2) = got
+    assert k1["region"] == "es" and k2["prio"] > k1["prio"]   # la cripto, aunque sea de hace horas, va antes
 
 
 def test_mismo_medio_por_otro_feed_no_confirma(tmp_path):
@@ -754,6 +760,11 @@ def test_arranque_temporales_en_m_gancho_del_bus_y_modulos_opcionales(tmp_path, 
     store.close()
 
 
+def ms_utc(*a) -> int:
+    from datetime import datetime, timezone
+    return int(datetime(*a, tzinfo=timezone.utc).timestamp() * 1000)
+
+
 def test_cripto_va_antes_que_la_macro_en_la_cola_de_la_ia_local():
     """Hallazgo n.º 7 de la revisión: la macro es unas 2,6 veces más numerosa; la cripto del mismo nivel y frescura va
     un punto por delante (la cola descarta lo menos prioritario y más antiguo)."""
@@ -763,10 +774,16 @@ def test_cripto_va_antes_que_la_macro_en_la_cola_de_la_ia_local():
     macro = classify("Russia launches missiles at Kyiv", "x", 60, lang="en")
     contexto = classify("Apple unveils new iPhone with AI features", "x", 60, lang="en")
     assert cripto.clase == "cripto" and macro.clase == "macro" and contexto.clase == "contexto"
+    lejos = ms_utc(2026, 10, 28, 19, 0)   # ninguna bolsa de Asia abre en 3 h ni abrió hace menos de 4 h
     for tier in ("T0", "T1", "T2"):
-        assert priority(cripto, tier) == priority(macro, tier) + 1 > priority(contexto, tier)
+        assert priority(cripto, tier) > priority(macro, "T0", "jp", lejos) + 1 > priority(contexto, tier)
     viejo = classify("Bitcoin ETF sees record inflows", "x", 5 * 3600, lang="en")   # de hace horas
-    assert priority(macro, "T2") > priority(viejo, "T0")   # lo fresco sigue mandando
+    # n.º 1 y 42: la cripto, siempre antes que la macro (con la cola llena se pierde macro, no cripto)
+    assert priority(viejo, "T2") > priority(macro, "T0", "jp", ms_utc(2026, 10, 28, 23, 30)) > priority(macro, "T0")
+    # la macro de la región cuya bolsa abre pronto (Tokio abre a las 00:00 UTC) o abrió hace poco, un punto por delante
+    assert priority(macro, "T1", "jp", ms_utc(2026, 10, 28, 22, 0)) == priority(macro, "T1", "jp", lejos) + 1
+    assert priority(macro, "T1", "jp", ms_utc(2026, 10, 29, 3, 0)) == priority(macro, "T1", "jp", lejos) + 1
+    assert priority(macro, "T1", "global", ms_utc(2026, 10, 28, 22, 0)) == priority(macro, "T1", "jp", lejos)
 
 
 def test_api_estado_resume_la_cripto_en_las_aperturas_y_no_el_indice(tmp_path):
