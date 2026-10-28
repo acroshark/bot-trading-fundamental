@@ -265,7 +265,7 @@ El motor en vivo (`bot/apertura.py`, modo «impulso», por defecto) opera la reg
 
 **Otros detalles:**
 - **Límites diarios:** 4 entradas y 2 % de riesgo. Las 4 monedas se mueven juntas y suelen disparar en la misma apertura.
-- **Comisión del perpetuo:** se supone la misma que la del contado (0,10 % por lado), la prudente. El funding sale de Binance escalado a 8 h con su periodo real (`funding_h`); no es el de OKX X-Perps EU, que está sin confirmar.
+- **Comisión del perpetuo:** en el paper, por defecto la misma que la del contado (0,10 % por lado), la prudente; la real de OKX X-Perps EU es 0,05 % taker (confirmada, ver la sección 21), que es la del laboratorio. El funding sale de Binance escalado a 8 h con su periodo real (`funding_h`); el de X-Perps es público y ronda el doble (sección 21).
 - **Noticias:** no dan la dirección. Filtran (`no_contra`: no se entra si van claramente en contra) y etiquetan cada operación (a favor, en contra, sin noticia) para medir si aportan.
 - **Variables de entorno:** `BOT_APERTURAS_ESTRATEGIA=ruptura` vuelve a la v2, y `BOT_IMPULSO_PARAMS` (JSON) cambia parámetros sobre el preset. Si la evolución ha aplicado una estrategia (`estrategia_activa.json`), manda esa.
 
@@ -642,3 +642,32 @@ la horquilla: para cobrar 3R el precio tiene que recorrer +4,5 % antes que −1,
 - La cartera de prueba de 100 € (111,37 USDC, 0 operaciones al reiniciar) mezcla regímenes desde este reinicio: lo dice
   el historial (`codigo-entrada-noticias-2026-10-28`). Para medirla limpia, empezar otra con
   `scripts/nueva_cartera_paper.py`.
+
+## 21. Comisiones de OKX EU y funding: lo confirmado y lo que decides tú (28-10-2026)
+
+Comprobado en las páginas oficiales de OKX (auditoría de datos externos del 27-28-10-2026, hallazgos n.º 56, 59 y 60).
+El paper y el motor operan a mercado, así que pagan la comisión de *taker*:
+
+| Instrumento | Maker | Taker (la que se usa) | Fuente oficial |
+|---|---|---|---|
+| Contado USDC **con la cuenta X-Perps desbloqueada** | 0,08 % | **0,10 %** | okx.com/help/eea-xperp-spot-trading-fees-comparison (19-10-2026) |
+| Contado USDC **sin ella** (nivel Regular desde el 22-04-2026) | 0,20 % | **0,35 %** | okx.com/help/notice-updates-to-okx-eea-trading-fees (08-04-2026) |
+| X-Perps (perpetuos EEE) | 0,02 % | **0,05 %** | okx.com/help/okx-x-perps-eea-fees-overview (01-09-2026) |
+
+- **En el bot (`bot/config.py`):** el contado usa 0,10 % por defecto (`BOT_OKX_XPERPS=1`), como hasta ahora. Con
+  `BOT_OKX_XPERPS=0` pasa al 0,35 %: el coste de ida y vuelta sube de 0,24 % a unos 0,74 % (con 2 pb de deslizamiento
+  por lado). `BOT_FEE_PCT` fija otro valor. Los perpetuos del paper pagan por defecto lo mismo que el contado (0,10 %,
+  prudente); con `BOT_FEE_PERP_PCT=0.05` pagan la real. El laboratorio ya usaba 0,05 % en los perpetuos (ahora con la
+  fuente oficial). **No ha cambiado ningún valor por defecto.**
+- **Qué cambia con 0,35 %:** la regla del 3 % neto se cumple igual con la horquilla de «6 diarias» (+4,5 % brutos, 3,76 %
+  netos) y de E2 (+9 %), pero una horquilla de 1,5 % × 2,2R (+3,3 %) dejaría 2,56 % y el paper la rechazaría. El
+  backtest y la cartera paper serían más caros: cada operación perdería 0,5 puntos más de ida y vuelta.
+- **Lo que tienes que confirmar en tu cuenta (n.º 56 y 57):** si en okx.com/en-eu te aparece «Unlock X-Perps» y la
+  tabla de 0,10 % en BTC-USDC. Si no, arranca el bot con `BOT_OKX_XPERPS=0` para que el paper cuente lo que pagarías.
+- **Funding (n.º 59), sin cambiar todavía:** el paper usa el de Binance USDT-M escalado a 8 h. El de OKX X-Perps se
+  publica en `eea.okx.com/api/v5/public/funding-rate?instId=<MONEDA>-USD_UM_XPERP-310404`, con el mismo horario (00, 08
+  y 16 UTC), y del 24-09 al 27-10-2026 rondó el doble (X-Perps 0,0068-0,0093 % por 8 h; Binance 0,0032-0,0037 %). Con el
+  de Binance, los cortos cobran de menos (prudente) y un largo en perpetuo pagaría de menos; el efecto ronda el 0,05 % en
+  las 65 h medias de E2 y es menor en las 13 h de «6 diarias». Pasar al de X-Perps cambia los resultados de la cartera
+  paper (a favor de los cortos), así que queda pendiente de tu decisión y de confirmar que X-Perps está activo en España.
+

@@ -69,7 +69,19 @@ CONTEXT_MAX_S = 6 * 3600     # entre FRESH_MAX_S y esto la noticia entra como «
 # Datos históricos y backtest
 HIST_DIR = DATA_DIR / "historico"
 BACKTEST_DIR = DATA_DIR / "backtest"
-FEE_PCT = 0.10               # comisión por lado en los backtests y el paper trading (OKX EU, base)
+# Comisiones de OKX EU por lado, taker (el paper y el motor operan a mercado), comprobadas el 27/28-10-2026 en las páginas
+# oficiales (docs/05, sección 21; hallazgos n.º 56 y 60):
+# - contado con la cuenta X-Perps desbloqueada: 0,10 % (maker 0,08 %), okx.com/help/eea-xperp-spot-trading-fees-comparison;
+# - contado sin ella (nivel Regular desde el 22-04-2026): 0,35 % (maker 0,20 %), okx.com/help/notice-updates-to-okx-eea-trading-fees;
+# - X-Perps: 0,05 % (maker 0,02 %), okx.com/help/okx-x-perps-eea-fees-overview.
+# Qué tabla tiene la cuenta del usuario está SIN CONFIRMAR (n.º 57): por defecto, la de X-Perps (0,10 %), como hasta
+# ahora. BOT_OKX_XPERPS=0 pasa el contado al 0,35 % (unos 0,74 % de ida y vuelta) y BOT_FEE_PCT fija otro valor.
+OKX_XPERPS = os.environ.get("BOT_OKX_XPERPS", "1") != "0"
+FEE_SPOT_XPERPS_PCT, FEE_SPOT_REGULAR_PCT, FEE_XPERPS_PCT = 0.10, 0.35, 0.05
+FEE_PCT = float(os.environ.get("BOT_FEE_PCT") or (FEE_SPOT_XPERPS_PCT if OKX_XPERPS else FEE_SPOT_REGULAR_PCT))
+# Comisión de los perpetuos en el paper: por defecto la del contado (0,10 %, prudente, como hasta ahora); la real de
+# X-Perps es 0,05 % (la del laboratorio). BOT_FEE_PERP_PCT=0.05 la pone (decisión del usuario).
+FEE_PERP_PCT = float(os.environ.get("BOT_FEE_PERP_PCT") or FEE_PCT)
 
 # Paper trading (dinero ficticio con precios reales de OKX EU)
 PAPER_EQUITY = float(os.environ.get("BOT_PAPER_EQUITY", "10000"))

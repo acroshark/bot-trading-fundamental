@@ -177,17 +177,23 @@ def market_of(window: str) -> str | None:
 
 # ---------------------------------------------------------------- salidas (funciones puras, también para el backtest)
 
-def cost_rt_pct() -> float:
+def fee_pct(inst: str | None = "spot") -> float:
+    """Comisión por lado en % (taker) del instrumento: la de los perpetuos (config.FEE_PERP_PCT) o la del contado
+    (config.FEE_PCT). Por defecto las dos son 0,10 % (n.º 56 y 60: ver config)."""
+    return config.FEE_PERP_PCT if inst == "perp" else config.FEE_PCT
+
+
+def cost_rt_pct(inst: str | None = "spot") -> float:
     """Coste de ida y vuelta en % del nominal: comisión y deslizamiento en cada lado (0,24 % con 0,10 % y 2 pb)."""
-    return 2 * (config.FEE_PCT + COST_SLIP_BPS / 100)
+    return 2 * (fee_pct(inst) + COST_SLIP_BPS / 100)
 
 
-def stop_loss_frac(side: str, stop_pct: float, exit_slip_bps: float) -> float:
+def stop_loss_frac(side: str, stop_pct: float, exit_slip_bps: float, inst: str | None = "spot") -> float:
     """Pérdida al saltar el stop inicial, por unidad de nominal: el recorrido hasta el stop, el deslizamiento al salir y
     las comisiones de entrada y salida. Un hueco que salte más allá del stop no se puede prever."""
     d = 1 if side == "long" else -1
     k = (1 - d * stop_pct / 100) * (1 - d * exit_slip_bps / 10000)   # precio de salida / precio de entrada
-    return abs(1 - k) + config.FEE_PCT / 100 * (1 + k)
+    return abs(1 - k) + fee_pct(inst) / 100 * (1 + k)
 
 
 def be_offset_pct() -> float:
@@ -579,7 +585,7 @@ class PaperBroker:
         risk, stop = _f(t.get("risk"), 0.0), _f(t.get("stopPct"), 0.0)
         if stop <= 0 or risk <= 0 or eq <= 0:
             return 0.0
-        loss = stop_loss_frac(t.get("side"), stop, self._exit_slip_bps(t.get("coin")))
+        loss = stop_loss_frac(t.get("side"), stop, self._exit_slip_bps(t.get("coin")), instrument_of(t))
         return min(eq * risk / 100 / loss, eq * MAX_NOTIONAL_PCT / 100)
 
     def _committed(self) -> float:
@@ -776,7 +782,7 @@ class PaperBroker:
             if not rr or rr < config.RULE_MIN_RR - 1e-9:
                 return (f"Regla del usuario: objetivo de {_n(rr)} R por debajo del mínimo de {_n(config.RULE_MIN_RR)} R"
                         if rr else "Regla del usuario: sin objetivo fijo (hace falta al menos 2R)")
-            net = stop * rr - cost_rt_pct()   # objetivo bruto menos el coste de ida y vuelta (comisiones y deslizamiento)
+            net = stop * rr - cost_rt_pct(instrument_of(t))   # objetivo bruto menos el coste de ida y vuelta
             if net < config.RULE_MIN_NET_PCT - 1e-9:
                 return (f"Regla del usuario: el objetivo (+{_n(stop * rr)} %) deja {_n(net)} % neto de costes, por debajo "
                         f"del {_n(config.RULE_MIN_NET_PCT)} %")
@@ -1080,7 +1086,8 @@ class PaperBroker:
         ref = prices[coin]
         eq = self.equity(prices)
         notional = self._notional(eq, t)
-        stop_loss = notional * stop_loss_frac(side, stop, self._exit_slip_bps(coin))   # pérdida prevista en el stop
+        inst = instrument_of(t)
+        stop_loss = notional * stop_loss_frac(side, stop, self._exit_slip_bps(coin), inst)   # pérdida prevista en el stop
         ex = {**(item.get("exec") or {}), "sent": now}
         self._event("order", "exec", story, coin, f"{_verb(side)} {_qty(coin, notional / ref)} {coin}",
                     f"{t.get('entryType') or 'A mercado'} · referencia {_px(ref)} {config.QUOTE} · "
@@ -1098,7 +1105,7 @@ class PaperBroker:
                "qty": qty, "entry": px, "sl": sl, "sl_initial": sl, "sl_kind": "inicial", "sl_pub": sl, "stop_pct": stop,
                "trail_pct": trail, "high_water": px, "last": px, "opened": now, "seen": now,
                "riskUsd": notional * stop / 100,
-               "notional": notional, "fee_open": notional * config.FEE_PCT / 100,
+               "notional": notional, "fee_open": notional * fee_pct(inst) / 100,
                "tp1": px + d * r * tp1R if tp1R else None, "tp2": px + d * r * tp2R if tp2R else None, "tp2R": tp2R,
                "be": False, "hold_until": hold_until, "hold_label": hold_label, "headline": item["headline"],
                "strategy": item["strategy"], "window": item["window"], "market": item["market"],
@@ -1109,7 +1116,7 @@ class PaperBroker:
                "realized": 0.0, "fees_exit": 0.0, "partials": []}
         if isinstance(t.get("tags"), dict):   # etiquetas del motor (noticia, apertura anterior…) para Resultados
             pos["tags"] = dict(t["tags"])
-        pos["instrument"] = inst = instrument_of(t)
+        pos["instrument"] = inst
         if inst == "perp":   # funding: cobrado (+) o pagado (−) en cada liquidación mientras siga abierta
             pos.update(funding=0.0, funding_n=0, funding_next=next_funding_ms(now),
                        funding_rate=self._funding_rate(coin))
@@ -1231,7 +1238,7 @@ class PaperBroker:
         if q >= p["qty"] * (1 - 1e-9):
             self._close(p, px, f"Objetivo ({_n(p.get('tp1R') or 0.0, 1)} R)", now)
             return True
-        fee = q * px * config.FEE_PCT / 100
+        fee = q * px * fee_pct(p.get("instrument")) / 100
         net = d * (px - p["entry"]) * q - fee
         p["qty"] -= q
         p["realized"] = p.get("realized", 0.0) + net
@@ -1255,7 +1262,7 @@ class PaperBroker:
         at = now if at is None else int(at)
         d, qty = self._dir(p["side"]), p["qty"]
         parts = p.get("partials") or []
-        comm = p["fee_open"] + p.get("fees_exit", 0.0) + qty * exit_px * config.FEE_PCT / 100
+        comm = p["fee_open"] + p.get("fees_exit", 0.0) + qty * exit_px * fee_pct(p.get("instrument")) / 100
         fund = p.get("funding", 0.0)
         fees = comm - fund   # el funding pagado suma a los costes y el cobrado resta (contrato 3.2)
         q_all = qty + sum(x["qty"] for x in parts)

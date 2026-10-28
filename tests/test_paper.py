@@ -1502,3 +1502,35 @@ def test_flujo_minorista_viejo_no_se_usa(env):
     env.market = lambda: {"prices": env.prices, "spread": env.spread, **m}
     env.broker = env.new()
     assert env.broker._funding_rate("BTC") is None and env.broker._funding_rate("ETH") == 0.02
+
+
+def test_comisiones_explicitas_y_configurables(monkeypatch):
+    """Hallazgos n.º 56 y 60: comisión del contado con cuenta X-Perps (0,10 %) o sin ella (0,35 %) y de los perpetuos
+    (por defecto la del contado, prudente; la real de X-Perps es 0,05 %), por variable de entorno."""
+    import importlib
+    try:
+        for env_, fee, perp in (({}, 0.10, 0.10), ({"BOT_OKX_XPERPS": "0"}, 0.35, 0.35),
+                                ({"BOT_FEE_PERP_PCT": "0.05"}, 0.10, 0.05), ({"BOT_FEE_PCT": "0.2"}, 0.2, 0.2)):
+            for k in ("BOT_OKX_XPERPS", "BOT_FEE_PCT", "BOT_FEE_PERP_PCT"):
+                monkeypatch.delenv(k, raising=False)
+            for k, v in env_.items():
+                monkeypatch.setenv(k, v)
+            cfg = importlib.reload(config)
+            assert (cfg.FEE_PCT, cfg.FEE_PERP_PCT) == (fee, perp), env_
+        assert config.FEE_SPOT_XPERPS_PCT == 0.10 and config.FEE_SPOT_REGULAR_PCT == 0.35 and config.FEE_XPERPS_PCT == 0.05
+    finally:
+        for k in ("BOT_OKX_XPERPS", "BOT_FEE_PCT", "BOT_FEE_PERP_PCT"):
+            monkeypatch.delenv(k, raising=False)
+        importlib.reload(config)
+    monkeypatch.setattr(config, "FEE_PCT", 0.35)
+    monkeypatch.setattr(config, "FEE_PERP_PCT", 0.05)
+    assert paper.fee_pct("spot") == 0.35 and paper.fee_pct("perp") == 0.05 and paper.fee_pct(None) == 0.35
+    assert paper.cost_rt_pct() == pytest.approx(0.74) and paper.cost_rt_pct("perp") == pytest.approx(0.14)
+
+
+def test_perpetuo_paga_su_comision(env, monkeypatch):
+    monkeypatch.setattr(config, "FEE_PERP_PCT", 0.05)
+    env.broker.submit(ticket(side="short", instrument="perp"), "n1")
+    env.broker.submit(ticket(coin="ETH"), "n2")
+    p1, p2 = env.broker.positions["n1"], env.broker.positions["n2"]
+    assert p1["fee_open"] == pytest.approx(p1["notional"] * 0.0005) and p2["fee_open"] == pytest.approx(p2["notional"] * 0.001)

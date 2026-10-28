@@ -1778,7 +1778,7 @@ def impulse_plan(d: int, entry: float, params: dict | None = None, funding_pct: 
     sl, R = p["sl_pct"], p["target_r"]
     stop, tgt = entry * (1 - d * sl / 100), entry * (1 + d * sl * R / 100)
     rr = (d * (tgt - entry)) / (d * (entry - stop))
-    gross, cost = d * (tgt - entry) / entry * 100, paper.cost_rt_pct()
+    gross, cost = d * (tgt - entry) / entry * 100, paper.cost_rt_pct(instrument)
     fund = expected_funding_pct(d, funding_pct, p["avg_hold_h"]) if instrument == "perp" else 0.0
     net = gross - cost - fund
     inst = "perpetuo" if instrument == "perp" else "contado"
