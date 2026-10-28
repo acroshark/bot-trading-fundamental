@@ -511,7 +511,8 @@ precio de esa moneda se mueva a su favor al menos el umbral del reflejo (el mayo
 0,5 % provisional y se recalcula) en los 60 min siguientes al triaje. Si lo hace, entra por el mismo camino que el motor
 (riesgo, aprobación y paper): stop 1,5 %, objetivo 3R (+4,5 %, ≥ 3 % neto), como mucho 24 h, largos al contado y cortos en
 perpetuo, 0,5 % de riesgo. Si no, caduca; una confirmación vista tarde no se persigue. Respeta una posición por moneda y
-los topes del día, **compartidos** con el motor (cuentan todas las entradas del paper del día de Madrid). Sin grupos que
+los topes del día, **compartidos** con el motor (cuentan todas las entradas del paper del día de Madrid): los del preset
+que tenga en marcha (6 entradas y 3 % con «6 diarias», 4 y 2 % con E2), nunca más de 6 y 3 %. Sin grupos que
 pasen la puerta no entra nunca: las noticias esperan en la cola hasta que ya no se pueden confirmar a tiempo.
 `BOT_ENTRADA_NOTICIAS=0` la apaga. Sus operaciones (`origen` `noticia_fiable`) no cuentan como del campeón E2 en la
 evolución, y la web las separa en Resultados.

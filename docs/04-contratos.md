@@ -84,7 +84,9 @@ def closes_before_open(a, b, day) -> bool;  def ordered_by_close(day) -> list[Ma
 #   fiable_para(medio, feed, tipo, dir) -> dict del grupo FIABLE que pasa la puerta para operar (opera) o None;
 #   monedas_de(titular, triaje, clase, reflejo) -> (monedas, motivo); hay_fiables() (¿alguno opera?), ultimo(),
 #   usar(msg). Los usan apertura (veto de «6 diarias») y entrada_noticias
-# bot/entrada_noticias.py  EntradaNoticias(bus, store, submit, get_portfolio, bars=CacheBars(live).get)
+# bot/entrada_noticias.py  EntradaNoticias(bus, store, submit, get_portfolio, bars=CacheBars(live).get, get_motor)
+#   get_motor() → parámetros del motor en marcha: los topes del día compartidos son los de su preset (E2: 4 y 2 %;
+#   «6 diarias»: 6 y 3 %), nunca más de 6 entradas y 3 % de riesgo
 #   observe(evento): gancho síncrono del bus → eventos «entrada_noticia» (2.16) y entradas en el paper («strategy» →
 #   riesgo → aprobación → paper, como el motor). BOT_ENTRADA_NOTICIAS=0 la apaga
 # bot/apertura.py       paper_day_entries(cartera, ahora) -> {story: riesgo %}: TODAS las entradas del paper del día de

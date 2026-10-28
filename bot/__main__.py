@@ -161,7 +161,8 @@ async def main() -> None:
         entrada = None
         if ENTRADA_NOTICIAS:
             entrada = optional("La entrada por noticia fiable", lambda: EntradaNoticias(
-                bus, store, broker.submit, broker.portfolio, bars=CacheBars(live=lambda c: vigil.bars.get(c)).get))
+                bus, store, broker.submit, broker.portfolio, bars=CacheBars(live=lambda c: vigil.bars.get(c)).get,
+                get_motor=lambda: getattr(openings, "p", None)))
         if entrada is not None:
             observe_bus(bus, entrada.observe)
         # Reacción: la cripto en cada apertura de bolsa (cripto_aperturas); la historia, en un hilo y una vez al día.

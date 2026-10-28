@@ -44,14 +44,15 @@ def bars_fn(now, series):
     return get
 
 
-def mod(tmp_path, now, series=None, pf=None, sent=None, prices=None, enabled=True):
+def mod(tmp_path, now, series=None, pf=None, sent=None, prices=None, enabled=True, motor=None):
     store = Store(tmp_path / "bot.db")
     bus = Bus(store)
     pf = {"positions": [], "pending": [], "scheduled": [], "closed": [], "equity": 111.37} if pf is None else pf
     sent = [] if sent is None else sent
     bus.state["market"] = {"prices": prices or {"BTC": 100.6, "ETH": 99.4}, "updated": {}, "flow": {}}
     m = en.EntradaNoticias(bus, store, lambda *a: sent.append(a) or True, lambda: pf,
-                           bars=bars_fn(now, series or {"BTC": velas()}), clock=lambda: now[0], enabled=enabled)
+                           bars=bars_fn(now, series or {"BTC": velas()}), clock=lambda: now[0], enabled=enabled,
+                           get_motor=(lambda: motor) if motor is not None else None)
     publish = bus.publish
 
     def publish_and_observe(msg):   # como __main__.observe_bus
@@ -144,8 +145,26 @@ async def test_vetos_una_por_moneda_y_topes_compartidos(tmp_path):
            "pending": [{"story": "nf-n8-xrp", "coin": "XRP"}], "closed": [], "equity": 111.37}
     assert ap.paper_day_entries(pf4, now[0]) == {"nf-n9-sol": round(0.55 / 111.37 * 100, 4),
                                                  "nf-n8-xrp": config.RISK_PER_TRADE_PCT}
-    for s in (store, store2, store3):
+    # Con el motor en E2 (4 entradas y 2 % al día) los topes compartidos son los suyos, no los de «6 diarias»
+    pf5 = {**pf2, "closed": closed[:4]}
+    m5, bus5, store5, sent5 = mod(tmp_path / "e", now, pf=pf5, motor=ap.IMPULSO)
+    noticia(bus5)
+    await m5.step()
+    assert not sent5 and "tope de 4 entradas" in eventos(bus5, store5)[-1]["patch"]["entrada_noticia"]["motivo"]
+    # ... y con «6 diarias», esas 4 dejan sitio
+    m6, bus6, store6, sent6 = mod(tmp_path / "f", now, pf=pf5, motor=ap.SEIS)
+    noticia(bus6)
+    assert await m6.step() == 1 and len(sent6) == 1
+    for s in (store, store2, store3, store5, store6):
         s.close()
+
+
+def test_topes_del_dia_son_los_del_motor_y_nunca_mas_de_6_y_3():
+    assert en.topes_dia(None) == (6, 3.0) and en.topes_dia({}) == (6, 3.0)
+    assert en.topes_dia(ap.IMPULSO) == (4, 2.0) and en.topes_dia(ap.SEIS) == (6, 3.0)
+    assert en.topes_dia({"max_day_entries": 10, "max_day_risk_pct": 5.0}) == (6, 3.0)
+    assert "tope de 4" in en.limites_dia({str(k): 0.1 for k in range(4)}, 0.5, 4, 2.0)
+    assert "riesgo del día" in en.limites_dia({"a": 1.0, "b": 0.6}, 0.5, 4, 2.0)
 
 
 async def test_caduca_sin_movimiento_y_no_persigue_tarde(tmp_path):
@@ -187,6 +206,7 @@ async def test_sin_grupos_fiables_o_apagada_no_hace_nada(tmp_path):
     assert await m3.step() == 0 and not sent3 and not eventos(bus3, store3)
     for s in (store, store2, store3):
         s.close()
+
 
 
 async def test_macro_espera_al_reflejo_y_vale_para_las_cuatro(tmp_path):
