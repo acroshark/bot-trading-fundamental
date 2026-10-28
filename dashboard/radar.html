@@ -536,6 +536,7 @@ body.world-mode{background:var(--w-bg)}
 .wlist i{width:8px;height:8px;border-radius:50%;margin-top:4px;background:rgb(var(--c))}
 .wlist .t{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .wlist .t small{color:var(--w-muted);margin-left:6px}
+.pmlist{list-style:none;margin:0;padding:0;display:grid;gap:8px}.pmlist li{border-bottom:1px solid var(--line);padding:6px 0;display:grid;gap:4px}
 .wpend{border:1px solid var(--w-warn);border-radius:6px;padding:8px 10px;display:grid;gap:6px;margin-bottom:6px;background:rgba(255,195,90,.06)}
 .wpend .btns .btn{background:transparent;color:var(--w-ink)}
 .wpend .btns .btn.ok{background:var(--w-good);border-color:var(--w-good);color:#06101f}
@@ -849,6 +850,8 @@ details.evo-more p{margin:6px 0 0}
     <div class="panel"><div class="panel-h"><h2>Línea de tiempo</h2><p>Todo lo que ha cambiado: medios añadidos, silenciados, retirados o restaurados, pesos, estrategia e informes. Solo se añade: nada se borra.</p></div><div class="filters" id="evoFilters"></div><div class="panel-b" id="evoTimeline"></div></div>
     <div class="panel" id="fiabPanel"><div class="panel-h"><h2>Noticias fiables</h2><p>Grupos de noticias (medio, canal, tipo y sentido, medio y sentido) que aciertan el sentido a 4 h al menos un 60 % de las veces, de forma constante día a día, con su cuenta frente al azar. Solo los que además pasan la puerta para operar vetan entradas en contra y abren entradas por noticia.</p></div><div class="panel-b" id="fiabHead"></div><div class="filters" id="fiabF"></div><div class="tbl-wrap" id="fiabTbl"></div></div>
     <div class="panel"><div class="panel-h"><h2>Medios: qué acierta y qué es ruido</h2><p>Acierto ajustado al mercado (lo que acertaría una moneda al aire con la tendencia del día no cuenta) y contraído hacia el 50 % con poca muestra. Pulsa un medio para verlo por horizonte.</p></div><div class="panel-b" id="evoMediaHead"></div><div class="filters" id="evoMediaF"></div><div class="tbl-wrap" id="evoMedia"></div><div class="panel-b" id="evoMedio" hidden></div></div>
+    <div class="panel"><div class="panel-h"><h2>Acierto por nivel, región, idioma, tipo, ventana, fase, rol y moneda</h2><p>Acierto ajustado al mercado a 1-4 h, con su intervalo del 90 % y los casos independientes (bloques sin solape): cien noticias de las mismas horas no valen como cien pruebas. Solo mide, no opera.</p></div><div class="filters" id="aprDimF"></div><div class="tbl-wrap" id="aprDim"></div></div>
+    <div class="panel"><div class="panel-h"><h2>Post-mortems: por qué ganó o perdió cada operación</h2><p>Cada operación cerrada (paper y vigilancia) con sus hechos, sin IA, y la explicación de la IA local cuando la escribe (en baja prioridad, con un hueco reservado aunque la cola de triaje esté llena). Es explicación, nunca decisión.</p></div><div class="panel-b" id="evoPM"></div></div>
     <div class="two">
       <div class="panel"><div class="panel-h"><h2>Noticias que mejor funcionaron</h2><p>Dirección prevista × movimiento a +4 h, últimos 30 días.</p></div><div class="panel-b" id="evoBest"></div></div>
       <div class="panel"><div class="panel-h"><h2>Noticias que peor funcionaron</h2><p>Las que más fallaron, con la explicación de por qué.</p></div><div class="panel-b" id="evoWorst"></div></div>
@@ -1243,7 +1246,7 @@ const S = {
   approval:"veto", execStop:false, source:"sim", ws:null, dirty:true,
   // Evolución: mensajes «evolucion», «aprendizaje» y «fuentes_vivas» más lo que llega por /api/... (evoRev cambia al llegar algo)
   evo:null, apr:null, fv:null, fvList:null, fvCand:null, evoHist:null, evoInf:null, evoNews:null, evoMedio:null, evoSel:null,
-  evoF:{tipo:"", origen:"", dias:30}, evoMF:"todos", evoRev:0, evoDemo:false,
+  evoF:{tipo:"", origen:"", dias:30}, evoMF:"todos", aprDim:"nivel", evoRev:0, evoDemo:false,
   fiables:null, fiabF:"todos"   // último cálculo de «noticias_fiables» (bot/fiables.py) y filtro de su tabla
 };
 for (const c of COINS){ S.prices[c]=INFO[c].price; S.p0[c]=INFO[c].price; S.hist[c]=[]; }
@@ -3026,7 +3029,7 @@ function renderEvo(force){
   if (E){ safe(() => renderEvoHead(E)); safe(() => renderEvoProps(E)); safe(() => renderEvoChamp(E)); safe(() => renderEvoAsp(E)); }
   else { putH($("#evoCtl"), ""); putH($("#evoProps"), ""); putH($("#evoChamp"), ""); putH($("#evoAsp"), "");
     putH($("#evoHead"), `<p class="note">${S.live ? "La evolución aún no ha publicado su estado: arranca con el bot y calcula cada 10 min (BOT_EVOLUCION=0 la apaga)." : "Sin datos."}</p>`); }
-  safe(renderEvoTimeline); safe(renderFiables); safe(renderEvoMediaHead); safe(renderEvoMedia); safe(renderEvoMedio); safe(renderEvoNews); safe(renderEvoCand); safe(() => renderEvoReport(E));
+  safe(renderEvoTimeline); safe(renderFiables); safe(renderEvoMediaHead); safe(renderEvoMedia); safe(renderEvoMedio); safe(renderAprDim); safe(renderEvoPM); safe(renderEvoNews); safe(renderEvoCand); safe(() => renderEvoReport(E));
 }
 // Mensajes del bus
 function onEvo(m){
@@ -3159,7 +3162,31 @@ function evoClick(t){   // true si el clic era de la pestaña Evolución
   const dd = t.closest("[data-evo-dias]"); if (dd){ S.evoF.dias = +dd.dataset.evoDias || 0; loadEvo("hist"); evoBump(); return true; }
   const mf = t.closest("[data-evo-mf]"); if (mf){ S.evoMF = MF.some(x => x[0]===mf.dataset.evoMf) ? mf.dataset.evoMf : "todos"; evoBump(); return true; }
   const fb = t.closest("[data-fiab-f]"); if (fb){ S.fiabF = FIAB_F.some(x => x[0]===fb.dataset.fiabF) ? fb.dataset.fiabF : "todos"; evoBump(); return true; }
+  const ad = t.closest("[data-apr-dim]"); if (ad){ S.aprDim = APR_DIMS.some(x => x[0]===ad.dataset.aprDim) ? ad.dataset.aprDim : "nivel"; evoBump(); return true; }
   return false;
+}
+// Acierto por dimensión (n.º 21): por_nivel, por_region… del mensaje «aprendizaje» (los 12 grupos con más casos de cada una)
+const APR_DIMS = [["nivel","Nivel"],["region","Región"],["idioma","Idioma"],["tipo","Tipo de noticia"],["ventana","Ventana"],["fase","Fase"],["rol","Primera o confirmación"],["moneda","Moneda"]];
+function renderAprDim(){
+  const A = isObj(S.apr) ? S.apr : null, k = APR_DIMS.some(x => x[0]===S.aprDim) ? S.aprDim : "nivel";
+  putH($("#aprDimF"), APR_DIMS.map(([id, l]) => `<button type="button" class="chip" data-apr-dim="${id}" aria-pressed="${k===id}">${l}</button>`).join(""));
+  const rows = A ? objs(A["por_" + k]) : [];
+  if (!rows.length){ putH($("#aprDim"), `<p class="note" style="padding:0 14px 10px">${A ? "Aún sin casos medidos para esta dimensión." : S.live ? "El aprendizaje aún no ha publicado su estado." : "Sin datos."}</p>`); return; }
+  const P = isObj(A.params) ? A.params : {}, minC = numOf(P.min_casos), minD = numOf(P.min_dias);
+  putH($("#aprDim"), `<table><thead><tr><th class="wrapc">${esc((APR_DIMS.find(x => x[0]===k) || [])[1] || k)}</th><th>Acierto ajustado (IC 90 %)</th><th class="r">Bruto</th><th class="r">Base del día</th><th class="r">Casos</th><th class="r">Independientes</th><th class="r">Días</th></tr></thead><tbody>${rows.map(r => {
+      const ic = Array.isArray(r.ic90) && r.ic90.length===2 && r.ic90.every(isNum) ? ` <span class="note">(${p01(r.ic90[0])}–${p01(r.ic90[1])})</span>` : "";
+      const poco = (isNum(minC) && isNum(r.independientes) && r.independientes < minC) || (isNum(minD) && isNum(r.dias) && r.dias < minD);
+      return `<tr><td class="wrapc"><b>${esc(String(r.clave ?? "–"))}</b>${poco ? ' <span class="pill muted">poca muestra</span>' : ""}</td><td>${p01(r.acierto)}${ic}</td><td class="r mono">${p01(r.bruto)}</td><td class="r mono">${p01(r.base)}</td><td class="r mono">${vigN(r.casos)}</td><td class="r mono">${vigN(r.independientes)}</td><td class="r mono">${vigN(r.dias)}</td></tr>`; }).join("")}</tbody></table>
+    <p class="note" style="padding:0 14px 10px">Con poca muestra (menos de ${isNum(minC) ? vigN(minC) : "los"} casos independientes o ${isNum(minD) ? vigN(minD) : "pocos"} días) un acierto alto o bajo puede ser casualidad: no se separa del 50 % hasta que el intervalo deja fuera el 50 %.</p>`);
+}
+// Post-mortems (n.º 16): los últimos que publica /api/aprendizaje (20), con su resumen sin IA y el texto de la IA local
+const PM_EST = {hecho:["good","Explicado"], pendiente:["muted","Pendiente de la IA local"], error:["bad","La IA local falló"]};
+function renderEvoPM(){
+  const A = isObj(S.apr) ? S.apr : null, pms = A ? objs(A.postmortems) : [];
+  if (!pms.length){ putH($("#evoPM"), `<p class="note">${A && Array.isArray(A.postmortems) ? "Aún no hay operaciones cerradas que explicar." : S.live ? "Sin post-mortems todavía (salen en /api/aprendizaje al cerrarse cada operación)." : "Sin datos."}</p>`); return; }
+  putH($("#evoPM"), `<ul class="pmlist">${pms.slice(0, 20).map(p => { const e = PM_EST[p.estado] || ["muted", String(p.estado || "sin estado")];
+      const R = numOf(p.R), story = strOk(p.story), org = p.origen==="vigilancia" ? "virtual (vigilancia)" : "paper";
+      return `<li${story && p.origen!=="vigilancia" ? ` data-story="${esc(story)}" style="cursor:pointer"` : ""}><div><b>${esc(String(p.moneda || "–"))}</b> · ${esc(org)} · ${okT(p.cerrada) ? vigTime(p.cerrada) : "–"} · <span class="${isNum(R) && R>=0 ? "pos" : "neg"}">${isNum(R) ? (R>=0 ? "+" : "") + nf(R, 2) + " R" : "–"}</span> <span class="pill ${e[0]}">${esc(e[1])}</span></div>${p.resumen ? `<div class="note">${esc(String(p.resumen))}</div>` : ""}${p.texto ? `<div class="why">${esc(String(p.texto))}</div><span class="llm">${esc(String(p.modelo || "IA local"))} · explicación, no decisión</span>` : ""}</li>`; }).join("")}</ul>`);
 }
 // ---------- Demostración: un estado de EJEMPLO de la pestaña Evolución (inventado y rotulado como tal en cada panel) ----------
 // Solo los nombres y cifras de backtest de las estrategias del laboratorio (labData, si está incrustado) son reales.

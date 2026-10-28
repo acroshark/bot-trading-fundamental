@@ -1986,3 +1986,27 @@ def test_contadores_del_cazador_con_los_totales_reales():
       H.recv(ev("captured", "d", {headline: "w"}));
       return {...a, cap2: S.counts.captured};""")
     assert r == {"cap": 1420, "fil": 2462, "cap2": 1421}
+
+
+def test_evolucion_ensena_postmortems_y_acierto_por_dimension():
+    """Hallazgos n.º 16 y 21: la web pinta los post-mortems (resumen sin IA, texto de la IA local y estado) y el acierto
+    por nivel, región, idioma, tipo, ventana, fase, rol y moneda con su intervalo y los casos independientes."""
+    r = run("""H.open(); reset();
+      H.recv({type: "aprendizaje", ts: now, estado: "ok", params: {min_casos: 20, min_dias: 10},
+        por_nivel: [{clave: "T1", casos: 400, independientes: 60, dias: 12, acierto: 0.522, ic90: [0.47, 0.57], bruto: 0.41, base: 0.39},
+                    {clave: "T3 <x>", casos: 30, independientes: 5, dias: 2, acierto: 0.61, ic90: [0.4, 0.8], bruto: 0.5, base: 0.4}],
+        por_moneda: [{clave: "BTC", casos: 900, independientes: 80, dias: 14, acierto: 0.49, ic90: [0.45, 0.53], bruto: 0.4, base: 0.41}],
+        postmortems: [{id: "p:t1", origen: "paper", story: "a-europa-btc-1", moneda: "BTC", cerrada: now - 3600e3, R: -1.04,
+                       resumen: "Stop a las 11:02 <b>", texto: null, estado: "pendiente", modelo: null, hechos: {}},
+                      {id: "v:9", origen: "vigilancia", story: "v9", moneda: "SOL", cerrada: now - 7200e3, R: 3.0,
+                       resumen: "Objetivo", texto: "Ganó porque el impulso siguió.", estado: "hecho", modelo: "Qwen3.5 9B (local)", hechos: {}}]});
+      S.tab = "evo"; renderEvo(true);
+      const nivel = H.el("#aprDim").innerHTML, chips = H.el("#aprDimF").innerHTML, pm = H.el("#evoPM").innerHTML;
+      S.aprDim = "moneda"; renderEvo(true);
+      return {nivel, chips, pm, moneda: H.el("#aprDim").innerHTML};""")
+    assert "T1" in r["nivel"] and "52 %" in r["nivel"] and "(47 %–57 %)" in r["nivel"] and "T3 &lt;x&gt;" in r["nivel"]
+    assert "poca muestra" in r["nivel"] and 'data-apr-dim="region"' in r["chips"] and "BTC" in r["moneda"]
+    assert "Stop a las 11:02 &lt;b&gt;" in r["pm"] and "Pendiente de la IA local" in r["pm"] and "-1,04 R" in r["pm"]
+    assert "Ganó porque el impulso siguió." in r["pm"] and "Explicado" in r["pm"] and "virtual (vigilancia)" in r["pm"]
+    assert 'data-story="a-europa-btc-1"' in r["pm"] and 'data-story="v9"' not in r["pm"]
+    _sin_null(r["nivel"], r["pm"], r["moneda"])
