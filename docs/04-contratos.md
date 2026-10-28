@@ -156,6 +156,11 @@ se reprograman repartidos (antes tardaban hasta 30 min en volver).
   "trend": "alcista|bajista|lateral", "venue": "OKX EU (libro) + Binance (operaciones)"}}}
 ```
 - `imbalance` = (volumen comprador − volumen vendedor) / suma, en los 5 primeros niveles del libro de OKX EU. Va de −1 a 1.
+  Es una media exponencial de ~1 min (`trend.IMB_TAU_S`): el libro de BTC en OKX EU es tan fino que el de un instante
+  pasaba de +0,88 a −0,94 en 20 s (hallazgo n.º 12). El del instante va en `imbalance_inst`.
+- `price` es el último precio de las operaciones de Binance en USDT: solo de referencia (va unos 10 pb por encima del
+  USDC por la base USDC/USDT). El precio con que opera el paper es el de OKX EU en USDC (`market.prices`), el único que
+  enseña la web.
 - `cvd_*` es la diferencia entre compras y ventas agresivas, en unidades de la moneda. Sale de las operaciones al contado de Binance (`wss://data-stream.binance.vision/stream?streams=btcusdt@aggTrade/...`).
 - `vol_ratio` es el volumen de los últimos 5 minutos frente a la media de 5 minutos de la última hora.
 - Se publica cada 5 s.

@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import math
 import time
 from collections import deque
 from datetime import date, datetime, timedelta, timezone
@@ -184,6 +185,21 @@ def market_state(m: regions.Market, now: datetime, last_candle_ms: int | None = 
 
 
 # ---------------------------------------------------------------- libro y operaciones (cripto)
+
+IMB_TAU_S = 60.0   # el desequilibrio que se publica es una media de ~1 min (n.º 12: el de un instante es ruido en OKX EU)
+
+
+def smooth_imbalance(prev_avg: float | None, prev_ms: int | None, inst: float | None, now: int,
+                     tau_s: float = IMB_TAU_S) -> float | None:
+    """Media exponencial del desequilibrio con constante de tiempo tau_s: el libro de BTC en OKX EU es tan fino que
+    pasaba de +0,88 a −0,94 en 20 s (hallazgo n.º 12)."""
+    if inst is None:
+        return prev_avg
+    if prev_avg is None or prev_ms is None:
+        return inst
+    a = 1 - math.exp(-max(0.0, now - prev_ms) / 1000 / tau_s)
+    return prev_avg + a * (inst - prev_avg)
+
 
 def imbalance(book: dict) -> dict:
     """books5 de OKX (un elemento de "data", o el mensaje entero) → desequilibrio de los 5 primeros niveles."""
@@ -469,7 +485,10 @@ class Trend:
                             raise ConnectionError(d.get("msg") or "error de suscripción")
                         coin = ((d.get("arg") or {}).get("instId") or "").split("-")[0]
                         for book in d.get("data") or []:
-                            self.books[coin] = {**imbalance(book), "rx": now_ms()}
+                            prev, now = self.books.get(coin) or {}, now_ms()
+                            row = imbalance(book)
+                            row["imb_avg"] = smooth_imbalance(prev.get("imb_avg"), prev.get("rx"), row["imbalance"], now)
+                            self.books[coin] = {**row, "rx": now}
                             self.ok["books"], self.err["books"], wait = True, "", 2
             except asyncio.CancelledError:
                 raise
@@ -532,6 +551,10 @@ class Trend:
             row = {"imbalance": None, "bid_vol": None, "ask_vol": None, "spread_bps": None}
             if bk and now - bk["rx"] <= STALE_BOOK_S * 1000:
                 row.update({k: bk[k] for k in row})
+                # el que se usa (predicciones y web) es la media de ~1 min; el del instante va aparte (n.º 12)
+                row["imbalance_inst"] = bk.get("imbalance")
+                if bk.get("imb_avg") is not None:
+                    row["imbalance"] = round(bk["imb_avg"], 4)
             row.update(self.windows[c].metrics(now))
             row["venue"] = VENUE
             coins[c] = row
