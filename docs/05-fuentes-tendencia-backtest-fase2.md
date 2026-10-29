@@ -928,3 +928,96 @@ fuera de muestra, ≈ +0,09 % de la cuenta por jornada con los costes de hoy; si
 negativo. Con 100 € de prueba, eso es céntimos por semana. No es una ventaja demostrada: se mide en paper si el usuario la
 activa. La única forma honesta de «sacar rendimiento» con estas cifras es operar menos y solo cuando hay tendencia, no
 más: cada operación cuesta 0,07-0,12 R, gane o pierda.
+
+## 25. 6 diarias 4R en la cartera (29-10-2026)
+
+**Qué es.** La n.º 1 del ranking de estrategias (`bot/ranking.py`: la fila `salidas_motor:F0 stop 2 % · objetivo 4R ·
+tope 7d`, +0,152 % de la cuenta por jornada fuera de muestra), ahora preset del motor: `apertura.PRESETS["seis4r"]`,
+«6 diarias 4R: stop 2 %, objetivo 4R, hasta 7 días», preparada para medirla en la cartera de prueba en lugar de la
+Ruptura V3. Se activa con `scripts/activar_estrategia.py --preset seis4r` (con el bot parado y el vigilante en pausa); el
+apunte en la evolución lleva sus cifras de fuera y de dentro y dice que es frágil. `--preset ruptura3` vuelve a la de antes.
+- **Entradas de «6 diarias» tal cual:** impulso de los 15 primeros min de cada apertura en su sentido (cualquier
+  movimiento ≠ 0, sin filtros de volumen, volatilidad ni BTC), entrada a +15 min, las 5 aperturas y las 4 monedas,
+  largos al contado y cortos en perpetuo, una posición por moneda, ≤ 6 entradas y 3 % de riesgo por día de Madrid
+  (0,5 % por operación) y el veto de una noticia fiable en contra (sin grupos que pasen su puerta no veta nada; el
+  28-10-2026 no pasaba ninguno).
+- **Salida, horquilla pura:** stop 2 % y objetivo 4R (+8 %: 7,76 % neto al contado con los costes de hoy; un corto en
+  perpetuo que pague 0,03 %/8 h de funding en las 35 h de media deja 7,73 %). Sin parcial, sin cerrojo, sin break-even
+  ni stop dinámico: o gana 4R o pierde 1R. Si a los 7 días no ha tocado ninguno de los dos, se cierra con lo que haya (la
+  excepción conocida del cierre por tiempo: 62 de 757 operaciones fuera de muestra; 42 de las 213 ganadoras de fuera
+  ganaron menos de 2R por eso). `avg_hold_h` 35: la duración media de la réplica (34,5 h en 3 años).
+- Con las reglas del usuario (`BOT_USER_RULES=1`) nada baja de su mínimo: un stop por debajo del 1,5 % o un objetivo
+  por debajo de 2R suben con aviso, el plan no sale si no deja ≥ 3 % neto y el paper lo rechaza
+  (`tests/test_apertura.py`, `test_*seis4r*`).
+
+**La réplica con el propio motor reproduce la medida operación a operación** (`scripts/replica_seis4r.py`; la
+comparación, los vetos, los perfiles y las operaciones en `BACKTEST_DIR/controles/replica_seis4r.json` y `.txt`; el
+resumen de la web en `BACKTEST_DIR/seis4r_resumen.json`). `apertura.ImpulseRun` con el preset da las mismas 14.984
+entradas candidatas que «6 diarias» en las 3.766 aperturas (28-10-2023 → 20-10-2026, sin la sesión especial de São
+Paulo). Con `impulse_plan` y `simulate_plan` (la gestión del paper) y el libro de `salidas_motor.py` (una posición por
+moneda, topes del día de Madrid, pausa por la pérdida del día y controles del paper), las **2.319 de 2.319** operaciones
+son iguales a las de la variante de `controles/salidas_motor.py` (moneda, lado, señal, entrada, salida, motivo, resultado,
+funding, tamaño e instrumento), con los mismos vetos (moneda ocupada 12.262, tope de 6 del día 319, paper detenido por la
+pérdida del día 84) y los mismos 12 días con el paper detenido. La referencia, rehecha con el código de
+`salidas_motor.py`, da exactamente las cifras de `salidas_motor.json`. Si algo dejara de coincidir, el script no
+escribe el resumen.
+
+**Cifras (3 años, 0,10 % por lado también en los perpetuos y 2 pb, funding real de Binance; corte el 16-08-2025):**
+
+| | Dentro de muestra | Fuera de muestra |
+|---|---|---|
+| Operaciones (por jornada) | 1.562 (3,34) | 757 (2,47) |
+| R medio con funding (sin funding) | **−0,041** (−0,048) | **+0,123** (+0,121) |
+| Ganadoras | 22,7 % | 28,1 % |
+| Antes de costes (sin comisión, deslizamiento ni funding) | +0,072 R (gana el 23,0 %) | +0,250 R (28,7 %) |
+| Lo que se llevan los costes por operación | 0,113 R | 0,127 R |
+| Salidas: objetivo / stop / 7 días | 310 / 1.202 / 50 | 155 / 540 / 62 |
+| Largos / cortos (R con funding) | 815 (+0,020) / 747 (−0,108) | 391 (−0,061) / 366 (+0,320) |
+| Cuenta por jornada con 0,5 % de riesgo | −0,069 % | +0,152 % (+0,108 % por día natural) |
+| Caída máxima (R con funding) | 164,4 R (≈ 56 % de la cuenta) | 40,2 R (≈ 18 %) |
+| Duración media | 29,9 h | 44,0 h |
+
+Con los costes de hoy del paper (OKX EU con X-Perps, las mismas operaciones): −0,015 R dentro y +0,15 R fuera
+(+0,185 % de la cuenta por jornada). **Sin cuenta X-Perps** (contado 0,35 % por lado y sin cortos; el libro rehecho solo
+con las compras): −0,229 R dentro (1.327 compras) y **−0,457 R fuera** (736 compras): sin cortos pierde. En la cuenta
+simulada con interés compuesto (tamaño sobre el capital de cada momento): −30,8 % dentro de muestra y +44,6 % fuera; de
+100 € al principio de los 3 años quedarían 100,06 €.
+
+**Por qué es frágil** (por eso el ranking la marca así):
+- **Es la mejor de 378 elegida después de ver los datos.** `salidas_motor.py` midió 378 salidas sobre las mismas entradas
+  (stops 1,5/2/3 %, objetivos de 3 a 10R, cerrojos, topes de 24 h a 30 días). Su regla fijada de antemano (la mejor
+  DENTRO de muestra con ≥ 5 operaciones por jornada) eligió otra (un cerrojo F1 con 2 %). Esta es la 1.ª fuera de muestra
+  en % de la cuenta por jornada (el criterio del ranking) pero la 35.ª dentro con el mismo criterio, y dentro pierde. En R
+  por operación es la 2.ª fuera (la 1.ª, «F0 stop 3 % · objetivo 10R · tope 7d», da +0,173 R en 436 operaciones fuera y
+  +0,006 R dentro) y la 30.ª dentro. Solo 12 de las 378 ganan dentro de muestra; 74 ganan fuera; 11 en las dos. La
+  mediana de las 378 pierde en los dos tramos (−0,078 R dentro y −0,072 R fuera).
+- **Sus vecinas no se le parecen.** Con el mismo stop y el mismo tope de 7 días, el objetivo de 3R da +0,082 R fuera
+  (−0,067 dentro), el de 5R +0,049 (−0,000) y el de 6R +0,033 (+0,014): el +0,123 R del 4R es un pico, no una meseta.
+- **Gana por los cortos y por el periodo.** Fuera de muestra (agosto de 2025 → octubre de 2026, con caídas fuertes) los
+  366 cortos dan +0,32 R y los 391 largos −0,06 R; dentro, al revés (largos +0,02 R, cortos −0,11 R). Por trimestres,
+  dentro de muestra pierde en 5 de 8 (2024T4 y 2025T1, −0,15 R por operación) y fuera gana en 5 de 6 (de +0,05 a +0,28 R;
+  el primer tramo, del 16-08 al 30-09-2025, −0,14 R).
+- **La caída de dentro es enorme:** del 12-12-2023 al 08-05-2025 el R acumulado bajó 172 R (sin funding; 164 R con él):
+  con 0,5 % de riesgo, más de la mitad de la cuenta con interés compuesto.
+- **Sin corrección por número de pruebas** (no hay p de una sola configuración): el ranking la da como «sin_p», no pasa.
+
+**Qué esperar, sin maquillar.** Unas 2,5 operaciones por jornada (como mucho 6 al día). Si el futuro se pareciera al
+fuera de muestra, ≈ +0,15 % de la cuenta por jornada con estos costes (≈ +0,18 % con los de hoy), con rachas: cerca del
+72 % de las operaciones pierde (casi todas por el stop, ≈ −1,1 R con costes) y cada objetivo (≈ +3,9 R) paga unas 3,5 de
+esas pérdidas. Si se pareciera al dentro de muestra, ≈ −0,07 % por jornada y una caída larga. Con 100 € de prueba,
+céntimos al día. No es una ventaja demostrada; lo único que vale es lo que haga en la cartera paper, con las operaciones
+etiquetadas con su preset (`tags.preset` = `seis4r`), que el ranking suma a su fila en vivo.
+
+## 26. 6 diarias 4R · stop 3 % en la cartera (29-10-2026)
+
+- A las 23:47 del 29-10 se activó «6 diarias 4R» con stop 2 % (sección 25). A las 23:59 el usuario pidió «la que más ganancias dé» y se cambió a `seis4r3`: la misma horquilla con stop 3 % y objetivo 4R (+12 %), como mucho 7 días (`apertura.PRESETS["seis4r3"]`, `scripts/activar_estrategia.py --preset seis4r3`).
+- Por qué esta: con los costes del paper (OKX EU con X-Perps) es la que más ganó en 3 años de todo lo medido que cumple las reglas, sin contar E2 (descartada por el usuario). 100 € → ≈ 209 € con interés compuesto (la de stop 2 %, ≈ 139 €), y gana en los dos tramos.
+- Réplica con el motor (`scripts/replica_seis4r.py --preset seis4r3`): 1.524 de 1.524 operaciones iguales que «F0 stop 3 % · objetivo 4R · tope 7d» de `controles/salidas_motor.py`; resumen en `BACKTEST_DIR/seis4r3_resumen.json`.
+- Cifras, fuera / dentro de muestra:
+  - Costes del paper: +0,107 / +0,106 R por operación; +0,088 % / +0,115 % de la cuenta por jornada; 1,65 / 2,18 operaciones por jornada.
+  - Costes del backtest (0,10 % por lado y 2 pb): +0,090 / +0,088 R; +0,074 % / +0,095 % por jornada.
+  - Antes de costes: +0,179 / +0,159 R.
+  - Sin cuenta X-Perps (solo compras, 0,35 % por lado): −0,382 / −0,007 R. Sin X-Perps pierde.
+  - Ganadoras: 33 % / 29 %. En 3 años, el 68 % sale por el stop, el 16 % por el objetivo y el 16 % por tiempo; duración media, 59 h.
+  - Caída máxima con los costes del paper: ≈ 21 % en 3 años (por orden de cierre; a precio de mercado, algo más).
+- Honesto: se eligió después de ver los dos tramos, entre las 50 combinaciones de stops y objetivos de `controles/anchos/`, y ninguna pasa Holm ni FDR. Fuera de muestra gana por los cortos (+0,28 R) y las compras pierden (−0,05 R), como el mercado (BTC −31 % en ese tramo). En la vecina de stop 3 % y 6R, «siempre corto» con el mismo libro da +0,124 R fuera, más que el impulso (+0,102). Se mide en paper tal cual.

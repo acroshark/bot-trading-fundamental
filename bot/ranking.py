@@ -71,8 +71,13 @@ PERFILES_CORTO = {"backtest": "costes del backtest", "laboratorio": "costes del 
                   "sin_costes": "sin costes", "paper": "costes del paper"}
 TIPOS_CORR = ("holm", "bh", "dsr", "bonferroni", "p", "sin_p")
 DIAS_MAX = 3650             # tope de días de un periodo del laboratorio vivo (10 años; lo de más es un archivo roto)
-# Preset del motor (apertura.PRESETS) → fila del ranking
-PRESET_FILA = {"ruptura3": "ruptura3", "seis2": "seis2", "seis": "seis", "impulso": "e2_impulso_7d"}
+# Preset del motor (apertura.PRESETS) → fila del ranking. «6 diarias 4R» (seis4r) es la salida F0 de salidas_motor.py
+# sobre las entradas de «6 diarias» (su réplica, scripts/replica_seis4r.py, da las mismas 2.319 operaciones): su fila es
+# esa (la n.º 1 del ranking del 29-10-2026), sin otra «seis4r» repetida.
+SEIS4R_FILA = "salidas_motor:F0 stop 2 % · objetivo 4R · tope 7d"
+SEIS4R3_FILA = "salidas_motor:F0 stop 3 % · objetivo 4R · tope 7d"   # «6 diarias 4R · stop 3 %» (seis4r3), igual
+PRESET_FILA = {"ruptura3": "ruptura3", "seis2": "seis2", "seis": "seis", "impulso": "e2_impulso_7d",
+               "seis4r": SEIS4R_FILA, "seis4r3": SEIS4R3_FILA}
 VIGILANCIA_FILA = {"E2-7d": "e2_impulso_7d"}   # la variante de 7 días de E2 es la de impulso_7d.json
 EN_VIVO_NOMBRES = {"en_vivo:noticia_fiable": "Entrada por noticia fiable (paper)",
                    "en_vivo:motor": "Motor de aperturas con parámetros cambiados (paper)",

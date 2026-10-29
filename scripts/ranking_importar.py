@@ -23,7 +23,9 @@ Cifras NETAS de costes, con el perfil con que se calcularon (perfil_costes):
   su p frente a la base emparejada corregido por Holm entre las 23.
 - controles/curso/medir_curso.json: toda la tabla menos la referencia (que es «6 diarias v2»), con Holm entre sus p.
 - controles/salidas_motor.json (378) y controles/salidas_1a1.json (las 1:1; la actual y la A ya están en salidas_motor):
-  sin p, cada una es una de N salidas sobre las mismas entradas (corrección «sin_p»: frágiles).
+  sin p, cada una es una de N salidas sobre las mismas entradas (corrección «sin_p»: frágiles). seis4r_resumen.json («6
+  diarias 4R») no se importa: su réplica da las mismas operaciones que «F0 stop 2 % · objetivo 4R · tope 7d» y su fila
+  es esa (bot/ranking.SEIS4R_FILA), sin otra repetida.
 Cada corrección lleva su tipo corto (holm, bh o sin_p) para la web y el método largo en «metodo».
 - controles/costes/bruto_neto.json: los perfiles de «6 diarias v2» y de la Ruptura V3 (sin costes, backtest, los de hoy
   del paper y sin X-Perps), en «perfiles».

@@ -79,7 +79,7 @@ async def test_ruta_con_seis(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "BACKTEST_DIR", tmp_path)
     store = Store(tmp_path / "bot.db")
     (tmp_path / rb.SEIS_FILE).write_text(json.dumps(_seis()), encoding="utf-8")
-    assert set(rb.load()) == {"impulso", "lab", "seis", "seis2", "ruptura3", "costes"}   # costes: con qué comisiones
+    assert set(rb.load()) == {"impulso", "lab", "seis", "seis2", "ruptura3", "seis4r", "seis4r3", "costes"}   # costes: las comisiones
     async with TestClient(TestServer(make_app(Bus(store), lambda: {}))) as client:
         r = await client.get("/api/backtest/impulso")   # solo con «6 diarias» ya responde
         assert r.status == 200
@@ -131,7 +131,7 @@ async def test_seis2_en_la_ruta_y_en_la_demostracion(tmp_path, monkeypatch):
     store = Store(tmp_path / "bot.db")
     (tmp_path / rb.SEIS2_FILE).write_text(json.dumps(_seis2()), encoding="utf-8")
     res = rb.load()
-    assert set(res) == {"impulso", "lab", "seis", "seis2", "ruptura3", "costes"} and res["seis"] is None
+    assert set(res) == {"impulso", "lab", "seis", "seis2", "ruptura3", "seis4r", "seis4r3", "costes"} and res["seis"] is None
     s2 = res["seis2"]
     assert s2["nombre"] == "6 diarias v2" and s2["params"]["lock_r"] == 3.0 and s2["params"]["target_r"] is None
     assert s2["fuera"]["salidas"]["cerrojo"] == 57 and len(s2["fuera"]["curva_R"]) == rb.CURVE_POINTS + 1
@@ -257,3 +257,76 @@ async def test_ruptura3_en_la_ruta_y_en_la_demostracion(tmp_path, monkeypatch):
     inc.main()                                                                       # otra vez: se reemplaza
     assert page.read_text(encoding="utf-8").count('id="ruptura3Data"') == 1
     assert "ruptura3Data" not in server.BT_BLOCK.sub("<!--BT-->", page.read_text(encoding="utf-8"))
+
+
+def _s4r() -> dict:
+    d = _impulso(300)
+    d.update(sl_pct=2.0, nota="réplica del motor con SEIS4R", nombre="6 diarias 4R: stop 2 %, objetivo 4R, hasta 7 días",
+             params={"measure_min": 15, "entry": "t:15", "min_move_pct": 0.0, "sl_pct": 2.0, "target_r": 4.0,
+                     "max_hold_h": 168.0, "tp1_frac": 0.0, "lock_r": None, "preset": "seis4r"})
+    perf = {"sin_costes": {"n": 757, "R": 0.2495}, "backtest": {"n": 757, "R": 0.1228, "pct_dia": 0.152},
+            "okx_eu_con_xperps": {"n": 757, "R": 0.1495}, "okx_eu_sin_xperps": {"n": 736, "R": -0.4568}}
+    d["fuera"].update(mean_R=0.1211, paper_R_funding=0.1228, op_jornada=2.474, perfiles=perf,
+                      salidas={"stop": 540, "objetivo": 155, "tiempo": 62},
+                      antes_de_costes={"n": 757, "R_bruto": 0.2495, "costes_R": -0.1267, "R_neto": 0.1228,
+                                       "cuenta_jornada_neto_pct": 0.152})
+    d["dentro"].update(mean_R=-0.0478, paper_R_funding=-0.0413,
+                       antes_de_costes={"n": 1562, "R_bruto": 0.0721, "costes_R": -0.1134, "R_neto": -0.0413},
+                       perfiles={**perf, "backtest": {"n": 1562, "R": -0.0413}})
+    return d
+
+
+async def test_seis4r_en_la_ruta_y_en_la_demostracion(tmp_path, monkeypatch):
+    """seis4r_resumen.json (scripts/replica_seis4r.py) sale en /api/backtest/impulso con «antes_de_costes» y «perfiles»
+    en fuera y dentro, y se incrusta en la demostración (seis4rData) detrás de ruptura3Data; en vivo se quita."""
+    import importlib.util
+    from pathlib import Path
+    from bot import ranking, server
+    monkeypatch.setattr(config, "BACKTEST_DIR", tmp_path)
+    store = Store(tmp_path / "bot.db")
+    (tmp_path / rb.SEIS4R_FILE).write_text(json.dumps(_s4r()), encoding="utf-8")
+    assert rb.SEIS4R_FILE == "seis4r_resumen.json"
+    res = rb.load()
+    assert res["ruptura3"] is None and res["seis4r"]["nombre"].startswith("6 diarias 4R")
+    f, d = res["seis4r"]["fuera"], res["seis4r"]["dentro"]
+    assert f["antes_de_costes"]["R_bruto"] == 0.2495 and f["perfiles"]["okx_eu_sin_xperps"]["R"] == -0.4568
+    assert f["paper_R_funding"] == 0.1228 and d["paper_R_funding"] == -0.0413 and len(f["curva_R"]) == rb.CURVE_POINTS + 1
+    assert set(f["perfiles"]) <= set(ranking.PERFILES_TEXTO)
+    assert res["seis4r"]["costes"]["comision_pct"] == 0.1 and res["seis4r"]["params"]["preset"] == "seis4r"
+    async with TestClient(TestServer(make_app(Bus(store), lambda: {}))) as client:
+        r = await client.get("/api/backtest/impulso")   # solo con «6 diarias 4R» ya responde
+        assert r.status == 200
+        j = await r.json()
+        assert j["seis4r"]["params"]["target_r"] == 4.0 and j["seis4r"]["fuera"]["mean_R"] == 0.1211
+        assert j["seis4r"]["dentro"]["antes_de_costes"]["R_neto"] == -0.0413
+    store.close()
+    root = Path(__file__).resolve().parents[1]
+    spec = importlib.util.spec_from_file_location("incrustar_backtest", root / "scripts" / "incrustar_backtest.py")
+    inc = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(inc)
+    page = tmp_path / "radar.html"
+    page.write_text('<html><!--BT--></html>', encoding="utf-8")
+    bt = tmp_path / "bt"
+    bt.mkdir()
+    (bt / "resultados.json").write_text(json.dumps({"strategies": []}), encoding="utf-8")
+    (bt / rb.RUPTURA3_FILE).write_text(json.dumps(_rup3()), encoding="utf-8")
+    (bt / rb.SEIS4R_FILE).write_text(json.dumps(_s4r()), encoding="utf-8")
+    monkeypatch.setattr(inc, "PAGE", page)
+    monkeypatch.setattr(config, "BACKTEST_DIR", bt)
+    inc.main()
+    html = page.read_text(encoding="utf-8")
+    m4, m3 = inc.BLOCK_S4R.search(html), inc.BLOCK_RUP3.search(html)
+    assert m4 and '"preset":"seis4r"' in m4.group(0) and m3.end() < m4.start()   # justo detrás de ruptura3Data
+    inc.main()                                                                     # otra vez: se reemplaza
+    assert page.read_text(encoding="utf-8").count('id="seis4rData"') == 1
+    assert "seis4rData" not in server.BT_BLOCK.sub("<!--BT-->", page.read_text(encoding="utf-8"))
+    (bt / rb.SEIS4R_FILE).unlink()                     # sin el resumen, la página tal cual
+    assert inc.incrustar_seis4r("<html>x</html>") == "<html>x</html>"
+    # sin ninguno de los seis resúmenes, 404
+    vacio = tmp_path / "vacio"
+    vacio.mkdir()
+    monkeypatch.setattr(config, "BACKTEST_DIR", vacio)
+    store2 = Store(tmp_path / "bot2.db")
+    async with TestClient(TestServer(make_app(Bus(store2), lambda: {}))) as client:
+        assert (await client.get("/api/backtest/impulso")).status == 404
+    store2.close()

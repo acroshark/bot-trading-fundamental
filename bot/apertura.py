@@ -25,6 +25,13 @@ noticia corroborada en contra (news_mode «corroboradas»). Las cuentas, en bot/
 −0,03 R en 159: NO es una ventaja demostrada (--preset ruptura3). Su puerta prerregistrada (sobre V1) no pasa y V3 es
 la mejor de las 23 configuraciones medidas fuera de muestra (cifra optimista); lo de fuera sale de los cortos en RISK_OFF
 (los largos de 3 años, ≈ +0,01 R) y sin cuenta X-Perps no hay cortos. En NEUTRAL no opera nada (docs/05, sección 24).
+Preset SEIS4R («6 diarias 4R», 29-10-2026, la n.º 1 del ranking de estrategias): las entradas de SEIS tal cual con una
+horquilla pura de stop 2 % y objetivo 4R (+8 %), sin parcial ni cerrojo, como mucho 7 días. Es la variante «F0 stop 2 %
+· objetivo 4R · tope 7d» de BACKTEST_DIR/controles/salidas_motor.py; la réplica del motor (scripts/replica_seis4r.py,
+BACKTEST_DIR/seis4r_resumen.json) la reproduce operación a operación (las 2.319): fuera de muestra +0,12 R por operación
+con funding en 757, dentro −0,04 R en 1.562. La mejor fuera de muestra en % de la cuenta por jornada (la 2.ª en R por
+operación) de 378 salidas sobre las mismas entradas, elegida después de ver los datos: frágil, NO es una ventaja
+demostrada (--preset seis4r; docs/05, sección 25).
 Los topes diarios de entradas y de riesgo cuentan TODAS las entradas del paper del día (paper_day_entries): son
 compartidos con la entrada por noticia confirmada (bot/entrada_noticias.py).
 Por qué entra o no (28-10-2026): en modo impulso cada punto de decisión de cada apertura×moneda queda en la tabla
@@ -1400,6 +1407,9 @@ IMPULSO = {
     "sl_pct": 3.0,
     "target_r": 3.0,            # objetivo en R (9 % con el stop de 3 %); None = sin objetivo final (solo con cerrojo)
     "max_hold_h": 168,          # sin tope de tiempo: solo 7 días de seguridad
+    "tope_propio": False,       # max_hold_h ≥ 7 días: False = solo de seguridad («sin tope», E2); True = el tope de la
+                                # propia estrategia, medido con él («como mucho 7 días», «6 diarias 4R»). Solo cambia
+                                # los textos (salida, ticket, etiqueta del cierre por tiempo), no lo que se opera
     # Salida parcial y cerrojo (28-10-2026, «6 diarias v2»): con estos valores, horquilla pura (sin parcial ni cerrojo).
     "tp1_r": None,              # salida parcial: en tp1_r R (≥ 2R y ≥ 3 % neto con las reglas del usuario) ...
     "tp1_frac": 0.0,            # ... esta parte de la posición (0 = sin parcial)
@@ -1525,6 +1535,46 @@ RUPTURA3 = {
     "rp_max_apertura": 2,
     "lab": None,
 }
+# Preset SEIS4R («6 diarias 4R: stop 2 %, objetivo 4R, hasta 7 días», 29-10-2026): la n.º 1 del ranking de estrategias
+# (bot/ranking.py), la salida «F0 stop 2 % · objetivo 4R · tope 7d» de BACKTEST_DIR/controles/salidas_motor.py sobre las
+# entradas de SEIS:
+# - Las entradas de SEIS tal cual: impulso de los 15 primeros min en su sentido (cualquier movimiento ≠ 0), entrada a
+#   +15 min, sin filtros de volumen, volatilidad ni BTC, veto de una noticia FIABLE en contra, ≤ 6 entradas y 3 % de
+#   riesgo por día de Madrid (0,5 % por operación), largos al contado y cortos en perpetuo, una posición por moneda.
+# - Horquilla pura: stop 2 % y objetivo 4R (+8 %, 7,76 % neto de costes), sin parcial ni cerrojo, sin break-even ni
+#   stop dinámico: «o gano más de 2 o pierdo 1». Si a los 7 días no ha llegado a ninguno de los dos, se cierra con lo
+#   que haya (la excepción conocida del cierre por tiempo).
+# HONESTO: réplica del motor de 3 años (scripts/replica_seis4r.py: las 2.319 operaciones, una a una, iguales que las de
+# salidas_motor.py): +0,12 R por operación fuera de muestra con funding (757, 2,47 por jornada: ≈ +0,15 % de la cuenta
+# por jornada con 0,5 % de riesgo; +0,25 R antes de costes) pero −0,04 R dentro (1.562; −0,05 sin funding; +0,07 antes
+# de costes). Es la mejor fuera de muestra en % de la cuenta por jornada (la 2.ª en R por operación) de 378 salidas de
+# una rejilla sobre las mismas entradas, elegida después de ver los datos (frágil): NO es una ventaja demostrada. Fuera
+# gana por los cortos (366: +0,32 R) y los 391 largos pierden (−0,06 R); dentro, al revés (largos +0,02, cortos
+# −0,11). Sin cuenta X-Perps (sin cortos y 0,35 % por lado) pierde: −0,46 R fuera. Se mide en paper solo si se activa
+# por decisión del usuario (--preset seis4r; docs/05, 25).
+SEIS4R = {
+    **SEIS,
+    "sl_pct": 2.0,
+    "target_r": 4.0,            # +8 % (7,76 % neto de costes)
+    "max_hold_h": 168,          # como mucho 7 días desde la entrada ...
+    "tope_propio": True,        # ... que son su tope (la variante «tope 7d»), no unos días de seguridad como en E2
+    "avg_hold_h": 35,           # duración media para el funding esperado (réplica: 34,5 h en 3 años; 29,9 dentro y 44 fuera)
+    "lab": None,
+}
+# Preset SEIS4R3 («6 diarias 4R · stop 3 %», 29-10-2026, lo eligió el usuario: «la que más ganancias dé»): la horquilla
+# de SEIS4R con el stop al 3 % y el objetivo 4R (+12 %), como mucho 7 días; es «F0 stop 3 % · objetivo 4R · tope 7d» de
+# BACKTEST_DIR/controles/salidas_motor.py y «6 diarias · stop 3 % · objetivo 4R» de controles/anchos/medir_anchos.json.
+# Con los costes del paper (OKX EU con X-Perps) es la que más ganó en 3 años de todo lo medido con las reglas del
+# usuario, sin contar E2 (descartada por él): 100 € → ≈ 209 € con interés compuesto (la n.º 1, SEIS4R, ≈ 139 €), y gana
+# en los dos tramos (+0,11 R dentro y fuera; caída máxima ≈ 21 %). HONESTO: elegida después de ver los dos tramos, una
+# de 50 combinaciones que no pasa Holm ni FDR; fuera gana por los cortos, que van con el mercado; sin cuenta X-Perps
+# pierde. Réplica del motor: scripts/replica_seis4r.py --preset seis4r3 (BACKTEST_DIR/seis4r3_resumen.json).
+SEIS4R3 = {
+    **SEIS4R,
+    "sl_pct": 3.0,
+    "target_r": 4.0,            # +12 % (11,76 % neto de costes)
+    "avg_hold_h": 59,           # duración media para el funding esperado (3 años: 59 h; 52,6 dentro y 72 fuera)
+}
 PRESETS = {
     "impulso": {"params": IMPULSO, "nombre": "E2 · impulso",
                 "descripcion": "Impulso de los primeros 15 min (≥ 0,2 %) con volumen relativo ≥ 1,5 y BTC a favor, "
@@ -1542,6 +1592,14 @@ PRESETS = {
                                 "volumen ≥ 1,5 × el del rango y expansión ≥ 1,5 ATR, antes de +240 min; stop 2-3 % "
                                 "(el otro lado del rango), como mucho 2 por apertura; la mitad sale en 3R y el resto "
                                 "corre con el cerrojo; veto de noticias corroboradas en contra"},
+    "seis4r": {"params": SEIS4R, "nombre": "6 diarias 4R: stop 2 %, objetivo 4R, hasta 7 días",
+               "descripcion": "Impulso de los primeros 15 min sin filtros, entrada a +15 min, stop 2 % y objetivo 4R "
+                              "(+8 %), como mucho 7 días; horquilla pura, sin parcial ni cerrojo; veto de noticias "
+                              "fiables en contra"},
+    "seis4r3": {"params": SEIS4R3, "nombre": "6 diarias 4R · stop 3 %: stop 3 %, objetivo 4R, hasta 7 días",
+                "descripcion": "Impulso de los primeros 15 min sin filtros, entrada a +15 min, stop 3 % y objetivo 4R "
+                               "(+12 %), como mucho 7 días; horquilla pura, sin parcial ni cerrojo; veto de noticias "
+                               "fiables en contra"},
 }
 EXIT_KEYS = ("tp1_r", "tp1_frac", "lock_r", "floor_r", "trail_r", "trail_atr", "max_hold_active_h")   # la salida
 RP_KEYS = ("rp_max_apertura", "rp_stop_max_pct")   # Ruptura V3 (solo cuentan con el modelo «ruptura3»)
@@ -1554,7 +1612,8 @@ LAB_KEYS = ("measure_min", "min_move_pct", "entry", "rvol_min", "vol_filter", "b
             "sl_pct", "target_r", "tp1_frac", "lock_r", "modelo")   # con todas como en el preset, se reproduce LAB_REF
 IMP_STATUS_KEYS = ("estrategia", "measure_min", "min_move_pct", "entry", "pb_frac", "entry_end_min", "brk_tf", "rvol_min",
                    "vol_filter", "btc_filter", "news_mode", "windows", "coins", "sl_pct", "target_r", "target_pct",
-                   "max_hold_h", "min_net_pct", "avg_hold_h", "long_instrument", "short_instrument", "min_strength",
+                   "max_hold_h", "tope_propio", "min_net_pct", "avg_hold_h", "long_instrument", "short_instrument",
+                   "min_strength",
                    "risk_pct", "max_day_entries", "max_day_risk_pct", "session_max_min", "lab", *EXIT_KEYS,
                    "modelo", *RP_KEYS)
 
@@ -1742,6 +1801,8 @@ def impulse_params(over: dict | None = None) -> tuple[dict, list[str]]:
                      f"{_n(p['sl_pct'])} %")
         p["rp_stop_max_pct"] = p["sl_pct"]
     p["session_max_min"] = max(p["entry_end_min"], m or 0)
+    tp = p.get("tope_propio")   # solo los textos del tope de tiempo: True (o «true», 1) o nada
+    p["tope_propio"] = tp is True or (not isinstance(tp, bool) and str(tp).strip().lower() in ("1", "true", "sí", "si"))
     # nunca break-even ni el stop dinámico de la ruptura: lo único que mueve el stop es el cerrojo (EXIT_KEYS)
     p.update(be_r=None, trail_start_r=None, target_pct=None, gate=False, moving_pct=None)
     p["lab"] = LAB_REF if all(p[k] == IMPULSO[k] for k in LAB_KEYS) else None
@@ -1793,8 +1854,9 @@ def _pnorm(v):
 
 
 def preset_of(params: dict | None) -> str | None:
-    """Preset del modo impulso («impulso» o «seis», de PRESETS) al que corresponden unos parámetros completos, o None
-    si alguno de los de operativa (PRESET_KEYS) es distinto (cambios de la evolución o de BOT_IMPULSO_PARAMS)."""
+    """Preset del modo impulso (de PRESETS: «impulso», «seis», «seis2», «ruptura3» o «seis4r») al que corresponden unos
+    parámetros completos, o None si alguno de los de operativa (PRESET_KEYS) es distinto (cambios de la evolución o de
+    BOT_IMPULSO_PARAMS)."""
     p = params or {}
     if p.get("estrategia", "impulso") != "impulso":
         return None
@@ -1820,12 +1882,23 @@ def _horas(h: float) -> str:
     return f"{_n(h / 24, 0)} días" if h >= 48 - 1e-9 and abs(h / 24 - round(h / 24)) < 1e-9 else f"{_n(h, 0)} h"
 
 
+def _seguridad(p: dict) -> bool:
+    """¿El tope de tiempo es solo de seguridad (7 días o más sin ser el de la estrategia: E2, «sin tope»)? Con
+    tope_propio («6 diarias 4R»), esos 7 días son su tope («como mucho 7 días»)."""
+    return p["max_hold_h"] >= 168 - 1e-9 and not p.get("tope_propio")
+
+
+def _tope(h: float) -> str:
+    """El tope de tiempo en texto: «24 h» o, desde 7 días (en días enteros), «7 días»."""
+    return _horas(h) if h >= 168 - 1e-9 else f"{_n(h, 0)} h"
+
+
 def hold_text(params: dict | None = None) -> str:
-    """Tope de tiempo de una entrada: «sin tope (7 días de seguridad)», «como mucho 24 h» o, con cerrojo, «como mucho
-    24 h sin activar el cerrojo y hasta 7 días activado»."""
+    """Tope de tiempo de una entrada: «sin tope (7 días de seguridad)» (E2), «como mucho 7 días» (el tope propio de «6
+    diarias 4R»), «como mucho 24 h» o, con cerrojo, «como mucho 24 h sin activar el cerrojo y hasta 7 días activado»."""
     p = _ip(params)
     h, ha = p["max_hold_h"], p.get("max_hold_active_h")
-    base = f"sin tope ({_n(h / 24, 0)} días de seguridad)" if h >= 168 - 1e-9 else f"como mucho {_n(h, 0)} h"
+    base = f"sin tope ({_n(h / 24, 0)} días de seguridad)" if _seguridad(p) else f"como mucho {_tope(h)}"
     if p.get("lock_r") and ha and ha > h + 1e-9:
         return f"{base} sin activar el cerrojo y hasta {_horas(ha)} activado"
     return base
@@ -3641,19 +3714,19 @@ class OpeningEngine:
 
     def _ticket_imp(self, w: dict, coin: str, act: dict, plan: dict, now: int) -> dict:
         """Ticket del modo impulso: inmediato, sin break-even ni stop dinámico, con tope de tiempo desde la entrada (7
-        días de seguridad o, con «6 diarias», 24 h), instrumento (contado o perpetuo), estrategia y etiquetas (con origen
-        «motor_aperturas», el preset y la versión). Horquilla pura (tp1R = tp2R, sin parcial) o, con cerrojo («6 diarias
-        v2»), parcial (tp1R + tp1Frac), cerrojo (lockR, lockFloorR, lockTrailR) sin objetivo final y tope de tiempo
-        activado (winEndActive, holdActiveLabel: hasta 7 días)."""
+        días de seguridad con E2, el tope de 7 días de «6 diarias 4R» o, con «6 diarias», 24 h), instrumento (contado o
+        perpetuo), estrategia y etiquetas (con origen «motor_aperturas», el preset y la versión). Horquilla pura (tp1R =
+        tp2R, sin parcial) o, con cerrojo («6 diarias v2»), parcial (tp1R + tp1Frac), cerrojo (lockR, lockFloorR,
+        lockTrailR) sin objetivo final y tope de tiempo activado (winEndActive, holdActiveLabel: hasta 7 días)."""
         p, d, tags = self.p, act["dir"], act["tags"]
         end = now + int(p["max_hold_h"] * H)
         until = datetime.fromtimestamp(end / 1000, MAD).strftime('%d-%m %H:%M')
-        if p["max_hold_h"] >= 168 - 1e-9:
+        if _seguridad(p):
             days = _n(p["max_hold_h"] / 24, 0)
             valid, label = f"sin tope: como mucho {days} días (hasta el {until} Madrid)", f"{days} días de seguridad"
-        else:
-            hrs = _n(p["max_hold_h"], 0)
-            valid, label = f"como mucho {hrs} h (hasta el {until} Madrid)", f"tope de {hrs} h"
+        else:   # «6 diarias» (24 h) o el tope propio de «6 diarias 4R» (7 días)
+            tope = _tope(p["max_hold_h"])
+            valid, label = f"como mucho {tope} (hasta el {until} Madrid)", f"tope de {tope}"
         sig = w["signals"].get(coin) or {}
         lock = plan.get("lockR")
         if lock:
@@ -3822,8 +3895,8 @@ class OpeningEngine:
             else:
                 run.last_why = (f"En posición (paper): {verb.lower()} {INST_TEXT[inst]} a {_px(entry)}, stop "
                                 f"{_px(plan['stop_px'])} y objetivo {_px(plan['target_px'])}; "
-                                + (f"sin tope de tiempo ({t['holdLabel']})" if self.p["max_hold_h"] >= 168 - 1e-9
-                                   else f"como mucho {_n(self.p['max_hold_h'], 0)} h"))
+                                + (f"sin tope de tiempo ({t['holdLabel']})" if _seguridad(self.p)
+                                   else hold_text(self.p)))
             log.info("Aperturas: %s %s en %s (%s, %s)", verb, coin, w["name"], story, t["strategy"])
         else:
             run.on_rejected(now, "vetada por el control de riesgo del paper")

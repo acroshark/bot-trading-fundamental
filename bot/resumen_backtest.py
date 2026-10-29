@@ -13,6 +13,11 @@
   V3», scripts/replica_ruptura3.py, operación a operación igual que la medida prerregistrada). Fuera de muestra gana y
   dentro pierde: no es una ventaja demostrada y se dice. Trae además, en «fuera» y «dentro», «antes_de_costes»: el R de
   las mismas operaciones sin comisiones ni deslizamiento ni funding y cuánto se lleva cada coste.
+- «seis4r» (con la misma seis_summary): seis4r_resumen.json, la réplica del motor con el preset SEIS4R («6 diarias 4R»:
+  las entradas de SEIS con stop 2 % y objetivo 4R, como mucho 7 días; scripts/replica_seis4r.py, operación a operación
+  igual que la variante F0 de controles/salidas_motor.py, la n.º 1 del ranking). Fuera de muestra gana y dentro pierde:
+  frágil, no es una ventaja demostrada y se dice. En «fuera» y «dentro», «antes_de_costes» y «perfiles» (sin costes,
+  backtest y OKX EU con y sin X-Perps, con las claves de bot/ranking.PERFILES_TEXTO).
 
 Cada resumen lleva «costes»: con qué comisiones está calculado (29-10-2026, «las comisiones dentro del sistema»). Las
 réplicas del motor y el laboratorio van con config.FEE_PCT (0,10 % por lado, también en los perpetuos de las réplicas) y
@@ -138,18 +143,24 @@ def _read(path: Path) -> dict | None:
 SEIS_FILE = "seis_diarias_resumen.json"
 SEIS2_FILE = "seis2_resumen.json"
 RUPTURA3_FILE = "ruptura3_resumen.json"
+SEIS4R_FILE = "seis4r_resumen.json"
+SEIS4R3_FILE = "seis4r3_resumen.json"   # «6 diarias 4R · stop 3 %» (scripts/replica_seis4r.py --preset seis4r3)
 
 
 def load() -> dict:
-    """{impulso, lab, seis, seis2, ruptura3} desde BACKTEST_DIR; lo que falte va como None."""
+    """{impulso, lab, seis, seis2, ruptura3, seis4r, seis4r3} desde BACKTEST_DIR; lo que falte va como None."""
     imp = _read(config.BACKTEST_DIR / "impulso_7d.json")
     lab = _read(config.BACKTEST_DIR / "laboratorio.json")
     seis = _read(config.BACKTEST_DIR / SEIS_FILE)
     seis2 = _read(config.BACKTEST_DIR / SEIS2_FILE)
     rup3 = _read(config.BACKTEST_DIR / RUPTURA3_FILE)
+    s4r = _read(config.BACKTEST_DIR / SEIS4R_FILE)
+    s4r3 = _read(config.BACKTEST_DIR / SEIS4R3_FILE)
     return {"impulso": impulso_summary(imp) if isinstance(imp, dict) else None,
             "lab": lab_summary(lab) if isinstance(lab, dict) else None,
             "seis": seis_summary(seis) if isinstance(seis, dict) else None,
             "seis2": seis_summary(seis2) if isinstance(seis2, dict) else None,
             "ruptura3": seis_summary(rup3) if isinstance(rup3, dict) else None,
+            "seis4r": seis_summary(s4r) if isinstance(s4r, dict) else None,
+            "seis4r3": seis_summary(s4r3) if isinstance(s4r3, dict) else None,
             "costes": costes()}

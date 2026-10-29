@@ -585,6 +585,38 @@ def test_perdida_del_dia_cuenta_desde_la_medianoche_con_posiciones_que_pasan_la_
     assert env.new().portfolio()["day_pnl"] == pytest.approx(-140, abs=0.01)   # la foto sobrevive al reinicio
 
 
+def test_arranque_tras_la_medianoche_con_posiciones_de_antes_no_cuenta_lo_de_ayer(env, monkeypatch):
+    """Con el bot parado a la medianoche y arrancado después, la foto del día se rehace con el último precio guardado de
+    las posiciones que pasan la noche: lo que se movieron ayer no cuenta como pérdida (ni ganancia) de hoy, y la foto se
+    guarda para los reinicios de ese día. Sin posiciones de antes no hace falta foto: cuenta lo realizado."""
+    monkeypatch.setattr(config, "RISK_PER_TRADE_PCT", 5.0)
+    env.clock.t = T0 + 780 * MIN                                     # 23:00 en Madrid
+    assert env.broker.submit(ticket(risk=4.5, stop=10, holdMin=600), "n1")   # nominal 4.000 (tope): 40 BTC a 100
+    env.at(839, BTC=95)                                              # 23:59: -204 $ latentes (2,04 %)
+    env.broker.save_positions()                                      # lo último que guarda antes de pararse
+    env.clock.t = T0 + 870 * MIN                                     # 00:30: arranca otra vez, con el mismo precio
+    b = env.new()
+    assert b.day_base == {} and b.portfolio()["day_pnl"] == pytest.approx(-204, abs=0.01)   # antes de la 1.ª ronda
+    b.step()
+    assert b.day_base == {"date": "2026-10-24", "equity": pytest.approx(10000 - 204),
+                          "origen": "ultimo_precio_guardado"}
+    assert b.portfolio()["day_pnl"] == pytest.approx(0, abs=0.01) and b.halt_until == 0
+    env.prices["BTC"] = 91.5
+    b.step()                                                         # hoy pierde 140 $ (1,43 %), no 3,44 %
+    assert b.halt_until == 0 and "n1" in b.positions and b.portfolio()["day_pnl"] == pytest.approx(-140, abs=0.01)
+    b.save_positions()                                               # ya con el precio de hoy: no rehace la foto
+    b2 = env.new()
+    b2.step()
+    assert b2.day_base == b.day_base and b2.portfolio()["day_pnl"] == pytest.approx(-140, abs=0.01)
+    # un día sin posiciones de antes: sin foto, lo realizado (aquí, nada)
+    env.clock.t = T0 + 3 * 1440 * MIN
+    b2.close("n1")
+    b3 = env.new()
+    env.clock.t += 1440 * MIN
+    b3.step()
+    assert b3.day_base.get("date") != "2026-10-27" and b3.portfolio()["day_pnl"] == pytest.approx(0, abs=0.01)
+
+
 # ---------------------------------------------------------------- precios sin actualizar
 
 def test_precio_sin_actualizar_no_entra_ni_mueve_stops_ni_cierra(env):

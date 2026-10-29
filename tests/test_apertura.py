@@ -1268,6 +1268,7 @@ async def test_motor_impulso_mide_espera_y_entra_a_los_30_min(monkeypatch):
     assert t["timing"] == "now" and t["side"] == "long" and t["instrument"] == "spot" and t["stopPct"] == 3.0
     assert t["tp2R"] == t["tp1R"] == 3.0 and t["tp1Frac"] == 0 and t["beR"] is None and t["trailPct"] is None
     assert t["winEnd"] == now[0] + 168 * ap.H and t["maxAgeMs"] == ap.MAX_FILL_DELAY_MS and t["risk"] == 0.5
+    assert t["holdLabel"] == "7 días de seguridad" and t["valid"].startswith("sin tope: como mucho 7 días (hasta el ")
     assert t["tags"]["rvol"] == pytest.approx(3.0) and t["strategy"] == strat and "(contado, paper)" in hl
     ev = next(m for m in bus.msgs if m["type"] == "event")
     assert ev["kind"] == "strategy" and ev["patch"]["tags"]["lado"] == "largo" and ev["patch"]["strat"]["tags"]
@@ -1275,6 +1276,7 @@ async def test_motor_impulso_mide_espera_y_entra_a_los_30_min(monkeypatch):
     x = _wimp(eng)["coins"]["BTC"]
     assert _wimp(eng)["state"] == "en_posicion" and x["state"] == "en_posicion" and x["rvol"] == pytest.approx(3.0)
     assert x["why"].startswith("En posición (paper): compra al contado a 100,31")
+    assert x["why"].endswith("sin tope de tiempo (7 días de seguridad)")   # E2: los 7 días son solo de seguridad
     assert x["plan"]["ok"] and x["plan"]["entry"] == 100.31 and x["plan"]["net_pct"] == pytest.approx(8.76)
 
 
@@ -1889,3 +1891,177 @@ async def test_motor_seis2_con_el_paper_real_a_medias_y_reinicio(tmp_path, monke
     assert run2.floor_px == pytest.approx(e * 1.04) and "la mitad ya salió" in run2.last_why
     assert broker.portfolio()["positions"][0]["qty"] == pytest.approx(p["qty"] / 2)
     store.close()
+
+
+# ---------------------------------------------------------------- «6 diarias 4R» (SEIS4R): stop 2 %, objetivo 4R, 7 días
+
+def _seis4r(**over):
+    return {**{k: v for k, v in ap.SEIS4R.items() if k not in ("estrategia", "windows", "coins")}, **over}
+
+
+def test_preset_seis4r_las_entradas_de_seis_con_stop_2_y_objetivo_4r(monkeypatch):
+    """«6 diarias 4R» (29-10-2026, la n.º 1 del ranking): las entradas y los límites de «6 diarias» con una horquilla pura
+    de stop 2 % y objetivo 4R, como mucho 7 días; un preset propio (no se confunde con ninguno) y dentro de las reglas
+    del usuario (BOT_USER_RULES=1): lo que baje de su mínimo sube, con aviso."""
+    from bot import config, evolucion
+    monkeypatch.setenv("BOT_USER_RULES", "1")
+    monkeypatch.setattr(config, "USER_RULES", True)
+    p, notes = ap.impulse_params(ap.SEIS4R)
+    assert not notes and p["lab"] is None and p["estrategia"] == "impulso" and ap.preset_of(p) == "seis4r"
+    seis = ap.impulse_params(ap.SEIS)[0]
+    for k in ("measure_min", "min_move_pct", "entry", "rvol_min", "vol_filter", "btc_filter", "news_mode", "windows",
+              "coins", "max_day_entries", "max_day_risk_pct", "risk_pct", "long_instrument", "short_instrument",
+              "min_net_pct", "modelo", "session_max_min"):
+        assert p[k] == seis[k], k   # las entradas y los límites de «6 diarias»
+    assert (p["sl_pct"], p["target_r"], p["max_hold_h"], p["avg_hold_h"]) == (2.0, 4.0, 168.0, 35.0)
+    assert (p["tp1_r"], p["tp1_frac"], p["lock_r"], p["floor_r"], p["trail_r"], p["trail_atr"]) == (None, 0.0, None, None,
+                                                                                                     None, None)
+    assert (p["max_hold_active_h"], p["be_r"], p["trail_start_r"], p["target_pct"]) == (None, None, None, None)
+    info = ap.preset_info(p)
+    assert info["nombre"] == "6 diarias 4R: stop 2 %, objetivo 4R, hasta 7 días" and info["preset"] == "seis4r"
+    assert "objetivo 4R (+8 %)" in info["descripcion"] and "veto de noticias fiables" in info["descripcion"]
+    for name in ("impulso", "seis", "seis2", "ruptura3"):   # los de antes siguen siendo ellos
+        assert ap.preset_of(ap.impulse_params(ap.PRESETS[name]["params"])[0]) == name
+    assert len({x["nombre"] for x in ap.PRESETS.values()}) == len(ap.PRESETS)
+    for over in ({"target_r": 3.0}, {"max_hold_h": 24}, {"sl_pct": 1.5}, {"min_move_pct": 0.2},
+                 {"tp1_r": 3.0, "tp1_frac": 0.5}):
+        assert ap.preset_of(ap.impulse_params({**ap.SEIS4R, **over})[0]) is None, over
+    assert ap.exit_text(p, corto=True) == "stop 2 % y objetivo 4R"
+    # los 7 días son su tope (la variante «tope 7d»), no unos días de seguridad como en E2
+    assert p["tope_propio"] is True and ap.hold_text(p) == "como mucho 7 días"
+    assert ap.exit_text(p) == "stop 2 % y objetivo 4R (+8 %), como mucho 7 días"
+    e2 = ap.impulse_params(ap.IMPULSO)[0]
+    assert e2["tope_propio"] is False
+    assert ap.exit_text(e2) == "stop 3 % y objetivo 3R (+9 %), sin tope (7 días de seguridad)"
+    assert not any(ap.impulse_params(ap.PRESETS[n]["params"])[0]["tope_propio"] for n in ("seis", "seis2", "ruptura3"))
+    assert ap.preset_of({**p, "tope_propio": False}) == "seis4r"   # solo cambia los textos, no lo que se opera
+    assert evolucion.firma_motor({**p, "tope_propio": False}) == evolucion.firma_motor(p)
+    limpio = {k: v for k, v in ap.SEIS4R.items() if k not in ("estrategia", "lab")}
+    ok, fallos = evolucion.cumple_reglas(limpio)
+    assert ok, fallos
+    f4 = evolucion.firma_motor(p)
+    assert f4 not in {evolucion.firma_motor(ap.impulse_params(ap.PRESETS[n]["params"])[0])
+                      for n in ("impulso", "seis", "seis2", "ruptura3")}
+    # con las reglas del usuario nada baja de su mínimo: el stop sube al 1,5 % y el objetivo a 2R (con aviso)
+    q, avisos = ap.impulse_params({**ap.SEIS4R, "sl_pct": 1.0, "target_r": 1.5})
+    assert (q["sl_pct"], q["target_r"]) == (1.5, 2.0) and len(avisos) == 2
+    assert all("regla del usuario" in a for a in avisos) and ap.preset_of(q) is None
+    for malo, motivo in (({"sl_pct": 1.0}, "stop 1,00 %"), ({"target_r": 1.5}, "objetivo 1,50R"),
+                         ({"be_r": 1.0}, "break-even"), ({"trail_r": 2.0}, "seguimiento sin cerrojo")):
+        ok, fallos = evolucion.cumple_reglas({**limpio, **malo})
+        assert not ok and any(motivo in f for f in fallos), (malo, fallos)
+
+
+def test_plan_seis4r_horquilla_pura_que_cumple_la_regla(monkeypatch):
+    """El plan desde la entrada real: stop −2 % y objetivo +8 % (4R), sin parcial, cerrojo, break-even ni dinámico; el
+    objetivo deja más del 3 % neto de costes (también con el funding esperado de un corto en 35 h) y el paper lo acepta
+    tal cual. Lo que rompe la regla no tiene plan."""
+    from bot import config, paper
+    monkeypatch.setattr(config, "USER_RULES", True)
+    p = ap.impulse_params(ap.SEIS4R)[0]
+    pl = ap.impulse_plan(1, 100.0, p)
+    assert pl["ok"] and pl["stop_px"] == pytest.approx(98.0) and pl["target_px"] == pytest.approx(108.0)
+    assert (pl["stopPct"], pl["tp1R"], pl["tp2R"], pl["tp1Frac"], pl["lockR"], pl["beR"], pl["trailStartR"]) == (
+        2.0, 4.0, 4.0, 0.0, None, None, None)
+    assert pl["rr"] == 4.0 and pl["gross_pct"] == pytest.approx(8.0) and [x["que"] for x in pl["partes"]] == ["objetivo"]
+    assert pl["net_pct"] == pytest.approx(8.0 - paper.cost_rt_pct("spot"), abs=1e-3) and pl["net_pct"] >= 3.0
+    assert pl["why"].startswith("Horquilla pura") and "sin break-even, stop dinámico ni parciales" in pl["why"]
+    corto = ap.impulse_plan(-1, 100.0, p, -0.03, "perp")   # el corto paga 0,03 %/8 h: en las 35 h de media, 0,13 %
+    assert corto["ok"] and corto["target_px"] == pytest.approx(92.0) and corto["partes"][0]["funding_h"] == 35.0
+    assert corto["funding_pct"] == pytest.approx(0.13125, abs=1e-4)
+    assert corto["net_pct"] == pytest.approx(8.0 - paper.cost_rt_pct("perp") - 0.13125, abs=1e-3)
+    t = {"coin": "BTC", "side": "long", "instrument": "spot", "stopPct": pl["stopPct"], "tp1R": pl["tp1R"],
+         "tp2R": pl["tp2R"], "tp1Frac": pl["tp1Frac"], "beR": None, "trailStartR": None, "trailPct": None}
+    ru = paper.exit_rules(t)
+    assert (ru["tp2R"], ru["tp1_frac"], ru["lock_r"], ru["be_r"], ru["trail"], ru["trail_start_r"], ru["dropped"]) == (
+        4.0, 0.0, None, None, None, None, [])
+    assert paper.rule_win_ok(4.0, 2.0, "spot") and paper.rule_win_ok(4.0, 2.0, "perp")
+    assert paper.PaperBroker._regla_neta(t, 2.0) is None
+    assert paper.PaperBroker._regla_neta({**t, "side": "short", "instrument": "perp"}, 2.0) is None
+    assert not ap.impulse_plan(1, 100.0, {**p, "sl_pct": 1.4})["ok"]      # stop por debajo del 1,5 %
+    assert not ap.impulse_plan(1, 100.0, {**p, "target_r": 1.5})["ok"]    # objetivo por debajo de 2R
+
+
+def test_simulate_plan_seis4r_objetivo_stop_y_cierre_a_los_7_dias(monkeypatch):
+    """La gestión del paper (simulate_plan) con el plan de SEIS4R: el objetivo de +8 % (4R) a su precio; si en la misma
+    vela tocan el stop y el objetivo, cuenta el stop; y si no toca ninguno, a las 168 h se cierra con lo que haya."""
+    from bot import config, paper
+    monkeypatch.setattr(config, "USER_RULES", True)
+    p = ap.impulse_params(ap.SEIS4R)[0]
+    fee, slip = config.FEE_PCT / 100, paper.COST_SLIP_BPS / 1e4
+    e = 100.0 * (1 + slip)
+    plan = ap.impulse_plan(1, e, p)
+    end = T0 + int(p["max_hold_h"] * ap.H)
+    bars = flat(T0, 3) + [bar(T0 + 3 * MIN, 100, 108.5, 99.9, 108.2)] + flat(T0 + 4 * MIN, 5, px=108.2)
+    r = ap.simulate_plan(bars, 0, 1, plan, end)
+    tp = e * 1.08
+    assert r["why"] == "objetivo" and r["first"] == "objetivo" and r["t"] == T0 + 4 * MIN and not r["partial"]
+    assert r["ret"] == pytest.approx((tp / e - 1 - fee * (1 + tp / e)) * 100) and r["R"] == pytest.approx(r["ret"] / 2)
+    assert 3.8 < r["R"] < 4.0
+    ambos = ap.simulate_plan(flat(T0, 2) + [bar(T0 + 2 * MIN, 100, 109, 97, 100)], 0, 1, plan, end)
+    assert ambos["why"] == "inicial" and ambos["first"] == "stop" and -1.2 < ambos["R"] < -1.0   # pesimista: el stop
+    quieto = flat(T0, 168 * 60 + 5)                          # 7 días sin tocar ni el stop ni el objetivo
+    r7 = ap.simulate_plan(quieto, 0, 1, plan, end)
+    assert r7["why"] == "tiempo" and r7["t"] == end and -0.2 < r7["R"] < 0   # la excepción conocida: con lo que haya
+    corto = ap.simulate_plan(flat(T0, 3) + [bar(T0 + 3 * MIN, 100, 100.1, 91.5, 91.8)], 0, -1,
+                             ap.impulse_plan(-1, 100.0 * (1 - slip), p, None, "perp"), end)
+    assert corto["why"] == "objetivo" and 3.8 < corto["R"] < 4.0
+
+
+def test_preset_seis4r3_la_misma_horquilla_con_stop_3(monkeypatch):
+    """«6 diarias 4R · stop 3 %» (29-10-2026, el usuario eligió «la que más ganancias dé»): las entradas y los límites de
+    «6 diarias 4R» con el stop al 3 % y el objetivo 4R (+12 %), como mucho 7 días; un preset propio, dentro de las reglas
+    del usuario, y su plan pone el stop a −3 % y el objetivo a +12 % en los largos (+3 % y −12 % en los cortos)."""
+    from bot import config, evolucion
+    monkeypatch.setenv("BOT_USER_RULES", "1")
+    monkeypatch.setattr(config, "USER_RULES", True)
+    p, notes = ap.impulse_params(ap.SEIS4R3)
+    assert not notes and ap.preset_of(p) == "seis4r3" and p["lab"] is None and p["tope_propio"] is True
+    s4 = ap.impulse_params(ap.SEIS4R)[0]
+    for k in ap.PRESET_KEYS:
+        if k != "sl_pct":
+            assert p[k] == s4[k], k   # todo igual que «6 diarias 4R» salvo el stop
+    assert (p["sl_pct"], p["target_r"], p["max_hold_h"], p["avg_hold_h"]) == (3.0, 4.0, 168.0, 59.0)
+    assert ap.preset_info(p)["nombre"] == "6 diarias 4R · stop 3 %: stop 3 %, objetivo 4R, hasta 7 días"
+    assert ap.exit_text(p) == "stop 3 % y objetivo 4R (+12 %), como mucho 7 días"
+    assert len({x["nombre"] for x in ap.PRESETS.values()}) == len(ap.PRESETS)
+    ok, fallos = evolucion.cumple_reglas({k: v for k, v in ap.SEIS4R3.items() if k not in ("estrategia", "lab")})
+    assert ok, fallos
+    assert evolucion.firma_motor(p) != evolucion.firma_motor(s4)
+    pl = ap.impulse_plan(1, 100.0, p)
+    assert pl["ok"] and pl["stop_px"] == pytest.approx(97.0) and pl["target_px"] == pytest.approx(112.0)
+    assert pl["rr"] == 4.0 and pl["net_pct"] >= 3.0 and [x["que"] for x in pl["partes"]] == ["objetivo"]
+    corto = ap.impulse_plan(-1, 100.0, p, -0.03, "perp")
+    assert corto["ok"] and corto["stop_px"] == pytest.approx(103.0) and corto["target_px"] == pytest.approx(88.0)
+
+
+async def test_motor_seis4r_estado_y_ticket_de_7_dias(monkeypatch):
+    """El motor con el preset entero: su nombre, «qué hará» y la salida en el estado; el ticket, una horquilla de stop 2 %
+    y objetivo 4R sin break-even ni cerrojo, con el tope de 7 días."""
+    from bot import config
+    monkeypatch.setattr(config, "USER_RULES", True)
+    now = [T0 - 30 * MIN]
+    full = ap.OpeningEngine(FakeBus(), None, lambda c, w: {"dir": 0}, lambda *a: True, lambda: {}, clock=lambda: now[0],
+                            params=dict(ap.SEIS4R))
+    await full.step()                                  # antes de armar ninguna apertura: sin red
+    st = full.view()
+    nombre = ap.PRESETS["seis4r"]["nombre"]
+    assert st["params"]["preset"] == "seis4r" and st["params"]["nombre"] == nombre and st["day"]["max_entries"] == 6
+    assert st["estrategia_cargada"]["preset"] == "seis4r" and st["salida_corta"] == "stop 2 % y objetivo 4R"
+    assert st["salida"] == "stop 2 % y objetivo 4R (+8 %), como mucho 7 días" and st["params"]["tope_propio"] is True
+    prog = next(w for w in st["windows"] if w["id"].startswith("europa-"))   # «Programadas»
+    assert prog["estrategia"] == nombre and prog["hara"] == (
+        "medirá el impulso de los 15 primeros min de BTC, ETH, SOL y XRP y entrará a las 09:15 en el sentido del "
+        "impulso; stop 2 % y objetivo 4R")
+    now[0] = T0 + 15 * MIN + 3000
+    eng, sent, _ = imp_engine(now, {"BTC": (1, 0.3)}, _seis4r())
+    await eng.step()
+    [(t, story, _hl, strat, _win)] = sent
+    assert story == "a-europa-2026-10-26-btc-1" and strat == "impulso-largo-sin-noticia" and t["instrument"] == "spot"
+    assert (t["stopPct"], t["tp1R"], t["tp2R"], t["tp1Frac"]) == (2.0, 4.0, 4.0, 0.0) and "lockR" not in t
+    assert t["beR"] is None and t["trailPct"] is None and t["trailStartR"] is None
+    assert t["winEnd"] == now[0] + 168 * ap.H and t["holdLabel"] == "tope de 7 días"   # su tope, no de seguridad
+    assert t["valid"].startswith("como mucho 7 días (hasta el ") and "(+8,00 %)" in t["inval"]
+    why = _rimp(eng, "BTC").last_why
+    assert why.endswith("; como mucho 7 días") and "seguridad" not in why
+    assert t["tags"]["preset"] is None   # con ventanas y monedas cambiadas no es el preset entero
