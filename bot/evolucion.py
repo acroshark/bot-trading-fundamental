@@ -121,6 +121,8 @@ FIRMA_KEYS = ("measure_min", "min_move_pct", "entry", "pb_frac", "entry_end_min"
               "btc_filter", "news_mode", "windows", "coins", "sl_pct", "target_r", "max_hold_h", "min_net_pct")
 # Salida parcial y cerrojo («6 diarias v2»): entran en la firma solo si se usan (sin ellos, la firma de siempre)
 FIRMA_SALIDA = ("tp1_r", "tp1_frac", "lock_r", "floor_r", "trail_r", "trail_atr", "max_hold_active_h")
+# Modelo de entrada distinto del impulso («ruptura3», Ruptura V3): entra en la firma con sus topes, solo si se usa
+FIRMA_MODELO = ("modelo", "brk_tf", "rp_max_apertura", "rp_stop_max_pct")
 
 TIPOS = {"fuente_añadida": "Medio añadido", "fuente_silenciada": "Medio silenciado",
          "fuente_retirada": "Medio retirado", "fuente_restaurada": "Medio restaurado",
@@ -688,6 +690,9 @@ def firma_motor(p: dict | None) -> str:
         v = (p or {}).get(k)
         if v not in (None, 0, 0.0, False):
             key[k] = _norm(v)
+    if (p or {}).get("modelo") not in (None, "impulso"):   # Ruptura V3: el modelo y sus topes, solo si se usa
+        for k in FIRMA_MODELO:
+            key[k] = _norm(p.get(k))
     return hashlib.sha1(json.dumps(key, sort_keys=True).encode()).hexdigest()[:12]
 
 

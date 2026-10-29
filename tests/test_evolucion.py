@@ -1304,3 +1304,44 @@ async def test_activar_seis2_por_decision_del_usuario(env, monkeypatch):
     assert st["salida_corta"] == "stop 2 %, la mitad en 3R y el resto corre" and st["day"]["max_entries"] == 6
     assert m.main(["--preset", "seis", *datos], ahora=ahora + 2000) == 0   # y se puede volver a «6 diarias»
     assert E.leer_estrategia_activa(path)["preset"] == "seis"
+
+
+async def test_activar_ruptura3_por_decision_del_usuario(env, monkeypatch):
+    """--preset ruptura3: estrategia_activa.json con el modelo «ruptura3» y sus topes, dentro de las reglas del usuario; el
+    motor la carga como RupturaRun con su nombre y su firma, y el historial dice el backtest fuera Y dentro de muestra."""
+    from bot import apertura as ap
+    store, bus, path = env
+    m = _script()
+    monkeypatch.setattr(m, "bot_en_marcha", lambda url, timeout=2.0: False)
+    ahora = ms(2026, 10, 29, 9, 0)
+    datos = ["--datos", str(path.parent), "--url", _url_cerrada()]
+    bt = path.parent / "backtest"
+    bt.mkdir(exist_ok=True)
+    (bt / "ruptura3_resumen.json").write_text(json.dumps({"fuera": {"n": 118, "mean_R": 0.4288, "win_rate": 0.508},
+                                                          "dentro": {"n": 159, "mean_R": -0.0331}}), encoding="utf-8")
+    assert m.main(["--preset", "seis2", *datos], ahora=ahora) == 0           # la de ahora: «6 diarias v2»
+    assert m.main(["--preset", "ruptura3", *datos], ahora=ahora + 1000) == 0
+    act = E.leer_estrategia_activa(path)
+    assert act["preset"] == "ruptura3" and act["nombre"].startswith("Ruptura V3") and act["fuente"] == "usuario"
+    assert E.validar_activa(act) == (True, None) and act["firma"] == E.firma_estrategia(act)
+    assert act["params"]["modelo"] == "ruptura3" and act["params"]["rp_max_apertura"] == 2
+    assert act["params"]["entry_end_min"] == 240 and act["params"]["news_mode"] == "corroboradas"
+    p = ap.impulse_params(E.params_motor(act))[0]
+    assert ap.preset_of(p) == "ruptura3" and E.firma_motor(p) == act["firma"]
+    e = E.leer(store, tipo="estrategia_cambiada")[0]
+    assert "Ruptura V3" in e["motivo"] and "R medio +0,43 en 118 operaciones (no es una ventaja demostrada)" in e["motivo"]
+    assert "dentro de muestra -0,03 en 159" in e["motivo"] and e["evidencia"]["backtest"]["archivo"] == "ruptura3_resumen.json"
+    assert e["antes"]["preset"] == "seis2" and e["despues"]["preset"] == "ruptura3"
+    monkeypatch.setenv("BOT_APERTURAS_ESTRATEGIA", "impulso")
+    monkeypatch.delenv("BOT_IMPULSO_PARAMS", raising=False)
+    eng = ap.OpeningEngine(bus, None, lambda c, w: {"dir": 0}, lambda *a: True, lambda: {}, clock=lambda: ahora,
+                           activa_path=path)
+    st = eng.view()
+    assert eng.firma == act["firma"] and st["params"]["preset"] == "ruptura3" and st["params"]["modelo"] == "ruptura3"
+    assert st["salida_corta"] == "stop 2-3 %, la mitad en 3R y el resto corre"
+    assert isinstance(eng._new_run("BTC", ahora), ap.RupturaRun)
+    assert m.main(["--preset", "seis2", *datos], ahora=ahora + 2000) == 0   # y se puede volver a «6 diarias v2»
+    back = E.leer_estrategia_activa(path)
+    assert back["preset"] == "seis2" and type(ap.OpeningEngine(bus, None, lambda c, w: {"dir": 0}, lambda *a: True,
+                                                                lambda: {}, clock=lambda: ahora, activa_path=path)
+                                              ._new_run("BTC", ahora)) is ap.ImpulseRun

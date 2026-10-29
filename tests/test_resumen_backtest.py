@@ -79,7 +79,7 @@ async def test_ruta_con_seis(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "BACKTEST_DIR", tmp_path)
     store = Store(tmp_path / "bot.db")
     (tmp_path / rb.SEIS_FILE).write_text(json.dumps(_seis()), encoding="utf-8")
-    assert set(rb.load()) == {"impulso", "lab", "seis", "seis2", "costes"}   # costes: con qué comisiones
+    assert set(rb.load()) == {"impulso", "lab", "seis", "seis2", "ruptura3", "costes"}   # costes: con qué comisiones
     async with TestClient(TestServer(make_app(Bus(store), lambda: {}))) as client:
         r = await client.get("/api/backtest/impulso")   # solo con «6 diarias» ya responde
         assert r.status == 200
@@ -131,7 +131,7 @@ async def test_seis2_en_la_ruta_y_en_la_demostracion(tmp_path, monkeypatch):
     store = Store(tmp_path / "bot.db")
     (tmp_path / rb.SEIS2_FILE).write_text(json.dumps(_seis2()), encoding="utf-8")
     res = rb.load()
-    assert set(res) == {"impulso", "lab", "seis", "seis2", "costes"} and res["seis"] is None
+    assert set(res) == {"impulso", "lab", "seis", "seis2", "ruptura3", "costes"} and res["seis"] is None
     s2 = res["seis2"]
     assert s2["nombre"] == "6 diarias v2" and s2["params"]["lock_r"] == 3.0 and s2["params"]["target_r"] is None
     assert s2["fuera"]["salidas"]["cerrojo"] == 57 and len(s2["fuera"]["curva_R"]) == rb.CURVE_POINTS + 1
@@ -204,3 +204,56 @@ async def test_ruta_impulso_lleva_los_costes(tmp_path, monkeypatch):
         d = await (await client.get("/api/backtest/impulso")).json()
         assert d["costes"]["perfil"] == "okx_eu_con_xperps" and d["impulso"]["costes"]["comision_pct"] == 0.1
     store.close()
+
+
+def _rup3() -> dict:
+    d = _impulso(300)
+    d.update(sl_pct=2.0, nota="réplica del motor con RUPTURA3", nombre="Ruptura V3: rango de apertura con tendencia, volumen y régimen",
+             params={"modelo": "ruptura3", "measure_min": 15, "entry": "brk", "entry_end_min": 240, "sl_pct": 2.0,
+                     "rp_stop_max_pct": 3.0, "rp_max_apertura": 2, "tp1_r": 3.0, "tp1_frac": 0.5, "lock_r": 3.0})
+    d["fuera"].update(mean_R=0.4288, op_jornada=0.386,
+                      antes_de_costes={"n": 118, "R_bruto": 0.5392, "costes_R": -0.1107, "R_neto": 0.4285})
+    d["dentro"]["antes_de_costes"] = {"n": 159, "R_bruto": 0.0868, "costes_R": -0.1198, "R_neto": -0.033}
+    return d
+
+
+async def test_ruptura3_en_la_ruta_y_en_la_demostracion(tmp_path, monkeypatch):
+    """ruptura3_resumen.json (scripts/replica_ruptura3.py) sale en /api/backtest/impulso con «antes_de_costes» dentro de
+    fuera y dentro, y se incrusta en la demostración (ruptura3Data) detrás de seis2Data; en vivo se quita."""
+    import importlib.util
+    from pathlib import Path
+    from bot import server
+    monkeypatch.setattr(config, "BACKTEST_DIR", tmp_path)
+    store = Store(tmp_path / "bot.db")
+    (tmp_path / rb.RUPTURA3_FILE).write_text(json.dumps(_rup3()), encoding="utf-8")
+    res = rb.load()
+    assert res["seis2"] is None and res["ruptura3"]["nombre"].startswith("Ruptura V3")
+    f = res["ruptura3"]["fuera"]
+    assert f["antes_de_costes"]["R_bruto"] == 0.5392 and f["op_jornada"] == 0.386 and len(f["curva_R"]) == rb.CURVE_POINTS + 1
+    assert res["ruptura3"]["dentro"]["antes_de_costes"]["R_neto"] == -0.033 and res["ruptura3"]["costes"]["comision_pct"] == 0.1
+    async with TestClient(TestServer(make_app(Bus(store), lambda: {}))) as client:
+        r = await client.get("/api/backtest/impulso")   # solo con la Ruptura V3 ya responde
+        assert r.status == 200
+        d = await r.json()
+        assert d["ruptura3"]["params"]["modelo"] == "ruptura3" and d["ruptura3"]["fuera"]["mean_R"] == 0.4288
+    store.close()
+    root = Path(__file__).resolve().parents[1]
+    spec = importlib.util.spec_from_file_location("incrustar_backtest", root / "scripts" / "incrustar_backtest.py")
+    inc = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(inc)
+    page = tmp_path / "radar.html"
+    page.write_text('<html><!--BT--></html>', encoding="utf-8")
+    bt = tmp_path / "bt"
+    bt.mkdir()
+    (bt / "resultados.json").write_text(json.dumps({"strategies": []}), encoding="utf-8")
+    (bt / rb.SEIS2_FILE).write_text(json.dumps(_seis2()), encoding="utf-8")
+    (bt / rb.RUPTURA3_FILE).write_text(json.dumps(_rup3()), encoding="utf-8")
+    monkeypatch.setattr(inc, "PAGE", page)
+    monkeypatch.setattr(config, "BACKTEST_DIR", bt)
+    inc.main()
+    html = page.read_text(encoding="utf-8")
+    m3, m2 = inc.BLOCK_RUP3.search(html), inc.BLOCK_SEIS2.search(html)
+    assert m3 and '"modelo":"ruptura3"' in m3.group(0) and m2.end() < m3.start()   # justo detrás de seis2Data
+    inc.main()                                                                       # otra vez: se reemplaza
+    assert page.read_text(encoding="utf-8").count('id="ruptura3Data"') == 1
+    assert "ruptura3Data" not in server.BT_BLOCK.sub("<!--BT-->", page.read_text(encoding="utf-8"))

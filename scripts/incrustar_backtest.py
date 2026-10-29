@@ -5,7 +5,8 @@ Con el bot en marcha la web no usa esto: pide /api/backtest.
 También incrusta un resumen ligero del laboratorio (labData): el ejemplo de la pestaña Evolución lo usa para poner los
 nombres y las cifras fuera de muestra reales de sus estrategias prometedoras (todo lo demás del ejemplo es inventado).
 Y el backtest del motor en vivo (impulsoData, E2) y los de las estrategias «6 diarias» (seisData, de
-seis_diarias_resumen.json) y «6 diarias v2» (seis2Data, de seis2_resumen.json), con la curva de R reducida.
+seis_diarias_resumen.json), «6 diarias v2» (seis2Data, de seis2_resumen.json) y «Ruptura V3» (ruptura3Data, de
+ruptura3_resumen.json), con la curva de R reducida.
 """
 import json
 import re
@@ -15,7 +16,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from bot import config  # noqa: E402
-from bot.resumen_backtest import (SEIS2_FILE, SEIS_FILE, impulso_summary,  # noqa: E402
+from bot.resumen_backtest import (RUPTURA3_FILE, SEIS2_FILE, SEIS_FILE, impulso_summary,  # noqa: E402
                                   lab_summary, seis_summary)
 
 PAGE = ROOT / "dashboard" / "radar.html"
@@ -25,6 +26,7 @@ BLOCK_LAB = re.compile(r'<script type="application/json" id="labData">.*?</scrip
 BLOCK_IMP = re.compile(r'<script type="application/json" id="impulsoData">.*?</script>', re.S)
 BLOCK_SEIS = re.compile(r'<script type="application/json" id="seisData">.*?</script>', re.S)
 BLOCK_SEIS2 = re.compile(r'<script type="application/json" id="seis2Data">.*?</script>', re.S)
+BLOCK_RUP3 = re.compile(r'<script type="application/json" id="ruptura3Data">.*?</script>', re.S)
 POINTS = 40
 
 
@@ -108,7 +110,25 @@ def main() -> None:
                  or BLOCK_OPEN.search(html) or BLOCK.search(html))
             html = html[:m.end()] + "\n" + tag6 + html[m.end():]
         print(f"Incrustado el backtest de «6 diarias v2» ({len(tag6) / 1024:.1f} KB)")
+    html = incrustar_ruptura3(html)
     PAGE.write_text(html, encoding="utf-8")
+
+
+def incrustar_ruptura3(html: str) -> str:
+    """El bloque ruptura3Data (la Ruptura V3, réplica de 3 años: fuera de muestra gana y dentro no, tal cual), justo
+    detrás del último bloque de datos. Sin ruptura3_resumen.json, la página tal cual."""
+    src = config.BACKTEST_DIR / RUPTURA3_FILE
+    if not src.exists():
+        return html
+    tag = _tag("ruptura3Data", seis_summary(json.loads(src.read_text(encoding="utf-8"))))
+    if BLOCK_RUP3.search(html):
+        return BLOCK_RUP3.sub(lambda _: tag, html)
+    m = (BLOCK_SEIS2.search(html) or BLOCK_SEIS.search(html) or BLOCK_IMP.search(html) or BLOCK_LAB.search(html)
+         or BLOCK_OPEN.search(html) or BLOCK.search(html))
+    if not m:
+        raise SystemExit("No encuentro ningún bloque de datos del backtest en la web")
+    print(f"Incrustado el backtest de la Ruptura V3 ({len(tag) / 1024:.1f} KB)")
+    return html[:m.end()] + "\n" + tag + html[m.end():]
 
 
 if __name__ == "__main__":

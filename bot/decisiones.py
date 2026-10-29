@@ -44,7 +44,11 @@ FASES = ("medida", "entrada", "riesgo", "paper", "cierre", "perdida")
 DECISIONES = ("entra", "no_entra", "rechazada", "perdida", "abierta", "parcial", "cerrada", "esperando")
 MOTIVOS = ("entra", "impulso_nulo", "impulso_bajo", "tarde", "sin_velas", "veto_noticia", "tope_dia", "riesgo_dia",
            "perdida_dia", "exposicion", "moneda_ocupada", "max_posiciones", "reglas", "aprobacion", "bot_parado",
-           "objetivo", "stop", "cerrojo", "tiempo", "sin_cortos", "otro")   # sin_cortos: perfil de comisiones sin X-Perps
+           "objetivo", "stop", "cerrojo", "tiempo", "sin_cortos", "otro",   # sin_cortos: perfil de comisiones sin X-Perps
+           # Ruptura V3 (preset ruptura3, 29-10-2026): régimen, tendencia, rango, potencia, stop y tope por apertura
+           "regimen_neutral", "sin_tendencia", "adx_bajo", "ruptura_contra", "sin_ruptura", "sin_volumen",
+           "sin_expansion", "stop_lejos", "tope_apertura",
+           "sin_contexto")   # la sesión acabó sin que llegara el contexto (régimen, tendencias o velas de 1 h y 4 h)
 FINALES = ("no_entra", "rechazada", "perdida", "cerrada")   # tras una de estas, esa apertura×moneda no vuelve a intentar
 COLS = tuple(c for c, _ in DECISIONES_COLS)
 DIAS_API = 3                  # GET /api/decisiones sin «desde»: los 3 últimos días

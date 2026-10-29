@@ -2,11 +2,15 @@
 
 Uso (con el bot PARADO y también su vigilante: scripts/vigilante-bot.ps1 relanza el bot unos 2 min después de que caiga;
 antes de pararlo, crear el archivo DATA_DIR\\parar-vigilante y borrarlo después de volver a arrancar):
+    M:\\BotFundamental-runtime\\venv\\Scripts\\python.exe -X utf8 scripts\\activar_estrategia.py --preset ruptura3
     M:\\BotFundamental-runtime\\venv\\Scripts\\python.exe -X utf8 scripts\\activar_estrategia.py --preset seis2
     M:\\BotFundamental-runtime\\venv\\Scripts\\python.exe -X utf8 scripts\\activar_estrategia.py --preset seis
     M:\\BotFundamental-runtime\\venv\\Scripts\\python.exe -X utf8 scripts\\activar_estrategia.py --preset impulso
-«seis2» activa «6 diarias v2» (apertura.SEIS2: las entradas de «6 diarias» con la mitad en 3R y el resto con el
-cerrojo); «seis» activa «6 diarias» (apertura.SEIS); «impulso» vuelve al preset de siempre (E2, apertura.IMPULSO).
+«ruptura3» activa «Ruptura V3: rango de apertura con tendencia, volumen y régimen» (apertura.RUPTURA3, modelo
+«ruptura3»: solo la moneda con el régimen cripto y su tendencia a favor, ruptura del rango de 15 min con volumen y
+expansión, stop 2-3 %, como mucho 2 por apertura y la salida A; su backtest, ruptura3_resumen.json); «seis2» activa
+«6 diarias v2» (apertura.SEIS2: las entradas de «6 diarias» con la mitad en 3R y el resto con el cerrojo); «seis»
+activa «6 diarias» (apertura.SEIS); «impulso» vuelve al preset de siempre (E2, apertura.IMPULSO).
 
 Qué hace:
 1. Se niega si el bot responde en /health (el historial se escribe en bot.db, que es del bot mientras está en marcha) o si
@@ -36,10 +40,10 @@ from zoneinfo import ZoneInfo
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from bot import apertura, config, evolucion  # noqa: E402
-from bot.resumen_backtest import SEIS2_FILE, SEIS_FILE  # noqa: E402
+from bot.resumen_backtest import RUPTURA3_FILE, SEIS2_FILE, SEIS_FILE  # noqa: E402
 
 MAD = ZoneInfo("Europe/Madrid")
-BACKTEST = {"seis2": SEIS2_FILE, "seis": SEIS_FILE, "impulso": "impulso_7d.json"}
+BACKTEST = {"ruptura3": RUPTURA3_FILE, "seis2": SEIS2_FILE, "seis": SEIS_FILE, "impulso": "impulso_7d.json"}
 
 
 def bot_en_marcha(url: str, timeout: float = 2.0) -> bool:
@@ -73,7 +77,11 @@ def _txt_bt(bt: dict | None) -> str:
         return ""
     r = f"{f['mean_R']:+.2f}".replace(".", ",")
     veredicto = "no es una ventaja" if f["mean_R"] <= 0 else "no es una ventaja demostrada"
-    return f" Backtest de 3 años fuera de muestra: R medio {r} en {f['n']} operaciones ({veredicto}); se mide en paper."
+    d = (bt or {}).get("dentro") or {}
+    dentro = (f"; dentro de muestra {d['mean_R']:+.2f} en {d['n']}".replace(".", ",")
+              if f["mean_R"] > 0 and d.get("n") is not None and d.get("mean_R") is not None else "")
+    return (f" Backtest de 3 años fuera de muestra: R medio {r} en {f['n']} operaciones ({veredicto}){dentro}; se mide "
+            "en paper.")
 
 
 def construir(preset: str, ahora: int, eid: str, bt: dict | None = None, extra: str | None = None) -> dict:
@@ -151,8 +159,9 @@ def activar(preset: str, datos: Path, ahora: int | None = None, extra: str | Non
 def main(argv: list[str] | None = None, ahora: int | None = None) -> int:
     ap = argparse.ArgumentParser(description="Cambia la estrategia del motor de aperturas (solo paper).")
     ap.add_argument("--preset", required=True, choices=sorted(apertura.PRESETS),
-                    help="seis2 = «6 diarias v2» (la mitad en 3R y el resto con el cerrojo); seis = «6 diarias»; "
-                         "impulso = volver a E2 (el preset de siempre)")
+                    help="ruptura3 = «Ruptura V3» (rango de apertura con tendencia, volumen y régimen); seis2 = «6 "
+                         "diarias v2» (la mitad en 3R y el resto con el cerrojo); seis = «6 diarias»; impulso = volver "
+                         "a E2 (el preset de siempre)")
     ap.add_argument("--datos", type=Path, default=config.DATA_DIR, help="carpeta de datos (por defecto DATA_DIR)")
     ap.add_argument("--url", default=f"http://{config.HOST}:{config.PORT}/health",
                     help="dirección de /health del bot (si responde, no se cambia nada)")

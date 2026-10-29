@@ -14,6 +14,17 @@ bot/fiables.py). Pierde en el backtest de 3 años: se mide en paper y solo se ac
 Preset SEIS2 («6 diarias v2», 28-10-2026, lo eligió el usuario: la salida «A»): las entradas de SEIS con stop 2 %, la
 mitad en 3R y el resto con un cerrojo (a +3R su stop sube a +2R y lo sigue a 2R; 24 h sin activar, 7 días activado).
 Antes del cerrojo el stop no se mueve. También pierde en 3 años (menos): se mide en paper (--preset seis2).
+Preset RUPTURA3 («Ruptura V3», 29-10-2026, lo pidió el usuario; modelo «ruptura3», RupturaRun): la variante V3 de
+BACKTEST_DIR/controles/selectiva/diseno_ruptura.md. Solo opera la moneda que va a favor del régimen cripto (largos en
+RISK_ON, cortos en RISK_OFF) con la tendencia diaria y de 4 h en ese sentido y ADX(14) de 4 h ≥ 25; entra cuando una
+vela de 5 min cierra fuera del rango de los 15 primeros min, a favor, con volumen ≥ 1,5 × el del rango y rango verdadero
+≥ 1,5 × ATR(14) de 5 min, antes de +240 min; stop máx(2 %, otro lado del rango + 0,10 %) hasta el 3 %; como mucho 2
+por apertura (la que dispara antes y, a la vez, la de mayor ADX); la salida A de SEIS2 con R = ese stop; veto de una
+noticia corroborada en contra (news_mode «corroboradas»). Las cuentas, en bot/ruptura3.py. Réplica de 3 años
+(scripts/replica_ruptura3.py, BACKTEST_DIR/ruptura3_resumen.json): fuera de muestra +0,43 R en 118 operaciones, dentro
+−0,03 R en 159: NO es una ventaja demostrada (--preset ruptura3). Su puerta prerregistrada (sobre V1) no pasa y V3 es
+la mejor de las 23 configuraciones medidas fuera de muestra (cifra optimista); lo de fuera sale de los cortos en RISK_OFF
+(los largos de 3 años, ≈ +0,01 R) y sin cuenta X-Perps no hay cortos. En NEUTRAL no opera nada (docs/05, sección 24).
 Los topes diarios de entradas y de riesgo cuentan TODAS las entradas del paper del día (paper_day_entries): son
 compartidos con la entrada por noticia confirmada (bot/entrada_noticias.py).
 Por qué entra o no (28-10-2026): en modo impulso cada punto de decisión de cada apertura×moneda queda en la tabla
@@ -55,8 +66,9 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import aiohttp
+import numpy as np
 
-from . import comisiones, config, paper, reflejo, regions
+from . import comisiones, config, paper, reflejo, regions, ruptura3
 from .models import now_ms
 
 log = logging.getLogger("apertura")
@@ -157,6 +169,9 @@ PRE_MIN = 80                # velas de antes de la apertura (rvol sin historia y
 SUBMIT_GRACE_MS = 20_000    # tras este plazo sin rastro en el paper, la orden se da por bloqueada
 KEEP_MS = 8 * H             # ventanas terminadas que siguen en el estado
 ACTIVA_CHECK_S = 60         # cada cuánto se mira si cambió estrategia_activa.json (evolución)
+ESPERA_MAX_S = 300          # fallo de datos: espera creciente (10, 20, 40… s) de esa moneda o del régimen, hasta 5 min
+REGIMEN = "_regimen"        # clave de la espera del régimen cripto de una ventana (Ruptura V3; no es una moneda)
+FUNDING_EDAD_MAX_H = 16     # Ruptura V3: una última liquidación de funding más vieja que esto no vale para el régimen
 
 # Festivos de cada bolsa: calendario mínimo de 2026 y 2027 con los seguros (regions solo mira el día de la semana).
 # Una ventana no se opera si todas sus bolsas tienen festivo. Si aquí falta uno, ese día se opera como uno normal.
@@ -1123,6 +1138,30 @@ def _fiables(coin: str, news, now: int, p: dict) -> list[dict]:
     return out
 
 
+def _macros(news, now: int, p: dict) -> list[dict]:
+    """Noticias macro o geopolíticas de las news_hours horas previas que la cripto confirmó (reflejo.macro_confirmada:
+    se miden con la media de las cuatro monedas, así que valen para todas), con su sentido. Las usa el veto de
+    news_mode «corroboradas» (Ruptura V3, diseno_ruptura.md, sección 9): no se entra contra una de ellas."""
+    out = []
+    for n in news or []:
+        if not isinstance(n, dict) or n.get("archivada") or n.get("kind") == "lowprio":
+            continue
+        if n.get("srcState") in ("silenciada", "retirada") or _f(n.get("srcWeight"), 1.0) <= 0:
+            continue
+        ts = _f(n.get("ts"))
+        if ts is None or not 0 <= (now - ts) / H <= p["news_hours"]:
+            continue
+        tr = _triage(n)
+        d = reflejo.direccion(tr)
+        imp = _f(tr.get("importancia"))
+        if not d or (imp is not None and imp < config.TRIAGE_MIN):
+            continue
+        if reflejo.macro_confirmada(n.get("title"), tr, n.get("reflejo"), n.get("clase")):
+            out.append({"story": n.get("story"), "dir": d, "ts": int(ts),
+                        "titular": _cut(tr.get("resumen") or n.get("title") or "", 120)})
+    return out
+
+
 def _pred(coin: str, markets: list[str], open_ms: int, predictions) -> tuple[float, str] | None:
     """Predicción de la ventana cripto de la moneda. Las de los índices (kind «bolsa») ya no cuentan (28-10-2026): al
     usuario no le importa el índice, sino la cripto; hasta entonces pesaban el 40 %."""
@@ -1180,6 +1219,9 @@ def signal_from(coin: str, markets: list[str], open_ms: int, plans=None, news=No
     fl = _fiables(coin, news, now, p)
     if fl:   # noticias de grupos fiables (veto de news_mode «fiables»); sin ellas el campo no sale
         out["fiables"] = fl
+    mc = _macros(news, now, p)
+    if mc:   # macros que la cripto confirmó (veto de news_mode «corroboradas», Ruptura V3); sin ellas no sale
+        out["macro"] = mc
     return out
 
 
@@ -1323,7 +1365,13 @@ ATR_H_N, ATR_LOOK_H = 14, 720        # ATR de 14 h en percentil de las 720 h pre
 LAB_BREAK_BPS, LAB_BREAK_FRAC = 2.0, 0.05   # margen de la ruptura del laboratorio (sobre la apertura y el rango)
 VOL_FILTERS = ("todos", "no_baja", "alta", "baja")
 BTC_FILTERS = ("ninguno", "no_contra", "a_favor")
-NEWS_MODES = ("no_contra", "a_favor", "etiqueta", "fiables")   # fiables: veto de una noticia FIABLE en contra
+NEWS_MODES = ("no_contra", "a_favor", "etiqueta", "fiables", "corroboradas")   # fiables: veto de una noticia FIABLE en
+# contra; corroboradas (Ruptura V3): la de un grupo fiable o una macro que la cripto confirmó (reflejo), en contra
+NEWS_TXT = {"no_contra": "no si las noticias van claramente en contra", "a_favor": "solo con noticias a favor",
+            "fiables": "no si una noticia de un grupo fiable va en contra",
+            "corroboradas": "no si una noticia corroborada (de un grupo fiable o una macro que la cripto confirmó) va en "
+                            "contra"}
+MODELOS = ("impulso", "ruptura3")    # qué decide la entrada: el impulso (ImpulseRun) o la Ruptura V3 (RupturaRun)
 IMP_STATES = ("esperando_apertura", "midiendo_impulso", "esperando_entrada", "en_posicion", "terminada")
 PRIOR_TRIES_IMP = 6                  # intentos de bajar las sesiones anteriores (rvol) antes de darlas por perdidas
 INST_TEXT = {"spot": "al contado", "perp": "en perpetuo"}
@@ -1369,6 +1417,10 @@ IMPULSO = {
     "max_day_risk_pct": 2.0,
     "session_max_min": 120,     # fin de la fase de entrada (la posición sigue en el paper)
     "lab": LAB_REF,             # estrategia del laboratorio que reproduce (None si se cambia alguna regla)
+    # Ruptura V3 (29-10-2026): con modelo «impulso» no se usan
+    "modelo": "impulso",        # impulso (ImpulseRun) | ruptura3 (RupturaRun: régimen, tendencia, rango y potencia)
+    "rp_max_apertura": 2,       # ruptura3: entradas como mucho por apertura (None = sin tope)
+    "rp_stop_max_pct": 3.0,     # ruptura3: stop estructural máximo; más lejos no se entra (el suelo es sl_pct)
 }
 # Preset SEIS («6 diarias», 28-10-2026, decisión del usuario: quiere ≥ 6 operaciones al día en la cartera de prueba).
 # Es el impulso de los 15 primeros min SIN filtros (cualquier movimiento ≠ 0, sin volumen relativo, volatilidad ni BTC),
@@ -1434,6 +1486,45 @@ SEIS2 = {
     "avg_hold_h": 16,           # duración media para el funding esperado (15,2 h dentro y 17,3 h fuera en la réplica)
     "lab": None,
 }
+# Preset RUPTURA3 («Ruptura V3: rango de apertura con tendencia, volumen y régimen», 29-10-2026, lo pidió el usuario:
+# «prueba Ruptura V3 o lo que haga falta»). Es la variante V3 de BACKTEST_DIR/controles/selectiva/diseno_ruptura.md
+# (reglas fijadas antes de medir; RupturaRun y bot/ruptura3.py):
+# - Solo se mira la moneda con el régimen cripto a favor (crypto-regime-analyzer con las 4 monedas: largos en RISK_ON,
+#   cortos en RISK_OFF, nada en NEUTRAL), la tendencia diaria y la de 4 h en ese sentido y ADX(14) de 4 h ≥ 25 con el
+#   DI a favor.
+# - Rango de los 15 primeros min (measure_min). Dispara la primera vela de 5 min (brk_tf) que cierra fuera del rango
+#   más el margen, a favor, con volumen ≥ 1,5 × el de las velas de 5 min del rango y rango verdadero ≥ 1,5 × ATR(14) de
+#   5 min, antes de +240 min (entry_end_min). Un cierre al otro lado antes la descarta en esa apertura.
+# - Stop estructural: máx(sl_pct = 2 %, otro lado del rango + 0,10 %); más del 3 % (rp_stop_max_pct), no se entra.
+# - Como mucho 2 por apertura (rp_max_apertura): la que dispara antes y, en la misma vela, la de mayor ADX.
+# - La salida A de SEIS2 con R = el stop de la operación (la mitad en 3R; la otra mitad, a +3R, al suelo de 2R y
+#   seguimiento a 2R; 24 h / 7 días); los límites del día de SEIS (6 entradas, 3 % de riesgo).
+# - Noticias: solo veto (news_mode «corroboradas»): no se entra si en las 6 h previas al disparo hay una noticia de un
+#   grupo fiable que pasa su puerta, o una macro que la cripto confirmó (reflejo), en contra.
+# HONESTO: réplica del motor de 3 años (scripts/replica_ruptura3.py, la misma que medir_selectiva.py, operación a
+# operación): +0,43 R por operación fuera de muestra (118, 0,39 por jornada) pero −0,03 R dentro (159); 3 años +0,16 R.
+# Frente a su base con el sentido al azar, p = 0,09: NO es una ventaja demostrada. La puerta fijada antes de medir (sobre
+# V1) dio «no pasa» y el diseño no asciende otra variante tras ver los datos: V3 sale de la regla de elección (máximo R
+# dentro con ≥ 150 operaciones) y es la mejor fuera de muestra de las 23 medidas, así que +0,43 R es optimista. Fuera,
+# 90 cortos en RISK_OFF dan 46 de los 50,5 R; los 166 largos de 3 años, ≈ +0,01 R por operación (sin X-Perps, −0,22 R).
+# Se mide en paper por decisión del usuario (--preset ruptura3).
+RUPTURA3 = {
+    **SEIS2,
+    "modelo": "ruptura3",
+    "measure_min": 15,          # rango de apertura: los 15 primeros min
+    "min_move_pct": 0.0,        # (no se usa: decide la ruptura)
+    "entry": "brk",             # ruptura del rango ...
+    "brk_tf": 5,                # ... al cierre de una vela de 5 min
+    "entry_end_min": 240,       # la ruptura tiene que llegar antes de +240 min (V3, «RP-15 tarde»)
+    "rvol_min": None,           # el volumen se mide contra el del rango (×1,5), no contra sesiones anteriores
+    "vol_filter": "todos",
+    "btc_filter": "ninguno",    # el régimen cripto y la tendencia de la propia moneda sustituyen al filtro de BTC
+    "news_mode": "corroboradas",
+    "sl_pct": 2.0,              # suelo del stop (el estructural, si es mayor, hasta rp_stop_max_pct)
+    "rp_stop_max_pct": 3.0,
+    "rp_max_apertura": 2,
+    "lab": None,
+}
 PRESETS = {
     "impulso": {"params": IMPULSO, "nombre": "E2 · impulso",
                 "descripcion": "Impulso de los primeros 15 min (≥ 0,2 %) con volumen relativo ≥ 1,5 y BTC a favor, "
@@ -1445,18 +1536,27 @@ PRESETS = {
               "descripcion": "Impulso de los primeros 15 min sin filtros, stop 2 %; la mitad sale en 3R y el resto "
                              "corre con un cerrojo (a +3R su stop sube a +2R y sigue al precio a 2R); 24 h sin "
                              "activar y hasta 7 días activado; veto de noticias fiables en contra"},
+    "ruptura3": {"params": RUPTURA3, "nombre": "Ruptura V3: rango de apertura con tendencia, volumen y régimen",
+                 "descripcion": "Solo la moneda con el régimen cripto, la tendencia diaria y la de 4 h (ADX ≥ 25) a "
+                                "favor; entra si una vela de 5 min cierra fuera del rango de los 15 primeros min con "
+                                "volumen ≥ 1,5 × el del rango y expansión ≥ 1,5 ATR, antes de +240 min; stop 2-3 % "
+                                "(el otro lado del rango), como mucho 2 por apertura; la mitad sale en 3R y el resto "
+                                "corre con el cerrojo; veto de noticias corroboradas en contra"},
 }
 EXIT_KEYS = ("tp1_r", "tp1_frac", "lock_r", "floor_r", "trail_r", "trail_atr", "max_hold_active_h")   # la salida
+RP_KEYS = ("rp_max_apertura", "rp_stop_max_pct")   # Ruptura V3 (solo cuentan con el modelo «ruptura3»)
 # Parámetros de operativa que identifican un preset (preset_of): con todos iguales, es ese preset
 PRESET_KEYS = ("measure_min", "min_move_pct", "entry", "pb_frac", "entry_end_min", "brk_tf", "rvol_min", "vol_filter",
                "btc_filter", "news_mode", "windows", "coins", "sl_pct", "target_r", "max_hold_h", "min_net_pct",
-               "long_instrument", "short_instrument", "risk_pct", "max_day_entries", "max_day_risk_pct", *EXIT_KEYS)
+               "long_instrument", "short_instrument", "risk_pct", "max_day_entries", "max_day_risk_pct", *EXIT_KEYS,
+               "modelo", *RP_KEYS)
 LAB_KEYS = ("measure_min", "min_move_pct", "entry", "rvol_min", "vol_filter", "btc_filter", "windows", "coins",
-            "sl_pct", "target_r", "tp1_frac", "lock_r")   # con todas como en el preset, se reproduce LAB_REF
+            "sl_pct", "target_r", "tp1_frac", "lock_r", "modelo")   # con todas como en el preset, se reproduce LAB_REF
 IMP_STATUS_KEYS = ("estrategia", "measure_min", "min_move_pct", "entry", "pb_frac", "entry_end_min", "brk_tf", "rvol_min",
                    "vol_filter", "btc_filter", "news_mode", "windows", "coins", "sl_pct", "target_r", "target_pct",
                    "max_hold_h", "min_net_pct", "avg_hold_h", "long_instrument", "short_instrument", "min_strength",
-                   "risk_pct", "max_day_entries", "max_day_risk_pct", "session_max_min", "lab", *EXIT_KEYS)
+                   "risk_pct", "max_day_entries", "max_day_risk_pct", "session_max_min", "lab", *EXIT_KEYS,
+                   "modelo", *RP_KEYS)
 
 
 def entry_kind(entry) -> tuple[str, int | None]:
@@ -1491,7 +1591,8 @@ def impulse_params(over: dict | None = None) -> tuple[dict, list[str]]:
     floor_r), parcial opcional (tp1_r + tp1_frac), seguimiento (trail_r o trail_atr) y tope de tiempo activado
     (max_hold_active_h); sin objetivo final (target_r None) solo con cerrojo, y el seguimiento sin cerrojo no se usa
     (nada mueve el stop antes del cerrojo). Con las reglas del usuario, stop ≥ 1,5 % y objetivo, parcial y suelo ≥ 2R
-    (con aviso si sube algo); nunca break-even ni stop dinámico."""
+    (con aviso si sube algo); nunca break-even ni stop dinámico. Con el modelo «ruptura3», entrada brk al cierre de 5 min,
+    rango (measure_min) en múltiplos de 5 min y al menos una vela de 5 min tras él antes de entry_end_min."""
     p = {**PARAMS, **IMPULSO, **{k: v for k, v in (over or {}).items() if k != "estrategia"}, "estrategia": "impulso"}
     notes = []
 
@@ -1573,6 +1674,45 @@ def impulse_params(over: dict | None = None) -> tuple[dict, list[str]]:
         notes.append("Cortos al contado: en OKX EU (USDC) no se pueden ejecutar, solo se miden en paper")
     if p["brk_tf"] not in (1, 5):
         back("brk_tf", "1 o 5")
+    if p["modelo"] not in MODELOS:
+        back("modelo", " | ".join(MODELOS))
+    if p["rp_max_apertura"] is not None:   # Ruptura V3: tope de entradas por apertura (None = sin tope)
+        try:
+            v = p["rp_max_apertura"]
+            if isinstance(v, bool) or (isinstance(v, float) and not v.is_integer()):   # True no es «1», ni 2,5 es «2»
+                raise TypeError
+            p["rp_max_apertura"] = int(v)
+            if p["rp_max_apertura"] < 1:
+                raise ValueError
+        except (TypeError, ValueError, OverflowError):
+            back("rp_max_apertura", "None o un entero ≥ 1")
+    try:
+        if isinstance(p["rp_stop_max_pct"], bool):
+            raise TypeError
+        p["rp_stop_max_pct"] = float(p["rp_stop_max_pct"])
+        if not (p["rp_stop_max_pct"] > 0 and math.isfinite(p["rp_stop_max_pct"])):
+            raise ValueError
+    except (TypeError, ValueError, OverflowError):
+        back("rp_stop_max_pct", "un número > 0")
+    if p["modelo"] == "ruptura3":   # la ruptura del rango al cierre de una vela de 5 min: entry y brk_tf no cambian nada
+        if (p["entry"], p["brk_tf"]) != ("brk", 5):
+            notes.append(f"modelo ruptura3: la entrada es la ruptura al cierre de 5 min (entry 'brk', brk_tf 5), no "
+                         f"{p['entry']!r} con brk_tf {p['brk_tf']}")
+            p["entry"], p["brk_tf"], kind, m = "brk", 5, "brk", None
+        # El rango y la ventana van en velas de 5 min (RupturaRun): el rango, un múltiplo de 5 min (si no, el volumen del
+        # rango saldría de velas a medias y la primera vela evaluada se solaparía con él), y al menos una vela de 5 min
+        # después del rango antes de entry_end_min. Si no, los del preset, con su nota.
+        if p["measure_min"] % 5:
+            notes.append(f"modelo ruptura3: measure_min = {p['measure_min']} no es un múltiplo de 5 min (el rango se "
+                         f"mide en velas de 5 min): se usa {RUPTURA3['measure_min']}")
+            p["measure_min"] = RUPTURA3["measure_min"]
+        if p["entry_end_min"] < p["measure_min"] + 5:
+            ee = RUPTURA3["entry_end_min"]
+            mm = p["measure_min"] if ee >= p["measure_min"] + 5 else RUPTURA3["measure_min"]
+            notes.append(f"modelo ruptura3: entry_end_min = {p['entry_end_min']} no deja ninguna vela de 5 min tras el "
+                         f"rango de {p['measure_min']} min: se usa {ee}"
+                         + (f" (y measure_min {mm})" if mm != p["measure_min"] else ""))
+            p["measure_min"], p["entry_end_min"] = mm, ee
     for k, sets, allowed, norm, what in (
             ("windows", LAB_WIN_SETS, LAB_WINDOWS, str.lower, "ventanas " + ", ".join(LAB_WINDOWS)),
             ("coins", LAB_COIN_SETS, config.COINS, str.upper, "monedas " + ", ".join(config.COINS))):
@@ -1597,6 +1737,10 @@ def impulse_params(over: dict | None = None) -> tuple[dict, list[str]]:
         notes.append(f"max_hold_active_h {_n(p['max_hold_active_h'], 0)} h es menos que max_hold_h: se usa "
                      f"{_n(p['max_hold_h'], 0)} h")
         p["max_hold_active_h"] = p["max_hold_h"]
+    if p["rp_stop_max_pct"] < p["sl_pct"] - 1e-12:   # el tope del stop estructural no puede quedar bajo su suelo
+        notes.append(f"rp_stop_max_pct {_n(p['rp_stop_max_pct'])} % por debajo del stop mínimo: se usa "
+                     f"{_n(p['sl_pct'])} %")
+        p["rp_stop_max_pct"] = p["sl_pct"]
     p["session_max_min"] = max(p["entry_end_min"], m or 0)
     # nunca break-even ni el stop dinámico de la ruptura: lo único que mueve el stop es el cerrojo (EXIT_KEYS)
     p.update(be_r=None, trail_start_r=None, target_pct=None, gate=False, moving_pct=None)
@@ -1702,22 +1846,27 @@ def exit_text(params: dict | None = None, corto: bool = False) -> str:
     corre». Larga: con los porcentajes, el cerrojo, el seguimiento y el tope de tiempo."""
     p = _ip(params)
     sl, R, f = p["sl_pct"], p["target_r"], p["tp1_frac"] if p.get("tp1_r") else 0.0
+    # Ruptura V3: el stop es el del rango, entre sl_pct y rp_stop_max_pct, y los % son los del stop mínimo («desde»)
+    rp = p.get("modelo") == "ruptura3" and p["rp_stop_max_pct"] > sl + 1e-12
+    st = f"{_g(sl)}-{_g(p['rp_stop_max_pct'])} %" if rp else f"{_g(sl)} %"
+    st_l = f"{st} (el otro lado del rango)" if rp else st
+    mas = "≥ +" if rp else "+"
     if not p.get("lock_r"):
         if f:
-            base = f"stop {_g(sl)} %, {_frac_text(f)} en {_g(p['tp1_r'])}R y el resto con objetivo {_g(R or 0)}R"
+            base = f"stop {st}, {_frac_text(f)} en {_g(p['tp1_r'])}R y el resto con objetivo {_g(R or 0)}R"
         else:
-            base = f"stop {_g(sl)} % y objetivo {_g(R)}R" + ("" if corto else f" (+{_g(sl * R)} %)")
+            base = f"stop {st} y objetivo {_g(R)}R" + ("" if corto else f" ({mas}{_g(sl * R)} %)")
         return base if corto else f"{base}, {hold_text(p)}"
     if corto:
         part = f"{_frac_text(f)} en {_g(p['tp1_r'])}R y el resto corre" if f else "la posición corre"
-        return f"stop {_g(sl)} %, {part}" + (f" (objetivo {_g(R)}R)" if R else "")
-    part = (f"{_frac_text(f)} sale en {_g(p['tp1_r'])}R (+{_g(sl * p['tp1_r'])} %) y el resto corre" if f
+        return f"stop {st}, {part}" + (f" (objetivo {_g(R)}R)" if R else "")
+    part = (f"{_frac_text(f)} sale en {_g(p['tp1_r'])}R ({mas}{_g(sl * p['tp1_r'])} %) y el resto corre" if f
             else "la posición corre")
     tr = (f" y lo sigue a {_g(p['trail_r'])}R por detrás" if p.get("trail_r") else
           f" y lo sigue a {_g(p['trail_atr'])} × ATR de 1 h por detrás" if p.get("trail_atr") else "")
-    obj = f"; objetivo final {_g(R)}R (+{_g(sl * R)} %)" if R else ""
-    return (f"stop {_g(sl)} %, {part}: al llegar a +{_g(p['lock_r'])}R su stop sube a +{_g(p['floor_r'])}R "
-            f"(+{_g(sl * p['floor_r'])} %){tr}; antes, el stop no se mueve{obj}; {hold_text(p)}")
+    obj = f"; objetivo final {_g(R)}R ({mas}{_g(sl * R)} %)" if R else ""
+    return (f"stop {st_l}, {part}: al llegar a +{_g(p['lock_r'])}R su stop sube a +{_g(p['floor_r'])}R "
+            f"({mas}{_g(sl * p['floor_r'])} %){tr}; antes, el stop no se mueve{obj}; {hold_text(p)}")
 
 
 def _easter(y: int) -> date:
@@ -1844,16 +1993,24 @@ def impulse_tags(d: int, mom: float, ctx: dict | None, sig: dict | None, params:
     fl = [x for x in (sig or {}).get("fiables") or [] if isinstance(x, dict)]   # noticias de grupos fiables (_fiables)
     contra, favor = [x for x in fl if x.get("dir") == -d], [x for x in fl if x.get("dir") == d]
     top = (contra or favor or [{}])[0]
-    return {"lado": "largo" if d > 0 else "corto", "instrumento": impulse_instrument(d, p),
-            "noticia": news_label(d, sig, p["min_strength"]),
-            "noticia_fuerza": round(_f((sig or {}).get("strength"), 0.0), 3),
-            "noticia_fiable": "en_contra" if contra else "a_favor" if favor else "ninguna",
-            "noticia_fiable_grupo": top.get("nombre"),
-            "apertura_anterior": "sin_dato" if not pr else "a_favor" if pr * d > 0 else "en_contra",
-            "apertura_anterior_pct": round(pr, 3) if pr is not None else None,
-            "btc": "neutral" if not btc else "a_favor" if btc == d else "en_contra",
-            "volatilidad_pct": round(vol * 100, 1) if vol is not None else None,
-            "impulso_pct": round(mom, 3), "medida_min": p["measure_min"]}
+    out = {"lado": "largo" if d > 0 else "corto", "instrumento": impulse_instrument(d, p),
+           "noticia": news_label(d, sig, p["min_strength"]),
+           "noticia_fuerza": round(_f((sig or {}).get("strength"), 0.0), 3),
+           "noticia_fiable": "en_contra" if contra else "a_favor" if favor else "ninguna",
+           "noticia_fiable_grupo": top.get("nombre"),
+           "apertura_anterior": "sin_dato" if not pr else "a_favor" if pr * d > 0 else "en_contra",
+           "apertura_anterior_pct": round(pr, 3) if pr is not None else None,
+           "btc": "neutral" if not btc else "a_favor" if btc == d else "en_contra",
+           "volatilidad_pct": round(vol * 100, 1) if vol is not None else None,
+           "impulso_pct": round(mom, 3), "medida_min": p["measure_min"]}
+    if p["news_mode"] == "corroboradas":   # Ruptura V3: la de un grupo fiable o una macro confirmada por la cripto
+        mc = [x for x in (sig or {}).get("macro") or [] if isinstance(x, dict)]
+        mcon, mfav = [x for x in mc if x.get("dir") == -d], [x for x in mc if x.get("dir") == d]
+        cc = [*(f"grupo fiable «{x.get('nombre') or 'sin nombre'}»" for x in contra),
+              *(f"macro confirmada «{_cut(x.get('titular'), 80)}»" for x in mcon)]
+        out.update(noticia_corroborada="en_contra" if cc else "a_favor" if favor or mfav else "ninguna",
+                   noticia_corroborada_txt=cc[0] if cc else None)
+    return out
 
 
 def impulse_filter(d: int, tags: dict, ctx: dict | None, params: dict | None = None) -> tuple[str | None, str | None]:
@@ -1883,6 +2040,9 @@ def impulse_filter(d: int, tags: dict, ctx: dict | None, params: dict | None = N
     if nm == "fiables" and tags.get("noticia_fiable") == "en_contra":
         return (f"una noticia de un grupo fiable va en contra ({tags.get('noticia_fiable_grupo') or 'sin nombre'}, en las "
                 f"{_n(p['news_hours'], 0)} h previas): no se opera", "veto_noticia")
+    if nm == "corroboradas" and tags.get("noticia_corroborada") == "en_contra":
+        return (f"una noticia corroborada va en contra ({tags.get('noticia_corroborada_txt') or 'sin detalle'}, en las "
+                f"{_n(p['news_hours'], 0)} h previas): no se opera", "veto_noticia")
     return None, None
 
 
@@ -1893,13 +2053,18 @@ def impulse_filters(d: int, tags: dict, ctx: dict | None, params: dict | None = 
 
 def impulse_strategy(d: int, tags: dict | None) -> str:
     """Nombre de estrategia para el paper (Resultados compara por él): lado y noticia, p. ej. «impulso-largo-noticia-a-
-    favor» o «impulso-corto-sin-noticia»."""
+    favor» o «impulso-corto-sin-noticia». Con la Ruptura V3 (tags.modelo «ruptura3»), «impulso-ruptura3-largo-…»: el
+    prefijo «impulso-» es el de todas las operaciones del motor de aperturas (la evolución las cuenta por él)."""
     news = {"a_favor": "noticia-a-favor", "en_contra": "noticia-en-contra"}.get((tags or {}).get("noticia"), "sin-noticia")
-    return f"impulso-{'largo' if d > 0 else 'corto'}-{news}"
+    rp = "ruptura3-" if (tags or {}).get("modelo") == "ruptura3" else ""
+    return f"impulso-{rp}{'largo' if d > 0 else 'corto'}-{news}"
 
 
 def impulse_entry_type(params: dict | None = None) -> str:
     p = _ip(params)
+    if p.get("modelo") == "ruptura3":
+        return (f"Ruptura V3: cierre de 5 min fuera del rango de {p['measure_min']} min a favor del régimen y la "
+                "tendencia, con volumen y expansión (a mercado)")
     kind, m = entry_kind(p["entry"])
     if kind == "pb":
         return f"Reanudación tras retroceder el {_n(p['pb_frac'] * 100, 0)} % del impulso (a mercado)"
@@ -2087,6 +2252,8 @@ class ImpulseRun:
                              for x in _dicts(n.get("drivers"), 3)],
                 "fiables": [{k: x.get(k) for k in ("story", "dir", "ts", "grupo", "nombre", "acierto", "titular")}
                             for x in _dicts(n.get("fiables"), 5)],
+                **({"macro": [{k: x.get(k) for k in ("story", "dir", "ts", "titular")}
+                              for x in _dicts(n.get("macro"), 5)]} if _dicts(n.get("macro")) else {}),
                 "etiqueta": t.get("noticia"), "fiable": t.get("noticia_fiable")}
 
     def measure_data(self) -> dict | None:
@@ -2289,6 +2456,294 @@ class ImpulseRun:
         else:
             self.last_why = "Entrada enviada al paper (recuperada tras reiniciar): a la espera de ejecutarse"
 
+    def esperando_txt(self) -> str:
+        """Lo que apunta el motor al abrir («esperando»)."""
+        return (f"Midiendo el impulso de los {self.N} primeros min desde la apertura ({_hm(self.open_ms)} Madrid): "
+                f"decide a las {_hm(self.open_ms + self.N * MIN)} Madrid")
+
+
+class RupturaRun(ImpulseRun):
+    """Ruptura V3 de una moneda en una apertura (preset RUPTURA3; diseno_ruptura.md, variante V3; las cuentas en
+    bot/ruptura3.py). Como ImpulseRun, sin red ni órdenes: el motor le da el contexto (ctx["rp"]: régimen cripto y
+    tendencias diaria y de 4 h de la moneda, con lo cerrado antes de la apertura), las velas de 1 min cerradas desde 80
+    min antes de la apertura (feed, en orden) y las noticias. Las mismas reglas, en el mismo orden y con las mismas
+    cuentas que BACKTEST_DIR/controles/selectiva/medir_selectiva.py (rp_scan); scripts/replica_ruptura3.py lo comprueba
+    operación a operación:
+    1. Sentido: el que permiten el régimen y la tendencia de la moneda (ruptura3.sentido). Sin él no se mira la moneda
+       (fila «medida»: regimen_neutral, sin_tendencia o adx_bajo).
+    2. Rango: máximo y mínimo de las velas de 1 min de los measure_min primeros min (hacen falta measure_min − 1).
+    3. Velas de 5 min (inicio múltiplo de 5 min desde 80 min antes de la apertura; valen con ≥ 4 velas de 1 min). En cada
+       una que empieza entre el fin del rango y entry_end_min − 5 min: si cierra al otro lado del rango (más el margen),
+       se descarta la moneda (ruptura_contra); si cierra a favor con volumen ≥ 1,5 × la media de las del rango y rango
+       verdadero ≥ 1,5 × su ATR(14) de 5 min, dispara (la primera, una sola vez): entrada al cierre de esa vela, stop
+       máx(sl_pct, el otro lado del rango + 0,10 %) y, si pasa de rp_stop_max_pct, no se entra (stop_lejos). Una
+       ruptura sin volumen o sin expansión no dispara, pero se sigue mirando.
+    4. Sin disparo al acabar la ventana: sin_ruptura, sin_volumen o sin_expansion.
+    El veto de las noticias corroboradas en contra lo pone el motor al disparar, con la señal de ese momento; el tope
+    de entradas por apertura y el orden de los disparos (ruptura3.orden), también."""
+
+    def __init__(self, coin: str, open_ms: int, params: dict | None = None, ctx: dict | None = None,
+                 news: dict | None = None, prior: list | None = None):
+        super().__init__(coin, open_ms, params, ctx, news, prior)
+        self.kind, self.t_min = "brk", None
+        self.lo_t = open_ms - ruptura3.PRE5 * M5            # inicio de la rejilla de velas de 5 min
+        self.g0 = ruptura3.PRE5 + self.N // 5                # primera vela de 5 min después del rango
+        self.g1 = ruptura3.PRE5 + self.E // 5 - 1            # la última que empieza antes de entry_end_min
+        self.b5: dict[int, list] = {}                         # vela de 5 min: [o, h, l, c, [volúmenes], n]
+        self.g_eval = self.g0 - 1                             # última vela de 5 min evaluada
+        self.g_listo = -1                                     # última vela de 5 min completa
+        self.or_n, self.or_c = 0, None                        # velas de 1 min del rango y su último cierre
+        self.margin = None
+        self.decidido = False                                 # sentido decidido (régimen y tendencia)
+        self.rango_hecho = False
+        self.saw_break = self.saw_vol = False
+        self.stop_pct = self.s_struct = self.vol_x = self.tr_x = None
+        self.t_disparo = None
+        self.last_why = (f"A las {_hm(open_ms)} Madrid se mira el régimen cripto y la tendencia de {coin}; si van a "
+                         f"favor, el rango de los {self.N} primeros min y su ruptura hasta las "
+                         f"{_hm(open_ms + self.E * MIN)}")
+
+    @property
+    def rp(self) -> dict:
+        return (self.ctx or {}).get("rp") or {}
+
+    def esperando_txt(self) -> str:
+        return (f"Ruptura V3: se mira el régimen cripto, la tendencia y el rango de los {self.N} primeros min desde la "
+                f"apertura ({_hm(self.open_ms)} Madrid); la ruptura vale hasta las {_hm(self.open_ms + self.E * MIN)} "
+                "Madrid")
+
+    # ---- velas de 5 min (como bars5 de medir_selectiva.py)
+
+    def _ok5(self, g: int) -> bool:
+        b = self.b5.get(g)
+        return b is not None and b[5] >= 4
+
+    def _vol5(self, g: int) -> float:
+        """Volumen de la vela de 5 min con la misma suma que np.add.reduceat (el backtest)."""
+        return float(np.add.reduceat(np.asarray(self.b5[g][4], dtype=float), [0])[0])
+
+    def _tr5(self, g: int) -> float:
+        """Rango verdadero de la vela de 5 min g (NaN si ella o la anterior no valen)."""
+        if g < 1 or not self._ok5(g) or not self._ok5(g - 1):
+            return math.nan
+        _, h, l, _, _, _ = self.b5[g]
+        pc = self.b5[g - 1][3]
+        return max(h - l, max(abs(h - pc), abs(l - pc)))
+
+    def _vref(self) -> float:
+        gs = [ruptura3.PRE5 + k for k in range(self.N // 5)]
+        if not gs or not all(self._ok5(g) for g in gs):
+            return math.nan
+        return float(np.nanmean(np.array([self._vol5(g) for g in gs])))
+
+    # ---- decisiones
+
+    def _sentido(self) -> dict | None:
+        """Una vez, con el contexto: el sentido que permiten el régimen y la tendencia (o el fin, con su motivo)."""
+        self.decidido = True
+        rp = self.rp
+        d, code, why = ruptura3.sentido(rp.get("zona"), rp.get("d_dia") or 0, rp.get("t4"))
+        if not d:
+            return self._no("medida", code, why, self.measure_data())
+        self.dir = d
+        self.last_why = (f"{why}. Midiendo el rango de los {self.N} primeros min (hasta las "
+                         f"{_hm(self.open_ms + self.N * MIN)} Madrid)")
+        return None
+
+    def _rango(self) -> dict | None:
+        """Fin del rango: se arma la ruptura a favor (o el fin si faltan velas)."""
+        self.rango_hecho = True
+        if self.or_n < self.N - 1 or self.hi is None:
+            return self._no("medida", "sin_velas", f"Faltan velas de 1 min del rango de {self.N} min ({self.or_n}): no "
+                                                    "se puede medir el rango", self.measure_data())
+        self.margin = ruptura3.margen(self.hi, self.lo)
+        d = self.dir
+        self.level = self.hi + self.margin if d > 0 else self.lo - self.margin
+        self.mom = (self.or_c / self.po - 1) * 100 if self.po and self.or_c else 0.0
+        self.ext = self.hi if d > 0 else self.lo
+        self.state, self.step = "esperando_entrada", "ruptura"
+        self.tags = self._rp_tags()
+        side = f"{'compra' if d > 0 else 'venta'} {INST_TEXT[self.tags['instrumento']]}"
+        head = (f"Rango de {self.N} min {_px(self.lo)}–{_px(self.hi)} (margen {_px(self.margin)}): se vigila un cierre "
+                f"de 5 min por {'encima' if d > 0 else 'debajo'} de {_px(self.level)} ({side}) con volumen ≥ "
+                f"{_g(ruptura3.VOL_X)} × el del rango y expansión ≥ {_g(ruptura3.TR_X)} ATR hasta las "
+                f"{_hm(self.open_ms + self.E * MIN)} Madrid")
+        self._dec("medida", "entra", "entra", f"{head} · {impulse_entry_type(self.p)}", self.measure_data())
+        self.last_why = head
+        return None
+
+    def _fin_ventana(self) -> dict:
+        if not self.saw_break:
+            return self._no("entrada", "sin_ruptura", f"Sin cierre de 5 min fuera del rango a favor hasta las "
+                                                      f"{_hm(self.open_ms + self.E * MIN)}: no se entra")
+        if not self.saw_vol:
+            return self._no("entrada", "sin_volumen", f"Rompió a favor, pero sin volumen ≥ {_g(ruptura3.VOL_X)} × el "
+                                                      "del rango en ninguna vela: no se entra")
+        return self._no("entrada", "sin_expansion", f"Rompió a favor con volumen, pero sin rango verdadero ≥ "
+                                                    f"{_g(ruptura3.TR_X)} × ATR(14) de 5 min: no se entra")
+
+    def _eval5(self, g: int, live_ok: bool) -> dict | None:
+        """Una vela de 5 min completa de la ventana (rp_scan de medir_selectiva.py, en el mismo orden)."""
+        if not self._ok5(g):
+            return None
+        d, cb = self.dir, self.b5[g][3]
+        hhmm = _hm(self.lo_t + g * M5)
+        if (d > 0 and cb < self.lo - self.margin) or (d < 0 and cb > self.hi + self.margin):
+            return self._no("entrada", "ruptura_contra",
+                            f"La vela de 5 min de las {hhmm} cierra en {_px(cb)}, al otro lado del rango "
+                            f"({_px(self.lo if d > 0 else self.hi)}): ruptura en contra, no se entra en esta apertura",
+                            {"vela_ms": self.lo_t + g * M5, "cierre": cb, "rango": {"maximo": self.hi, "minimo": self.lo}})
+        if not ((d > 0 and cb > self.hi + self.margin) or (d < 0 and cb < self.lo - self.margin)):
+            return None
+        self.saw_break = True
+        vref, v = self._vref(), self._vol5(g)
+        if not (np.isfinite(vref) and vref > 0 and v >= ruptura3.VOL_X * vref):
+            self.last_why = (f"Ruptura a favor a las {hhmm} ({_px(cb)}) sin volumen ≥ {_g(ruptura3.VOL_X)} × el del "
+                             f"rango ({_n(v / vref, 2) if np.isfinite(vref) and vref > 0 else 'sin dato'}): se sigue "
+                             f"mirando hasta las {_hm(self.open_ms + self.E * MIN)}")
+            return None
+        self.saw_vol = True
+        trs = np.array([self._tr5(k) for k in range(g - ruptura3.ATR5_N, g)])
+        trg = self._tr5(g)
+        if np.isnan(trs).sum() > 2 or not np.isfinite(trg):
+            self.last_why = f"Ruptura con volumen a las {hhmm}, pero sin velas para el ATR de 5 min: se sigue mirando"
+            return None
+        atr5 = np.nanmean(trs)
+        if trg < ruptura3.TR_X * atr5:
+            self.last_why = (f"Ruptura con volumen a las {hhmm}, pero sin expansión (rango verdadero "
+                             f"{_n(trg / atr5, 2) if atr5 > 0 else '–'} × ATR < {_g(ruptura3.TR_X)}): se sigue mirando")
+            return None
+        t_b = self.lo_t + (g + 1) * M5
+        s_struct = ruptura3.stop_estructural(d, cb, self.hi, self.lo)
+        s = max(self.p["sl_pct"], s_struct)
+        self.vol_x, self.tr_x = v / vref, (trg / atr5 if atr5 > 0 else None)
+        self.stop_pct, self.s_struct, self.t_disparo = s, s_struct, t_b
+        side = "por encima" if d > 0 else "por debajo"
+        why = (f"Ruptura V3: la vela de 5 min de las {hhmm} cierra en {_px(cb)}, {side} de {_px(self.level)} (rango "
+               f"{_px(self.lo)}–{_px(self.hi)} y margen), con volumen ×{_n(self.vol_x)} el del rango y rango verdadero "
+               f"×{_n(self.tr_x) if self.tr_x is not None else '–'} el ATR de 5 min; stop {_n(s)} %"
+               + (" (el otro lado del rango)" if s_struct > self.p["sl_pct"] else " (el mínimo)"))
+        datos = {"vela_ms": self.lo_t + g * M5, "cierre": cb, "stop_pct": round(s, 4),
+                 "stop_estructural_pct": round(s_struct, 4), "volumen_x": round(self.vol_x, 3),
+                 "rango_verdadero_x": round(self.tr_x, 3) if self.tr_x is not None else None}
+        if s > self.p["rp_stop_max_pct"]:
+            return self._no("entrada", "stop_lejos", f"{why}: más del {_g(self.p['rp_stop_max_pct'])} % (la ruptura "
+                                                     "llega demasiado lejos del rango, no se persigue)", datos)
+        if not live_ok:
+            return self._no("entrada", "tarde", f"{why}, pero en una vela antigua: tarde para entrar (no se persigue "
+                                                "el precio)", {**datos, "decision_ms": t_b})
+        self.tags = {**self._rp_tags(), "stop_pct": round(s, 3), "stop_estructural_pct": round(s_struct, 3),
+                     "volumen_x": round(self.vol_x, 3),
+                     "rango_verdadero_x": round(self.tr_x, 3) if self.tr_x is not None else None,
+                     "min_tras_apertura": (t_b - self.open_ms) // MIN}
+        self.state, self.step, self.entries = "en_posicion", None, self.entries + 1
+        self.last_why = f"Entrada: {why}"
+        rp = self.rp
+        # sin «rvol»: su volumen es el de la vela frente al del rango (volumen_x), no el relativo a sesiones anteriores
+        return {"action": "enter", "dir": d, "price": cb, "t": t_b, "why": why, "volumen_x": self.vol_x,
+                "rango_verdadero_x": self.tr_x, "stop_pct": s,
+                "s_struct": s_struct, "adx": float((rp.get("t4") or {}).get("adx") or 0.0),
+                "ext": float((rp.get("t4") or {}).get("ext") or 0.0), "tags": dict(self.tags),
+                "levels": self.levels()}
+
+    def _rp_tags(self) -> dict:
+        rp, t4 = self.rp, self.rp.get("t4") or {}
+        return {**impulse_tags(self.dir, self.mom or 0.0, self.ctx, self.news, self.p), "modelo": "ruptura3",
+                "regimen": rp.get("zona"), "regimen_puntos": rp.get("puntos"),
+                "tendencia_diaria": rp.get("d_dia"), "tendencia_4h": t4.get("d"),
+                "adx_4h": round(t4["adx"], 2) if isinstance(t4.get("adx"), (int, float)) else None}
+
+    def veto_noticias(self, sig: dict | None) -> str | None:
+        """Con la señal de noticias del momento del disparo: el motivo del veto (news_mode del preset) o None. Las
+        etiquetas de noticias de la entrada pasan a ser las de ese momento."""
+        self.news = sig
+        tags = impulse_tags(self.dir, self.mom or 0.0, self.ctx, sig, self.p)
+        for k in ("noticia", "noticia_fuerza", "noticia_fiable", "noticia_fiable_grupo", "noticia_corroborada",
+                  "noticia_corroborada_txt"):
+            if k in tags:
+                self.tags[k] = tags[k]
+        why, code = impulse_filter(self.dir, self.tags, self.ctx, {**self.p, "vol_filter": "todos",
+                                                                    "btc_filter": "ninguno"})
+        return why if code == "veto_noticia" else None
+
+    # ---- velas
+
+    def feed(self, bar: list, live_ok: bool = True) -> dict | None:
+        """Una vela de 1 min cerrada (en orden; las de antes de la rejilla o ya vistas no cuentan). Devuelve
+        {"action": "enter", …}, {"action": "end", …} o None. Sin contexto se guardan las velas y se decide después."""
+        if self.done or self.state == "en_posicion":
+            return None
+        t = bar[T]
+        if t < self.lo_t or (self.t_next is not None and t < self.t_next):
+            return None
+        self.t_next, self.last_c = t + MIN, bar[C]
+        g = (t - self.lo_t) // M5
+        b = self.b5.get(g)
+        if b is None:
+            self.b5[g] = [bar[O], bar[HI], bar[LO], bar[C], [bar[V]], 1]
+        else:
+            b[1], b[2], b[3] = max(b[1], bar[HI]), min(b[2], bar[LO]), bar[C]
+            b[4].append(bar[V])
+            b[5] += 1
+        if self.open_ms <= t < self.open_ms + self.N * MIN:   # el rango de apertura
+            if self.po is None:
+                self.po = bar[O]
+            self.hi = bar[HI] if self.hi is None else max(self.hi, bar[HI])
+            self.lo = bar[LO] if self.lo is None else min(self.lo, bar[LO])
+            self.or_n += 1
+            self.or_c = bar[C]
+        self.g_listo = g if (t - self.lo_t) % M5 == 4 * MIN else g - 1
+        if self.ctx is None or t < self.open_ms:
+            return None
+        if not self.decidido:
+            act = self._sentido()
+            if act:
+                return act
+        if not self.rango_hecho:
+            if t < self.open_ms + (self.N - 1) * MIN:
+                live = (self.last_c / self.po - 1) * 100 if self.po else 0.0
+                self.last_why = (f"Midiendo el rango: {_px(self.lo)}–{_px(self.hi)} ({_sg(live)} %) en "
+                                 f"{(t + MIN - self.open_ms) // MIN} de {self.N} min")
+                return None
+            act = self._rango()
+            if act:
+                return act
+        while self.g_eval < self.g_listo:
+            self.g_eval += 1
+            if self.g_eval > self.g1:
+                return self._fin_ventana()
+            act = self._eval5(self.g_eval, live_ok)
+            if act:
+                return act
+        if self.g_eval >= self.g1 or t >= self.open_ms + self.E * MIN:
+            return self._fin_ventana()
+        return None
+
+    # ---- web y registro
+
+    def levels(self) -> dict:
+        out = super().levels()
+        t4 = self.rp.get("t4") or {}
+        out.update(ruptura=self.level, margen=self.margin, regimen=self.rp.get("zona"),
+                   regimen_puntos=self.rp.get("puntos"), adx_4h=round(t4["adx"], 2) if t4.get("adx") else None,
+                   stop_pct=round(self.stop_pct, 3) if self.stop_pct else None,
+                   hasta_ms=self.open_ms + self.E * MIN, hora_entrada=None,
+                   minutos_medidos=max(0, min(self.N, ((self.t_next or self.open_ms) - self.open_ms) // MIN)))
+        return out
+
+    def _measure_data(self) -> dict:
+        rp, t4 = self.rp, self.rp.get("t4") or {}
+        return {"modelo": "ruptura3", "apertura": self.po, "precio": self.last_c,
+                "rango": {"maximo": self.hi, "minimo": self.lo, "velas": self.or_n}, "margen": self.margin,
+                "ruptura": self.level, "rango_min": self.N, "ventana_min": self.E,
+                "regimen": {"zona": rp.get("zona"), "puntos": rp.get("puntos")},
+                "tendencia_diaria": rp.get("d_dia"),
+                "tendencia_4h": {k: (round(t4[k], 4) if isinstance(t4.get(k), float) else t4.get(k))
+                                 for k in ("d", "adx", "di", "ext")} if t4 else None,
+                "adx_min": ruptura3.ADX_MIN, "volumen_x_min": ruptura3.VOL_X, "rango_verdadero_x_min": ruptura3.TR_X,
+                "stop_min_pct": self.p["sl_pct"], "stop_max_pct": self.p["rp_stop_max_pct"],
+                "filtro_noticias": self.p["news_mode"], "noticias": self.news_data()}
+
 
 def position_state_text(pos: dict | None) -> str:
     """«; la mitad ya salió en 3R (+1,23 USDC) · cerrojo activado: stop en X (asegura +2,0 R), como mucho hasta el
@@ -2321,6 +2776,13 @@ def window_plan_text(open_ms: int, params: dict | None = None) -> str:
     SOL y XRP y entrará a las HH:MM en el sentido del impulso; stop 2 %, la mitad en 3R y el resto corre». Con filtros
     (umbral, volumen relativo, BTC), los dice entre paréntesis."""
     p = _ip(params)
+    if p.get("modelo") == "ruptura3":
+        tope = p.get("rp_max_apertura")
+        return (f"vigilará el rango de los {p['measure_min']} primeros min de {_lista(p['coins'])} y entrará en la "
+                f"ruptura al cierre de 5 min a favor del régimen cripto y de la tendencia diaria y de 4 h (ADX ≥ "
+                f"{_g(ruptura3.ADX_MIN)}), con volumen ≥ {_g(ruptura3.VOL_X)} × el del rango y expansión ≥ "
+                f"{_g(ruptura3.TR_X)} ATR, antes de las {_hm(open_ms + p['entry_end_min'] * MIN)}"
+                + (f" (como mucho {tope} por apertura)" if tope else "") + f"; {exit_text(p, corto=True)}")
     kind, m = entry_kind(p["entry"])
     move = ("en el sentido del impulso" if p["min_move_pct"] <= 0
             else f"a favor del impulso si pasa de ±{_g(p['min_move_pct'])} %")
@@ -2352,6 +2814,9 @@ def senal_de_fila(row: dict | None) -> dict | None:
     fl = _dicts(n.get("fiables"))
     if fl:
         out["fiables"] = fl
+    mc = _dicts(n.get("macro"))
+    if mc:
+        out["macro"] = mc
     return out
 
 
@@ -2445,8 +2910,6 @@ class OpeningEngine:
         self._lag_ms = LIVE_LAG_MS + ((self.p.get("confirm_tf") or 1) - 1) * MIN   # una vela de antigüedad como mucho
         self._key = None
         self._pub_at = 0.0
-        self._fails = 0
-        self._retry_at = 0
         self._err_at = 0.0
 
     # ---- estrategia de la evolución (estrategia_activa.json)
@@ -2528,7 +2991,7 @@ class OpeningEngine:
                     self.windows[key] = {**o, "key": key, "armed": False, "at_open": False, "missed": False,
                                          "signals": {}, "runs": {}, "bars": {}, "prior": {}, "prior_tries": {},
                                          "done_i": {}, "stories": {}, "seq": {}, "why": "", "gate": {}, "plans": {},
-                                         "ctx": {}, "dec_esp": set(),
+                                         "ctx": {}, "dec_esp": set(), "espera": {},
                                          "prev": prev_session_opens(o["lead"], o["open_ms"], self.p["rvol_sessions"])}
         for key in [k for k, w in self.windows.items()
                     if now - (w["open_ms"] + self.p["session_max_min"] * MIN) > KEEP_MS]:
@@ -2556,7 +3019,7 @@ class OpeningEngine:
             for coin in p["coins"]:
                 w["signals"][coin] = await self._signal(coin, w)
                 if coin not in w["runs"]:
-                    run = w["runs"][coin] = ImpulseRun(coin, w["open_ms"], p)
+                    run = w["runs"][coin] = self._new_run(coin, w["open_ms"])
                     pf = await self._portfolio() if pf is None else pf
                     self._restore(w, coin, run, pf or {}, now)
                     self._restore_row(w, coin, run)
@@ -2573,6 +3036,10 @@ class OpeningEngine:
                         f" · {impulse_entry_type(p)} · {' · '.join(x for x in conf if x)} · largos "
                         f"{INST_TEXT[p['long_instrument']]} y cortos {INST_TEXT[p['short_instrument']]} · "
                         f"{exit_text(p)}")
+            if p.get("modelo") == "ruptura3":   # Ruptura V3: régimen, tendencia, rango y potencia
+                w["why"] = (f"Ruptura V3: {window_plan_text(w['open_ms'], p)} · largos "
+                            f"{INST_TEXT[p['long_instrument']]} y cortos {INST_TEXT[p['short_instrument']]} · "
+                            f"{NEWS_TXT.get(p['news_mode'], 'noticias solo como etiqueta')}")
             w["armed"], w["at_open"] = True, w["at_open"] or at_open
             return
         for coin in config.COINS:
@@ -2597,6 +3064,12 @@ class OpeningEngine:
         except Exception as e:
             log.warning("Aperturas: cartera no disponible: %s", e)
             return None
+
+    def _new_run(self, coin: str, open_ms: int) -> ImpulseRun:
+        """La moneda en una apertura del modo impulso: RupturaRun con el modelo «ruptura3» (Ruptura V3) e ImpulseRun
+        con el de siempre."""
+        cls = RupturaRun if self.p.get("modelo") == "ruptura3" else ImpulseRun
+        return cls(coin, open_ms, self.p)
 
     def _prefix(self, w: dict, coin: str) -> str:
         """Story de las operaciones de una moneda en una apertura: a-<ventana>-<fecha Madrid>-<moneda>-<n>."""
@@ -2733,7 +3206,7 @@ class OpeningEngine:
         for coin in self.p["coins"]:
             run = w["runs"].get(coin)
             if run is None:
-                run = w["runs"][coin] = ImpulseRun(coin, w["open_ms"], self.p)
+                run = w["runs"][coin] = self._new_run(coin, w["open_ms"])
                 self._restore(w, coin, run, pf, now)
                 self._restore_row(w, coin, run)
             if run.done or run.state == "en_posicion":
@@ -2788,9 +3261,7 @@ class OpeningEngine:
             w["dec_esp"].add(coin)
             if self._dec_try("leer", self.dec.ultima, w["key"], coin) is not None:
                 continue   # ya apuntada antes de reiniciar (esperando, o la medida hecha): «esperando» una sola vez
-            self._dec(w, coin, now, "medida", "esperando", "otro",
-                      f"Midiendo el impulso de los {run.N} primeros min desde la apertura ({_hm(w['open_ms'])} Madrid): "
-                      f"decide a las {_hm(w['open_ms'] + run.N * MIN)} Madrid")
+            self._dec(w, coin, now, "medida", "esperando", "otro", run.esperando_txt())
 
     @staticmethod
     def _coin_busy(pf: dict, coin: str) -> str | None:
@@ -2831,11 +3302,103 @@ class OpeningEngine:
             if prev is not None:
                 bars = await self.fetch_klines(coin, prev - 5 * MIN, 70)
                 react = react_between([b for b in bars if b[T] < om], prev, min(prev + 60 * MIN, om))
-            ctx[coin] = {"atr_pct": vol["pct"] if vol else None, "atr_h_pct": vol["atr_pct"] if vol else None,
-                         "btc_dir": (ctx["btc"] or {}).get("dir", 0), "prev_ms": prev, "prev_react": react}
+            cx = {"atr_pct": vol["pct"] if vol else None, "atr_h_pct": vol["atr_pct"] if vol else None,
+                  "btc_dir": (ctx["btc"] or {}).get("dir", 0), "prev_ms": prev, "prev_react": react}
+            if self.p.get("modelo") == "ruptura3":
+                cx["rp"] = await self._context_rp(w, coin)
+            ctx[coin] = cx
         run = w["runs"].get(coin)
         if run is not None and run.ctx is None:
             run.ctx = ctx[coin]
+
+    async def fetch_funding(self, coin: str, end_ms: int) -> list[list]:
+        """Últimas liquidaciones de funding de Binance USDT-M (públicas, sin claves) hasta end_ms: [[ms, tasa], …]."""
+        from . import historia_extra   # perezoso: solo la Ruptura V3
+        params = {"symbol": PAIRS[coin], "endTime": str(int(end_ms)), "limit": "5"}
+        async with self.session.get(historia_extra.FUNDING_URL, params=params,
+                                    timeout=aiohttp.ClientTimeout(total=15)) as r:
+            r.raise_for_status()
+            return historia_extra.parse_funding(await r.json(content_type=None))
+
+    async def _funding_rows(self, coin: str, om: int) -> list[list]:
+        """Funding liquidado hasta la apertura para el régimen: de Binance y, si falla, el que guarda el bot
+        (HIST_DIR/funding, lo pone al día la vigilancia). La última liquidación tiene que ser de las FUNDING_EDAD_MAX_H
+        horas antes de abrir: una más vieja (p. ej. la vigilancia lleva días sin poder bajarlo) no se usa y queda en
+        bot.log. Sin ninguna que valga, [] (el componente del régimen queda sin dato y su peso se reparte, como en la
+        skill)."""
+        def validas(rows: list, de: str) -> list | None:
+            rows = sorted((r for r in rows or [] if r[0] <= om), key=lambda r: r[0])
+            if len(rows) < 2:   # sin dos liquidaciones no se sabe su periodo (ruptura3.funding_8h)
+                return None
+            edad = (om - rows[-1][0]) / H
+            if edad > FUNDING_EDAD_MAX_H:
+                log.warning("Aperturas: el último funding %s de %s es de hace %.0f h (más de %d h): no se usa para el "
+                            "régimen", de, coin, edad, FUNDING_EDAD_MAX_H)
+                return None
+            return rows
+
+        try:
+            rows = validas(await self.fetch_funding(coin, om), "de Binance")
+            if rows:
+                return rows
+        except Exception as e:
+            log.warning("Aperturas: funding de %s no disponible en Binance (%s): se usa el guardado", coin, e)
+        try:
+            from . import historia_extra
+            guardado = historia_extra.load_funding(coin)
+        except Exception:
+            log.exception("Aperturas: no pude leer el funding guardado de %s", coin)
+            return []
+        rows = validas(guardado, "guardado")
+        if rows is None:
+            log.warning("Aperturas: sin funding válido de %s para el régimen de la apertura de las %s: ese componente "
+                        "queda sin dato", coin, _hm(om))
+        return rows or []
+
+    async def _regimen_rp(self, w: dict) -> dict:
+        """Ruptura V3: el régimen cripto de la ventana, una vez, con lo cerrado antes de la apertura (los cierres diarios
+        y el funding de las 4 monedas, también si la estrategia opera menos). Un fallo de velas sale hacia arriba; lo ya
+        bajado (los cierres de cada moneda) se guarda para el reintento."""
+        ctx, om = w["ctx"], w["open_ms"]
+        if "rp_regimen" not in ctx:
+            d1 = ctx.setdefault("rp_d1", {})
+            for c in config.COINS:
+                if c not in d1:
+                    rows = await self.fetch_interval(c, "1d", (om // DAY - ruptura3.DIAS_REGIMEN - 25) * DAY, 1000)
+                    d1[c] = ruptura3.cierres_cerrados(rows, om)
+            f8 = {c: ruptura3.funding_8h(await self._funding_rows(c, om), om) for c in config.COINS}
+            ctx["rp_regimen"] = {**ruptura3.regimen(d1, f8), "funding_8h": f8}
+        return ctx["rp_regimen"]
+
+    async def _regimen_listo(self, w: dict, now: int) -> bool:
+        """Ruptura V3: ¿está el régimen cripto de la ventana? Se pide antes que las monedas (lo necesitan todas), con su
+        propia espera si falla; mientras no esté, ninguna moneda pide su contexto ni sus velas."""
+        if "rp_regimen" in w["ctx"]:
+            return True
+        if self._esperando_datos(w, REGIMEN, now):
+            return False
+        try:
+            await self._regimen_rp(w)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            self._fallo_datos(w, REGIMEN, now, "el régimen cripto (cierres diarios de Binance)", e)
+            return False
+        w.setdefault("espera", {}).pop(REGIMEN, None)
+        return True
+
+    async def _context_rp(self, w: dict, coin: str) -> dict:
+        """Ruptura V3, con lo cerrado antes de la apertura: el régimen cripto de la ventana (_regimen_rp), la tendencia
+        diaria de la moneda y la de 4 h (1.000 velas de 4 h de Binance). Un fallo de velas sale hacia arriba (reintento
+        con la espera de esa moneda, como el resto del contexto)."""
+        ctx, om = w["ctx"], w["open_ms"]
+        reg = await self._regimen_rp(w)
+        b4 = await self.fetch_interval(coin, "4h", om - 1000 * ruptura3.H4, 1000)
+        t4 = ruptura3.tendencia_4h(b4, om)
+        d_dia = ruptura3.tendencia_diaria((ctx.get("rp_d1") or {}).get(coin) or [])
+        d, code, why = ruptura3.sentido(reg["zona"], d_dia, t4)
+        return {"zona": reg["zona"], "puntos": reg["puntos"], "d_dia": d_dia, "t4": t4, "sentido": d,
+                "codigo": code, "motivo": why}
 
     async def _update_bars(self, w: dict, coin: str, now: int) -> None:
         if self.impulso:   # las velas desde la apertura y, para el rvol, las de las sesiones anteriores
@@ -2847,7 +3410,8 @@ class OpeningEngine:
             if run is not None and run.prior is None and (coin in w["prior"] or tries >= PRIOR_TRIES_IMP):
                 run.prior = w["prior"].get(coin) or []   # sin ellas el rvol no se cumple (como el laboratorio)
             bars = w["bars"].setdefault(coin, [])
-            start = bars[-1][T] + MIN if bars else w["open_ms"]
+            pre = ruptura3.PRE5 * M5 if self.p.get("modelo") == "ruptura3" else 0   # Ruptura V3: ATR de 5 min previo
+            start = bars[-1][T] + MIN if bars else w["open_ms"] - pre
             if now >= start + MIN + 2000:
                 new = await self.fetch_klines(coin, start, (now - start) // MIN + 2)
                 bars.extend(b for b in new if not bars or b[T] > bars[-1][T])
@@ -3151,6 +3715,14 @@ class OpeningEngine:
         if self.paused:   # la evolución pausó el campeón: se mide la apertura pero no se entra
             run.on_paused(now, "el campeón está pausado por la evolución (solo paper)")
             return self._no_entra(w, coin, now, "otro")
+        rp = isinstance(run, RupturaRun)
+        if rp:   # Ruptura V3: las noticias del momento del disparo (veto de una corroborada en contra, 6 h previas)
+            sig = w["signals"][coin] = await self._signal(coin, w)
+            veto = run.veto_noticias(sig)
+            act["tags"] = dict(run.tags)
+            if veto:
+                run.on_rejected(now, veto)
+                return self._no_entra(w, coin, now, "veto_noticia", {"noticias": run.news_data()})
         busy = self._coin_busy(pf, coin)
         if busy:   # una sola posición por moneda (como el laboratorio: la apertura se salta)
             run.on_rejected(now, busy)
@@ -3163,7 +3735,8 @@ class OpeningEngine:
             run.on_rejected(now, why)
             return self._no_entra(w, coin, now, "sin_cortos", {"comisiones": comisiones.activo()})
         entry = self._live_price(coin, now) or act["price"]
-        plan = impulse_plan(d, entry, self.p, self._funding_now(coin), inst, (run.ctx or {}).get("atr_h_pct"))
+        pp = {**self.p, "sl_pct": float(act["stop_pct"])} if rp else self.p   # Ruptura V3: R = el stop del rango
+        plan = impulse_plan(d, entry, pp, self._funding_now(coin), inst, (run.ctx or {}).get("atr_h_pct"))
         w["plans"][coin] = {k: plan[k] for k in ("stopPct", "tp2R", "rr", "ok", "why", "instrument", "gross_pct",
                                                  "cost_pct", "funding_pct", "net_pct", "tp1R", "tp1Frac", "lockR",
                                                  "lockFloorR", "lockTrailR", "partes")}
@@ -3180,6 +3753,9 @@ class OpeningEngine:
                           suelo=plan["floor_px"], suelo_R=plan.get("lockFloorR"),
                           seguimiento_R=plan.get("lockTrailR"), tope_activado_h=self.p.get("max_hold_active_h"),
                           partes=plan["partes"])
+        if rp:
+            plan_d.update(stop_estructural_pct=round(float(act.get("s_struct") or 0.0), 4),
+                          stop_max_pct=self.p["rp_stop_max_pct"], adx_4h=round(float(act.get("adx") or 0.0), 2))
         if not plan["ok"]:
             run.on_rejected(now, plan["why"])
             return self._no_entra(w, coin, now, "reglas" if plan["why"].startswith("Regla del usuario") else "otro",
@@ -3191,6 +3767,16 @@ class OpeningEngine:
         if limit:
             run.on_rejected(now, limit)
             return self._no_entra(w, coin, now, _limit_code(limit), {"limites": lim_d})
+        cap = self.p.get("rp_max_apertura") if rp else None
+        if cap:   # Ruptura V3: como mucho rp_max_apertura entradas en esta apertura (el hueco de una ocupada pasa)
+            # las ya enviadas al paper o recuperadas de él (w["stories"]) que siguen contando; no los disparos que aún
+            # esperan su turno en esta misma ronda
+            ya = len({x["coin"] for x in w["stories"].values() if x["coin"] != coin
+                      and getattr(w["runs"].get(x["coin"]), "entries", 0)})
+            if ya >= cap:
+                run.on_rejected(now, f"ya hay {ya} entradas en esta apertura (como mucho {cap})")
+                return self._no_entra(w, coin, now, "tope_apertura",
+                                      {"limites": {**lim_d, "apertura": ya, "max_apertura": cap}})
         try:
             t = self._ticket_imp(w, coin, act, plan, now)
             n = w["seq"][coin] = w["seq"].get(coin, 0) + 1
@@ -3198,11 +3784,14 @@ class OpeningEngine:
             verb = "Compra" if d > 0 else "Venta"
             news = {"a_favor": "noticia a favor", "en_contra": "noticia en contra"}.get(tags["noticia"], "sin noticia")
             inst_t = "perpetuo" if inst == "perp" else "contado"
-            hl = f"Apertura {w['name']} · {verb} {coin} ({inst_t}, paper) · impulso {_sg(tags['impulso_pct'])} % · {news}"
+            que = (f"Ruptura V3 (régimen {tags.get('regimen') or '–'}, ADX {_n(_f(tags.get('adx_4h'), 0.0), 1)}, stop "
+                   f"{_n(plan['stopPct'])} %)" if rp else f"impulso {_sg(tags['impulso_pct'])} %")
+            hl = f"Apertura {w['name']} · {verb} {coin} ({inst_t}, paper) · {que} · {news}"
             text = (f"{act['why']} · {plan['why']} · riesgo {_n(t['risk'])} % · apertura anterior "
                     f"{tags['apertura_anterior'].replace('_', ' ')} · BTC {tags['btc'].replace('_', ' ')}")
             self.bus.publish({"type": "event", "ts": now, "kind": "strategy", "agent": "strat", "story": story,
-                              "title": f"{verb} {coin} · Impulso de apertura (paper)", "coins": [coin],
+                              "title": f"{verb} {coin} · {'Ruptura V3' if rp else 'Impulso de apertura'} (paper)",
+                              "coins": [coin],
                               "text": _cut(text, 400),
                               "patch": {"headline": hl, "src": SRC, "tier": "Plan", "t0": now, "coins": [coin],
                                         "strat": t, "tags": dict(tags)}})
@@ -3211,11 +3800,12 @@ class OpeningEngine:
             run.on_rejected(now, "fallo interno al preparar la orden")
             return self._no_entra(w, coin, now, "otro")
         # Antes de submit: lo que digan el riesgo y el paper (que lo apunta su gancho del bus) va después
+        x3 = lambda k: round(_f(act.get(k)), 3) if _f(act.get(k)) is not None else None   # noqa: E731
+        vol_d = ({"volumen_x": x3("volumen_x"), "rango_verdadero_x": x3("rango_verdadero_x")} if rp   # Ruptura V3
+                 else {"rvol": x3("rvol"), "rvol_min": self.p.get("rvol_min")})
         self._dec(w, coin, now, "entrada", "entra", "entra",
                   f"Se envía al paper: {verb.lower()} {INST_TEXT[inst]} a {_px(entry)}, " + self._plan_txt(plan),
-                  {"plan": plan_d, "limites": lim_d,
-                   "rvol": round(_f(act.get("rvol")), 3) if _f(act.get("rvol")) is not None else None,
-                   "rvol_min": self.p.get("rvol_min")}, story=story)
+                  {"plan": plan_d, "limites": lim_d, **vol_d}, story=story)
         try:
             ok = await _maybe(self.submit(t, story, hl, t["strategy"], f"Apertura {w['name']}"))
         except Exception as e:
@@ -3309,6 +3899,34 @@ class OpeningEngine:
                     log.exception("Aperturas: fallo en la ventana %s", w.get("key"))
         self._publish(now)
 
+    @staticmethod
+    def _esperando_datos(w: dict, key: str, now: int) -> bool:
+        """¿Espera esta moneda (o el régimen de la ventana, clave REGIMEN) tras un fallo de datos?"""
+        x = w.setdefault("espera", {}).get(key)
+        return bool(x) and now < x["hasta"]
+
+    def _fallo_datos(self, w: dict, key: str, now: int, que: str, e: Exception) -> None:
+        """Un fallo de datos de una moneda (o del régimen): espera creciente solo para ella (10, 20, 40… s, hasta
+        ESPERA_MAX_S); las demás monedas de la ventana siguen. El último error queda para su fila si la sesión acaba
+        sin contexto."""
+        x = w.setdefault("espera", {}).setdefault(key, {"n": 0, "hasta": 0, "error": None})
+        x["n"] += 1
+        wait = min(ESPERA_MAX_S, 5 * 2 ** min(x["n"], 6))
+        x["hasta"], x["error"] = now + wait * 1000, _cut(f"{type(e).__name__}: {e}", 200)
+        if time.monotonic() - self._err_at > 60:
+            self._err_at = time.monotonic()
+            log.warning("Aperturas: fallo al pedir %s en %s (%s); reintento en %d s", que, w.get("name"), e, wait)
+
+    def _sin_contexto_txt(self, w: dict, coin: str) -> str:
+        """Qué contexto no llegó a una moneda que acabó la sesión sin él (su fila «sin_contexto»)."""
+        ctx = w["ctx"]
+        if self.p.get("modelo") == "ruptura3" and "rp_regimen" not in ctx:
+            return "no llegó el régimen cripto (los cierres diarios de Binance)"
+        if "btc" not in ctx:
+            return "no llegó la tendencia diaria de BTC"
+        return (f"no llegaron de Binance los datos de {coin} para su contexto (velas de 1 h"
+                + (", de 4 h" if self.p.get("modelo") == "ruptura3" else "") + " o de la apertura anterior)")
+
     async def _window(self, w: dict, now: int) -> None:
         if w["missed"] or now < w["open_ms"] - self.p["lead_min"] * MIN:
             return
@@ -3333,40 +3951,56 @@ class OpeningEngine:
                     continue
                 if not self.impulso:
                     run.end("Fin de la sesión")
+                elif run.state == "midiendo_impulso" and run.ctx is None:   # nunca llegó su contexto: no son las velas
+                    run.end(f"Fin de la sesión sin contexto: {self._sin_contexto_txt(w, c)}; no se pudo decidir")
+                    sin_reg = self.p.get("modelo") == "ruptura3" and "rp_regimen" not in w["ctx"]
+                    fallo = w.get("espera", {}).get(REGIMEN if sin_reg else c) or {}
+                    self._dec(w, c, now, "medida", "no_entra", "sin_contexto", run.last_why,
+                              {"error": fallo.get("error"), "intentos": fallo.get("n", 0)})
                 elif run.state == "midiendo_impulso":
-                    run.end("Fin de la sesión sin medir el impulso: no llegaron las velas de 1 min")
+                    run.end(f"Fin de la sesión sin medir el {'rango' if isinstance(run, RupturaRun) else 'impulso'}: "
+                            "no llegaron las velas de 1 min")
                     self._dec(w, c, now, "medida", "no_entra", "sin_velas", run.last_why)
                 else:
                     run.end("Fin de la sesión sin entrar")
                     self._dec(w, c, now, "entrada", "no_entra", "otro", run.last_why)
             return
-        if not active or now < w["open_ms"] + MIN or now < self._retry_at:
+        if not active or now < w["open_ms"] + MIN:
             return
+        juntos = self.impulso and self.p.get("modelo") == "ruptura3"   # Ruptura V3: los disparos de todas, en orden
+        if juntos and not await self._regimen_listo(w, now):   # sin el régimen cripto ninguna moneda puede decidir
+            return
+        pend: list[tuple[str, dict]] = []
         for coin in active:
+            if self._esperando_datos(w, coin, now):   # su espera tras un fallo de datos (las demás siguen)
+                continue
             try:
                 if self.impulso:
                     await self._context(w, coin)
                 await self._update_bars(w, coin, now)
-                self._fails = 0
             except asyncio.CancelledError:
                 raise
-            except Exception as e:   # espera creciente; nunca tumba el bucle
-                self._fails += 1
-                wait = min(300, 5 * 2 ** min(self._fails, 6))
-                self._retry_at = now + wait * 1000
-                if time.monotonic() - self._err_at > 60:
-                    self._err_at = time.monotonic()
-                    log.warning("Aperturas: velas de %s no disponibles (%s); reintento en %d s", coin, e, wait)
-                break
+            except Exception as e:   # espera creciente solo para esta moneda; nunca tumba el bucle ni frena a las demás
+                self._fallo_datos(w, coin, now, f"los datos de {coin} (contexto o velas)", e)
+                continue
+            w.setdefault("espera", {}).pop(coin, None)
             if self.p.get("gate") and not await self._gate_ok(w, coin):
                 continue
             if self.impulso:
                 await self._news_at_measure(w, coin, now)
             acts = self._process(w, coin, now)
             self._flush_decs(w, coin, now)   # la medida antes que la entrada
+            if juntos:
+                pend += [(coin, a) for a in acts]
+                continue
             for act in acts:
                 await (self._enter_imp if self.impulso else self._enter)(w, coin, act, now)
                 self._flush_decs(w, coin, now)
+        # Ruptura V3: primero la que dispara antes y, en la misma vela, la de mayor ADX (ruptura3.orden); el tope por
+        # apertura lo pone _enter_imp, así que una moneda ocupada o vetada deja su hueco a la siguiente
+        for coin, act in sorted(pend, key=lambda x: ruptura3.orden(x[1])):
+            await self._enter_imp(w, coin, act, now)
+            self._flush_decs(w, coin, now)
 
     async def run(self) -> None:
         while True:
@@ -3420,8 +4054,10 @@ class OpeningEngine:
         news = (run.news if run is not None and run.news is not None else s) or {}
         if run is None:
             state = "terminada" if w["missed"] else "esperando_apertura"
-            why = w["why"] if w["missed"] else (f"A las {_hm(w['open_ms'])} Madrid se mide el impulso de los "
-                                                 f"{self.p['measure_min']} primeros min")
+            why = w["why"] if w["missed"] else (
+                f"A las {_hm(w['open_ms'])} Madrid se mira el régimen cripto y la tendencia de {c}; si van a favor, el "
+                f"rango de los {self.p['measure_min']} primeros min y su ruptura" if self.p.get("modelo") == "ruptura3"
+                else f"A las {_hm(w['open_ms'])} Madrid se mide el impulso de los {self.p['measure_min']} primeros min")
         else:
             state, why = run.state, run.last_why
             if state == "midiendo_impulso" and now < w["open_ms"]:
@@ -3441,7 +4077,8 @@ class OpeningEngine:
                 "gate": None, "moving": None, "plan": w["plans"].get(c),
                 "tags": (run.tags or None) if run is not None else None,
                 "levels": run.levels() if run is not None and (run.po is not None or run.entry_px) else None,
-                "context": {k: ctx.get(k) for k in ("atr_pct", "atr_h_pct", "btc_dir", "prev_ms", "prev_react")}
+                "context": {**{k: ctx.get(k) for k in ("atr_pct", "atr_h_pct", "btc_dir", "prev_ms", "prev_react")},
+                            **({"rp": ctx["rp"]} if ctx.get("rp") else {})}   # Ruptura V3: régimen y tendencias
                 if ctx else None}
 
     def build_status(self, now: int) -> dict:
@@ -3456,7 +4093,9 @@ class OpeningEngine:
                      "hora_madrid": _hm(w["open_ms"]), "medida_hasta": w["open_ms"] + self.p["measure_min"] * MIN,
                      "entrada_ms": w["open_ms"] + m * MIN if kind == "t" else None,
                      "estrategia": self.preset.get("nombre") or "impulso",
-                     "hara": window_plan_text(w["open_ms"], self.p)}
+                     "hara": window_plan_text(w["open_ms"], self.p),
+                     **({"regimen": {k: v for k, v in w["ctx"]["rp_regimen"].items() if k != "componentes"}}
+                        if w["ctx"].get("rp_regimen") else {})}   # Ruptura V3: el régimen cripto de esa apertura
                     for w in sorted(self.windows.values(), key=lambda x: x["open_ms"])]
             return {"type": "openings", "ts": now, "strategy": "impulso", "windows": wins,
                     "params": {**{k: self.p[k] for k in IMP_STATUS_KEYS}, **self.preset},

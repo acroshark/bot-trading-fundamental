@@ -471,8 +471,9 @@ async def test_motor_orden_bloqueada_y_fallo_de_datos_no_tumba():
         return [b for b in data if start <= b[0] < start + limit * MIN and b[0] + MIN <= now[0]]
 
     eng.fetch_klines = fetch
-    await eng.step()                       # primer fallo: espera creciente, sin excepción
-    assert not sent and eng._retry_at > now[0]
+    await eng.step()                       # primer fallo: espera creciente de esa moneda, sin excepción
+    w = eng.windows[next(k for k in eng.windows if k.startswith("europa-"))]
+    assert not sent and w["espera"]["BTC"]["hasta"] == now[0] + 10_000 and w["espera"]["BTC"]["n"] == 1
     now[0] = T0 + 40 * MIN                 # los datos vuelven tarde: la ruptura ya es vieja y no se entra
     await eng.step()
     assert not sent

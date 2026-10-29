@@ -745,7 +745,11 @@ def test_catalogo_cerrado_sin_repetir_y_ts_en_orden(tmp_path):
     assert c["datos"] == {"x": None, "y": [1, None]} and c["dia"] == "2026-10-29"
     assert set(D.MOTIVOS) == {"entra", "impulso_nulo", "impulso_bajo", "tarde", "sin_velas", "veto_noticia", "tope_dia",
                               "riesgo_dia", "perdida_dia", "exposicion", "moneda_ocupada", "max_posiciones", "reglas",
-                              "aprobacion", "bot_parado", "objetivo", "stop", "cerrojo", "tiempo", "sin_cortos", "otro"}
+                              "aprobacion", "bot_parado", "objetivo", "stop", "cerrojo", "tiempo", "sin_cortos", "otro",
+                              # Ruptura V3 (preset ruptura3)
+                              "regimen_neutral", "sin_tendencia", "adx_bajo", "ruptura_contra", "sin_ruptura",
+                              "sin_volumen", "sin_expansion", "stop_lejos", "tope_apertura",
+                              "sin_contexto"}   # la sesión acabó sin el contexto de la moneda
     assert set(D.DECISIONES) == {"entra", "no_entra", "rechazada", "perdida", "abierta", "parcial", "cerrada",
                                  "esperando"}   # «parcial»: la salida parcial, la posición sigue abierta a medias
     assert [r["id"] for r in filas(dec)] == [a["id"], b["id"], c["id"]]

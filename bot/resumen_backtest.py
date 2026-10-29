@@ -9,6 +9,10 @@
   motor con el preset SEIS («6 diarias», apertura.SEIS) en 3 años. Pierde fuera de muestra: se enseña tal cual.
 - «seis2» (con la misma seis_summary): seis2_resumen.json, la réplica del motor con el preset SEIS2 («6 diarias v2»:
   las entradas de SEIS y la salida «A», la mitad en 3R y el resto con el cerrojo) en 3 años. También pierde: tal cual.
+- «ruptura3» (con la misma seis_summary): ruptura3_resumen.json, la réplica del motor con el preset RUPTURA3 («Ruptura
+  V3», scripts/replica_ruptura3.py, operación a operación igual que la medida prerregistrada). Fuera de muestra gana y
+  dentro pierde: no es una ventaja demostrada y se dice. Trae además, en «fuera» y «dentro», «antes_de_costes»: el R de
+  las mismas operaciones sin comisiones ni deslizamiento ni funding y cuánto se lleva cada coste.
 
 Cada resumen lleva «costes»: con qué comisiones está calculado (29-10-2026, «las comisiones dentro del sistema»). Las
 réplicas del motor y el laboratorio van con config.FEE_PCT (0,10 % por lado, también en los perpetuos de las réplicas) y
@@ -133,16 +137,19 @@ def _read(path: Path) -> dict | None:
 
 SEIS_FILE = "seis_diarias_resumen.json"
 SEIS2_FILE = "seis2_resumen.json"
+RUPTURA3_FILE = "ruptura3_resumen.json"
 
 
 def load() -> dict:
-    """{impulso, lab, seis, seis2} desde BACKTEST_DIR; lo que falte va como None."""
+    """{impulso, lab, seis, seis2, ruptura3} desde BACKTEST_DIR; lo que falte va como None."""
     imp = _read(config.BACKTEST_DIR / "impulso_7d.json")
     lab = _read(config.BACKTEST_DIR / "laboratorio.json")
     seis = _read(config.BACKTEST_DIR / SEIS_FILE)
     seis2 = _read(config.BACKTEST_DIR / SEIS2_FILE)
+    rup3 = _read(config.BACKTEST_DIR / RUPTURA3_FILE)
     return {"impulso": impulso_summary(imp) if isinstance(imp, dict) else None,
             "lab": lab_summary(lab) if isinstance(lab, dict) else None,
             "seis": seis_summary(seis) if isinstance(seis, dict) else None,
             "seis2": seis_summary(seis2) if isinstance(seis2, dict) else None,
+            "ruptura3": seis_summary(rup3) if isinstance(rup3, dict) else None,
             "costes": costes()}

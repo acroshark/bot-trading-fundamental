@@ -779,3 +779,152 @@ del puerto 8443, que OKX retira, al 443.
 - **Una errata en `BOT_COMISIONES`** usa el perfil más caro (sin X-Perps) y la web lo avisa.
 - **La comisión de la demo de OKX no pasa al paper**, y los cortos del perfil `cuenta` dependen de que la cuenta tenga X-Perps, no del modo de posición que necesita el conector.
 - **Tu regla ≥ 2:1 se mide en R de precio, antes de costes.** En dinero, después de costes, la horquilla de «6 diarias» (stop 1,5 %, objetivo 3R) gana ≈ 2,5 por cada 1 que pierde con X-Perps (objetivo 4,5 % − 0,10 − 0,08 − 0,02 = 4,30 %; stop 1,5 % + 0,20 + 0,04 = 1,74 %) y ≈ 1,8 sin ellas (3,93 % frente a 2,24 %): sin X-Perps queda por debajo de 2:1 en dinero. No se ha cambiado la regla: falta que decidas si el 2:1 es bruto (como ahora) o neto. La web lo enseña en «Comisiones del paper».
+
+
+## 24. Ruptura V3 en vivo (29-10-2026)
+
+**Qué pidió el usuario.** «Si la estrategia es mala, prueba Ruptura V3 o lo que haga falta, pero saca ya rendimiento de
+todo el sistema». Y no entiende cómo se pierde tanto si «un mono acertaría el 50 %». Respuesta con cifras exactas abajo.
+
+**Qué es.** La variante V3 del diseño prerregistrado `BACKTEST_DIR/controles/selectiva/diseno_ruptura.md` (reglas fijadas
+antes de medir), ahora preset del motor: `apertura.PRESETS["ruptura3"]`, «Ruptura V3: rango de apertura con tendencia,
+volumen y régimen». Se activa con `scripts/activar_estrategia.py --preset ruptura3` (con el bot parado; **no se ha
+activado**: la cartera de prueba sigue con «6 diarias v2» hasta que el usuario decida).
+- Solo mira la moneda con el **régimen cripto** a favor (la skill crypto-regime-analyzer con las 4 monedas, portada a
+  `bot/ruptura3.py`: largos solo en RISK_ON, cortos solo en RISK_OFF, nada en NEUTRAL), la **tendencia diaria y la de
+  4 h** en ese sentido y **ADX(14) de 4 h ≥ 25** con el DI a favor.
+- Rango de los 15 primeros minutos. Dispara la primera vela de 5 min que cierra fuera del rango (más el margen), a favor,
+  con **volumen ≥ 1,5 ×** el de las velas del rango y **rango verdadero ≥ 1,5 × ATR(14)** de 5 min, antes de +240 min.
+  Un cierre al otro lado antes descarta la moneda en esa apertura.
+- Stop máx(2 %, el otro lado del rango + 0,10 %); si pasa del 3 %, no se entra. Como mucho **2 por apertura** (la que
+  dispara antes y, a la vez, la de mayor ADX); una moneda ocupada o vetada deja su hueco.
+- Salida A de «6 diarias v2» con R = el stop de cada operación: la mitad en 3R; la otra mitad, a +3R, al suelo de +2R y
+  seguimiento a 2R; 24 h sin activar, 7 días activada; antes de +3R el stop no se mueve. Tus reglas, intactas.
+- Noticias: solo veto (`news_mode` `corroboradas`): no se entra si en las 6 h previas al disparo hay en contra una noticia
+  de un grupo fiable que pasa su puerta o una macro que la cripto confirmó. En el backtest no hay noticias: no actúa.
+
+**Antes que las cifras, lo que la principal (+0,43 R fuera de muestra) no dice** (revisión del 29-10-2026):
+- **No pasó su puerta.** El criterio fijado antes de medir (sobre V1, `diseno_ruptura.md`, sección 11) dio «no pasa: no
+  hay ventaja medida»: V1 da −0,022 R dentro y +0,30 R fuera, por debajo del p95 de su base al azar (+0,43). El mismo
+  diseño fija que, si V1 no pasa, «no se asciende ninguna otra variante después de ver los datos». V3 sale de la regla de
+  elección del script (máximo R dentro entre las de ≥ 150 operaciones dentro; V1 se queda fuera por una, con 149) y es,
+  además, la mejor fuera de muestra de las 23 configuraciones medidas ese día (de −0,10 a +0,43 R). El +0,43 R es la
+  mejor de 23, es decir, una cifra optimista. Se prueba en paper porque lo pidió el usuario, no porque pasara su puerta.
+- **Sale de los cortos.** Fuera de muestra, los 90 cortos (todos en RISK_OFF, con BTC −29 %) dan +0,51 R por operación y
+  46,0 de los 50,6 R. Los 166 largos de los 3 años dan +0,01 R por operación (dentro −0,02 R en 138; fuera +0,16 R en 28).
+- **Hoy no operaría.** Con los cierres diarios guardados (hasta el 27-10-2026), el régimen está en NEUTRAL desde el
+  19-10-2026 (72,1 puntos; en los 60 días anteriores, 38 en RISK_ON y 22 en NEUTRAL). En NEUTRAL no mira ninguna moneda.
+  En RISK_ON solo compra, el lado sin resultado: +0,01 R por operación con los costes de hoy (3 años) y −0,22 R sin
+  X-Perps.
+- **Sin cuenta X-Perps no hay cortos.** Las «comisiones del 0,35» que menciona el usuario son las del contado sin
+  X-Perps. Con ese perfil, en el motor entero (prueba de la revisión con 8 días de la réplica), los 14 cortos se vetan
+  (`sin_cortos`) y solo entran los 5 largos (`tests/test_ruptura3.py` lo comprueba). Medido en 3 años con 0,35 % por lado,
+  sus compras dan −0,25 R dentro (138) y −0,08 R fuera (28).
+  Antes de activarla hay que confirmar qué comisión tiene de verdad la cuenta: el paper usa ahora `okx_eu_con_xperps`.
+
+**La réplica con el propio motor reproduce la medida operación a operación** (`scripts/replica_ruptura3.py`; detalle en
+`controles/selectiva/replica_ruptura3.json`): `apertura.RupturaRun` con las velas de 1 min de 3 años da las **277 de 277**
+operaciones de `medir_selectiva.py` (moneda, lado, apertura, hora de entrada y de salida, stop, R con funding, motivo y
+muestra), las mismas 508 señales y el mismo embudo (régimen neutral 6.876 monedas × apertura, sin tendencia 5.068, ADX
+bajo 1.428, ruptura en contra 1.027, sin ruptura 9, sin volumen 70, sin expansión 26, stop > 3 % 52). Con las 1.000
+últimas velas de 4 h (lo que pide el motor en vivo) la tendencia de 4 h decide igual en las 15.064 monedas × apertura
+(diferencia del ADX < 1e-9). El mismo libro reproduce además «6 diarias v2» (2.389 operaciones −0,0584 R dentro, 1.463
+−0,0743 R fuera, con el plan real de SEIS2). Diferencias que quedan entre la réplica y el vivo (todas pequeñas y
+conocidas): en vivo las velas de 4 h son las de Binance (en la réplica, hechas con las de 1 min; la réplica descarta una
+vela de 4 h con menos de 200 de 1 min), el funding del régimen es la última liquidación de `/fapi/v1/fundingRate` (en la
+réplica, el archivo de `HIST_DIR/funding`), la entrada es al precio vivo de OKX cuando llega la vela (en la réplica, la
+apertura de la vela siguiente con 2 pb) y el plan usa el funding actual de 8 h (en la réplica, la última tasa publicada).
+
+**Cifras (3 años, 0,10 % por lado y 2 pb, funding real; corte el 16-08-2025):**
+
+| | Dentro de muestra | Fuera de muestra |
+|---|---|---|
+| Operaciones (por jornada) | 159 (0,34) | 118 (0,39) |
+| R medio con funding | **−0,033** | **+0,429** |
+| Ganadoras | 37 % | 51 % |
+| Largos / cortos | 138 (−0,017 R) / 21 (−0,14 R) | 28 (+0,16 R) / 90 (+0,51 R) |
+| Cuenta por jornada (0,5 % de riesgo) | −0,006 % | +0,083 % |
+| Caída máxima | 28,1 R (12,2 % de la cuenta) | 9,5 R (4,2 %) |
+
+3 años: +0,16 R por operación (IC 95 % por días −0,07 a +0,40). Fuera de muestra, frente a su base con el sentido al azar
+p = 0,09: **no llega a ventaja demostrada**. El sentido depende del periodo (dentro, casi todo largos en subidas; fuera,
+casi todo cortos en caídas) y el resultado de fuera viene sobre todo de los cortos de 2026. Con deslizamiento doble,
++0,36 R fuera y −0,09 R dentro; con suelo del stop en 1,5 %, +0,31 / −0,10.
+
+**«Un mono acertaría el 50 %»: lo que da antes de costes y lo que se llevan** (`BACKTEST_DIR/controles/costes/`:
+`bruto_neto.py`, `.json`, `.txt` y `bruto_neto_operaciones.json`). Las mismas operaciones del libro verificado (reproduce
+exactamente `medir_selectiva.json` en las dos estrategias, o el script se para), otra vez simuladas con cada coste. «Sin
+costes»: comisión 0, sin deslizamiento, sin extra en los stops y sin funding. «Costes de hoy»: el perfil del paper,
+`okx_eu_con_xperps` (contado 0,10 % tomador y 0,08 % creador; X-Perps 0,05 % y 0,02 %), con 2 pb (el paper en vivo
+añade además medio diferencial real). «Sin X-Perps»: 0,35 % / 0,20 % y sin cortos, con el libro rehecho solo con las
+compras. En R por operación (1 R = el stop, ≈ 2 % del precio = 0,5 % de la cuenta) y, entre paréntesis, las que ganan:
+
+| | Sin costes | Costes de hoy del paper | Costes del backtest (0,10 % y 2 pb) | Sin X-Perps (solo compras) |
+|---|---|---|---|---|
+| 6 diarias v2, dentro (2.389) | **+0,060** (40 %) | **−0,029** (38 %) | −0,055 (37 %) | −0,337 (1.992 compras, 33 %) |
+| 6 diarias v2, fuera (1.463) | **+0,043** (42 %) | **−0,049** (40 %) | −0,074 (39 %) | −0,413 (1.236 compras, 30 %) |
+| Ruptura V3, dentro (159) | +0,087 (38 %) | −0,026 (37 %) | −0,033 (37 %) | −0,253 (138 compras, 33 %) |
+| Ruptura V3, fuera (118) | +0,539 (52 %) | +0,468 (51 %) | +0,429 (51 %) | −0,079 (28 compras, 43 %) |
+
+- **«6 diarias v2» gana antes de costes** (+0,04 a +0,06 R por operación), **pero los costes se llevan más**: con los de
+  hoy, 0,092 R por operación fuera de muestra (0,184 % del precio: comisiones 0,150 %, deslizamiento 0,036 %, funding
+  −0,001 %) y 0,089 R dentro; con los del backtest, 0,117 y 0,115 R. Con ≈ 5 operaciones por jornada y 0,5 % de riesgo,
+  en la cuenta: fuera de muestra, +0,10 % bruto y −0,22 % de costes por jornada (−0,12 % neto); dentro, +0,15 % y −0,23 %
+  (−0,07 % neto). **Los costes son 2,1 veces lo que gana antes de pagarlos fuera de muestra y 1,5 veces dentro**, con los
+  de hoy; con los del backtest, 2,7 veces fuera (0,280 % frente a 0,104 %) y 1,9 dentro (0,294 % frente a 0,153 %). No
+  son «unas tristes comisiones»: cuantas más operaciones sin ventaja, más se paga.
+- **En dinero** (las 1.463 operaciones de fuera de muestra): +63,6 R antes de costes y −71,0 R con los de hoy; los costes
+  se llevaron 134,7 R. De 100 € quedarían 133 € sin costes, 68 € con los de hoy y 8 € sin X-Perps (1.236 compras: −61,6 R
+  antes de costes y −510,9 R después). En los 3 años, de 100 €: 258 € sin costes, 45 € con los de hoy y 0,25 € sin X-Perps.
+- **El mono no acierta el 50 %.** Con las mismas entradas de «6 diarias v2» y el sentido a cara o cruz (100 veces), gana
+  el 42 % de las operaciones fuera de muestra: con stop de 1R y ganancias de 2-3R, siempre hay menos ganadoras que
+  perdedoras. Antes de costes saca +0,025 R por operación (el 90 % de las veces entre −0,025 y +0,080; en 3 años,
+  +0,014 R): alrededor de cero. Con los costes de hoy, −0,066 R; comprando al azar con 0,35 %, −0,424 R. De 100 € fuera
+  de muestra (mediana de las 100 veces): 121 € sin costes, 62 € con los de hoy y 21 € con 0,35 %.
+- **La estrategia frente al mono:** en 3 años saca +0,040 R más por operación que el azar, antes de costes (+0,054 frente
+  a +0,014; el mono la iguala el 1 % de las veces); fuera de muestra, +0,018 R (+0,043 frente a +0,025; la iguala el
+  32 %). Cada operación cuesta 0,090 R con X-Perps (2,3 veces esa ventaja) y 0,364 R sin ellas (9,1 veces).
+- **El acierto que haría falta para no perder** (fuera de muestra, con la ganancia y la pérdida medias de cada caso): el
+  40 % sin costes (gana el 42 %), el 42 % con los costes de hoy (gana el 40 %) y el 49 % con 0,35 % (gana el 30 %). La
+  pérdida no sale de equivocarse más que un mono: sale de pagar en cada operación más de lo que se gana antes de costes.
+- **La Ruptura V3** paga por operación algo parecido (0,07 R fuera y 0,11 R dentro con los de hoy), pero hace 13 veces
+  menos operaciones: su bruto de fuera (+0,54 R) la deja en positivo; el de dentro (+0,09 R) no cubre los costes. Con los
+  de hoy, en 3 años, +0,18 R por operación (+0,03 % de la cuenta por jornada); fuera de muestra, +0,09 % por jornada y de
+  100 € quedarían 131 €. Pero con sus mismas entradas hasta el mono a cara o cruz gana +0,17 R fuera de muestra con los
+  costes de hoy (las caídas de 2026: BTC pasó de 117.342 a 83.028 USDT, −29 %), y un mono con la misma proporción de
+  cortos saca +0,32 R y la iguala o supera el 8 % de las veces (p = 0,094 en `medir_selectiva.json`).
+- **Cartera paper en vivo** (29-10-2026, 11:23): una sola operación cerrada, de «6 diarias» v1 (stop 1,5 %): bruto
+  −0,49 USDC, costes 0,06 USDC (0,13 R), neto −0,55 USDC. Con una operación no se puede concluir nada.
+
+**En vivo** (`OpeningEngine` con el modelo «ruptura3», docs/04 2.9): el régimen se calcula una vez por apertura, antes que
+las monedas, con los cierres diarios de las 4 monedas y el funding de Binance (una última liquidación de más de 16 h no
+vale: ese componente queda sin dato); la tendencia de 4 h con 1.000 velas de 4 h; las velas de 1 min desde 80 min antes
+de la apertura. Cada decisión va a `decisiones_apertura` con su motivo (códigos nuevos: `regimen_neutral`,
+`sin_tendencia`, `adx_bajo`, `ruptura_contra`, `sin_ruptura`, `sin_volumen`, `sin_expansion`, `stop_lejos`,
+`tope_apertura` y, en todos los modos, `sin_contexto`). La web la nombra y enseña su backtest arriba (pestaña Backtest),
+con el antes y el después de costes.
+
+**Revisión del 29-10-2026 (arreglos, sin cambiar ninguna regla ni lo medido):**
+- **Un fallo de datos ya no frena a las demás monedas.** Antes, si fallaban las velas o el contexto de una moneda, la
+  ronda se cortaba en ella (las de detrás no se miraban) y la espera era de todo el motor: si fallaba la primera, subía
+  hasta 5 min para todas y sus rupturas llegaban «tarde». Ahora espera solo esa moneda (10 s, 20 s, 40 s… hasta 5 min) y
+  el régimen tiene su propia espera. Lo que queda: dos disparos de la misma vela que llegan en rondas distintas no se
+  reordenan por ADX (para eso habría que retrasar las entradas de las demás en cada fallo; solo cambia algo si además
+  se llena el tope de 2, que en 3 años vetó 17 entradas).
+- **El funding guardado viejo no cuenta.** Si Binance falla y el archivo que mantiene la vigilancia lleva días sin
+  ponerse al día, ya no se usa una tasa vieja sin avisar: queda en `bot.log` y el componente (15 % del peso) se reparte.
+- **El rango y la ventana van en velas de 5 min.** Un `estrategia_activa.json` o un `BOT_IMPULSO_PARAMS` tocados a mano
+  con un rango que no sea múltiplo de 5 min (con 12, el volumen del rango salía de velas a medias) o sin ninguna vela de
+  5 min tras el rango vuelven a los del preset con una nota; `rp_max_apertura` `true` ya no vale como 1.
+- **Las filas dicen lo que es.** La entrada guarda `volumen_x` y `rango_verdadero_x` (no `rvol`, que en el resto del motor
+  es el volumen frente a sesiones anteriores), y una moneda que acaba la sesión sin que llegara su contexto queda como
+  `sin_contexto`, no «no llegaron las velas de 1 min».
+
+**Qué esperar, sin maquillar.** Con el régimen de hoy (NEUTRAL), ninguna operación: no mira ninguna moneda hasta que el
+régimen pase a RISK_ON o RISK_OFF. En RISK_ON solo compra, y las compras de los 3 años dan ≈ 0 R con X-Perps y −0,22 R sin
+ellas. En RISK_OFF vende en perpetuo, lo que dio el resultado de fuera de muestra, pero solo con cuenta X-Perps. Cuando
+opere, unas 0,35-0,4 operaciones por jornada (una cada 2-3 días, a rachas), no 6 al día. Si el futuro se pareciera al
+fuera de muestra, ≈ +0,09 % de la cuenta por jornada con los costes de hoy; si se pareciera al dentro, ≈ 0 o algo
+negativo. Con 100 € de prueba, eso es céntimos por semana. No es una ventaja demostrada: se mide en paper si el usuario la
+activa. La única forma honesta de «sacar rendimiento» con estas cifras es operar menos y solo cuando hay tendencia, no
+más: cada operación cuesta 0,07-0,12 R, gane o pierda.

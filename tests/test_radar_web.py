@@ -2027,7 +2027,7 @@ def test_decisiones_catalogo_de_motivos_en_lenguaje_llano():
     r = run(DEC + """H.open(); reset();
       const B = Date.parse(dia(now) + "T10:00:00Z");   // todas el mismo día de Madrid: un solo recuento
       const CODES = ["impulso_nulo", "impulso_bajo", "tarde", "sin_velas", "veto_noticia", "tope_dia", "riesgo_dia", "perdida_dia", "exposicion",
-                     "moneda_ocupada", "max_posiciones", "reglas", "aprobacion", "otro", "zzz"];
+                     "moneda_ocupada", "max_posiciones", "reglas", "aprobacion", "sin_contexto", "otro", "zzz"];
       H.recv(...CODES.map((k, i) => dec({ventana: "w" + i, coin: "BTC", fase: "entrada", decision: k === "exposicion" ? "rechazada" : "no_entra",
         motivo_codigo: k, motivo: null, apertura_ms: B - i * 60e3})));
       H.recv(...["objetivo", "stop", "tiempo"].map((k, i) => dec({ventana: "c" + i, coin: "ETH", fase: "cierre", decision: "cerrada", motivo_codigo: k,
@@ -2039,11 +2039,12 @@ def test_decisiones_catalogo_de_motivos_en_lenguaje_llano():
     for t in ("sin dirección no se entra", "no llegó al mínimo para entrar", "Ya había pasado la hora de entrada", "No llegaron las velas de 1 min",
               "se veta la entrada", "todas las entradas permitidas hoy", "presupuesto de riesgo del día", "pérdida máxima del día",
               "pasaría del 100 % del capital", "una posición por moneda", "el máximo de posiciones", "No cumple tus reglas",
-              "No se aprobó a tiempo", "Llegó al objetivo.", "Tocó el stop.", "plazo máximo de la operación", "Sin motivo."):
+              "No se aprobó a tiempo", "Llegó al objetivo.", "Tocó el stop.", "plazo máximo de la operación", "Sin motivo.",
+              "sin que llegaran de Binance los datos para decidir"):
         assert t in box, t
     for t in ("impulso nulo 1", "impulso bajo 1", "tarde para entrar 1", "sin velas 1", "noticia fiable en contra 1", "tope de entradas del día 1",
               "riesgo del día agotado 1", "pérdida máxima del día 1", "moneda ocupada 1", "máximo de posiciones 1", "tus reglas 1",
-              "sin aprobación 1", "otro motivo 1", "sin motivo 1", "exposición 1"):
+              "sin aprobación 1", "sin contexto 1", "otro motivo 1", "sin motivo 1", "exposición 1"):
         assert t in box, t
     assert "Cerrada: objetivo" in box and "Cerrada: stop" in box and "Cerrada: fin del plazo" in box
     assert r["lines"][0].endswith("BTC no entra (impulso nulo)") and r["lines"][1].endswith("BTC no entra (impulso bajo)")
@@ -2356,6 +2357,68 @@ def test_backtest_seis2_en_marcha_y_seis_como_anterior():
         r2 = run("const now = Date.now();" + FIAB + SEIS2 + f"""S.btImp = {{impulso: null, lab: null, seis: null, seis2: {blob}}}; S.openings = opn(SEIS2_P); S.tab = "bt"; S.btSig = null; renderAll(true);
           return H.el("#btSeis2Top").innerHTML + H.el("#btSeis2Kpis").innerHTML;""", live=False)
         assert "Fuera de muestra" in r2 and "por tu decisión" in r2
+        _sin_null(r2)
+
+
+RUP3 = r"""
+const RUP3_P = {...SEIS2_P, modelo: "ruptura3", entry: "brk", brk_tf: 5, entry_end_min: 240, news_mode: "corroboradas",
+  rp_max_apertura: 2, rp_stop_max_pct: 3, preset: "ruptura3", nombre: "Ruptura V3: rango de apertura con tendencia, volumen y régimen"};
+"""
+RUP3_BT = {"generated": 1793260000000, "split": 1755295200000, "sl_pct": 2.0, "nota": "Réplica de la Ruptura V3 <b>",
+           "nombre": "Ruptura V3: rango de apertura con tendencia, volumen y régimen",
+           "params": {**SEIS2_BT["params"], "modelo": "ruptura3", "entry": "brk", "entry_end_min": 240, "news_mode": "corroboradas",
+                      "rp_max_apertura": 2, "rp_stop_max_pct": 3.0},
+           "fuera": {"n": 118, "mean_R": 0.4288, "win_rate": 0.5085, "paper_R_funding": 0.4285, "op_jornada": 0.386,
+                     "salidas": {"stop": 50, "tiempo": 40, "cerrojo": 19, "seguimiento": 9}, "horas_media": 14.6,
+                     "largos": {"n": 28, "mean_R": 0.1621}, "cortos": {"n": 90, "mean_R": 0.5114}, "desde": 1755476100000,
+                     "hasta": 1792505400000, "curva_R": [[1755480600000, 1.0], [1792505400000, 50.6]],
+                     "antes_de_costes": {"n": 118, "R_bruto": 0.5392, "deslizamiento_R": -0.0123, "comisiones_R": -0.0982,
+                                         "funding_R": -0.0003, "R_neto": 0.4285, "costes_R": -0.1107, "gana_bruto_pct": 51.7,
+                                         "op_jornada": 0.386, "cuenta_jornada_neto_pct": 0.0826}},
+           "dentro": {"n": 159, "mean_R": -0.0331, "win_rate": 0.371, "desde": 1698624900000, "hasta": 1755328500000,
+                      "curva_R": [[1698646140000, 6.8], [1755328500000, -5.25]],
+                      "antes_de_costes": {"n": 159, "R_bruto": 0.0868, "deslizamiento_R": -0.023, "comisiones_R": -0.0969,
+                                          "funding_R": 0.0, "R_neto": -0.033, "costes_R": -0.1198, "op_jornada": 0.34,
+                                          "cuenta_jornada_neto_pct": -0.0056}}}
+
+
+def test_ruptura3_nombre_descripcion_y_backtest():
+    """Con el preset «ruptura3» la web la nombra («Ruptura V3»), explica qué hace y abre arriba su backtest: fuera de muestra
+    gana, dentro no (no es una ventaja demostrada) y cuánto se llevan los costes. Con otra en marcha, sale como medida.
+    El incrustado real (ruptura3Data) se pinta igual, sin huecos."""
+    page = HTML.read_text(encoding="utf-8")
+    r = run("const now = Date.now();" + FIAB + SEIS2 + RUP3 + f"""S.btImp = {{impulso: {json.dumps(IMP_BT)}, lab: null, seis: null, seis2: {json.dumps(SEIS2_BT)}, ruptura3: {json.dumps(RUP3_BT)}}};
+      const out = {{}};
+      for (const [k, m] of [["rup3", opn(RUP3_P, {{params_source: "usuario"}})], ["seis2", opn(SEIS2_P)]]){{
+        S.openings = m; S.tab = "bt"; S.btSig = null; renderAll(true);
+        out[k] = {{shown: !H.el("#btRup3P").hidden, title: H.el("#btRup3Title").textContent, html: H.el("#btRup3").innerHTML + H.el("#btRup3Kpis").innerHTML,
+          e2: H.el("#btLiveTitle").textContent, e2sub: H.el("#btLiveSub").textContent, s2top: !H.el("#btSeis2TopP").hidden}};
+        S.tab = "market"; renderAll(true); out[k].sub = H.el("#openSub").textContent;
+        S.tab = "trades"; renderAll(true); out[k].st = H.el("#tradesStrat").innerHTML; }}
+      S.btImp = {{impulso: null, lab: null, seis: null, seis2: null, ruptura3: null}}; S.openings = opn(RUP3_P); S.tab = "bt"; S.btSig = null; renderAll(true);
+      out.vacio = {{shown: !H.el("#btRup3P").hidden, html: H.el("#btRup3").innerHTML}};
+      return out;""", live=False)
+    a, b = r["rup3"], r["seis2"]
+    assert a["shown"] and a["title"].startswith("Estrategia en marcha: Ruptura V3") and not a["s2top"]
+    assert a["e2"].startswith("Estrategia anterior (E2)") and "«Ruptura V3»" in a["e2sub"]
+    for t in ("Fuera de muestra gana", "+0,43 R por operación en 118 operaciones", "Pero dentro de muestra pierde",
+              "-0,03 R en 159 operaciones", "no es una ventaja demostrada", "Lo que se llevan los costes",
+              "antes de costes +0,54 R por operación", "las comisiones -0,10 R", "quedan +0,43 R", "≈ 0,37 R por operación",
+              "Tus reglas no se tocan", "Está en tu cartera paper por tu decisión", "Réplica de la Ruptura V3 &lt;b&gt;",
+              "<small>Antes de costes</small>", "Ruptura V3: rango de los 15 primeros min", "stop 2,00-3,00 % (el otro lado del rango)"):
+        assert t in a["html"], t
+    assert a["sub"].startswith("Ruptura V3 (paper, por tu decisión)") and "como mucho 2 por apertura" in a["sub"]
+    assert "Ruptura V3" in a["st"] and "preset Ruptura V3" in a["st"] and "+0,43 R por operación fuera de muestra" in a["st"]
+    assert "Dentro de muestra no gana" in a["st"]
+    assert b["shown"] and b["title"].startswith("Medida en backtest, no está en marcha: Ruptura V3") and b["s2top"]
+    assert "Si la activas (scripts/activar_estrategia.py --preset ruptura3)" in b["html"]
+    assert r["vacio"]["shown"] and "no trae el backtest de la Ruptura V3" in r["vacio"]["html"]
+    _sin_null(a["html"], b["html"], a["sub"], a["st"], r["vacio"]["html"])
+    if 'id="ruptura3Data"' in page:   # el resumen real incrustado (scripts/incrustar_backtest.py)
+        blob = page.split('<script type="application/json" id="ruptura3Data">', 1)[1].split("</script>", 1)[0]
+        r2 = run("const now = Date.now();" + FIAB + SEIS2 + RUP3 + f"""S.btImp = {{impulso: null, lab: null, seis: null, seis2: null, ruptura3: {blob}}}; S.openings = opn(RUP3_P); S.tab = "bt"; S.btSig = null; renderAll(true);
+          return H.el("#btRup3").innerHTML + H.el("#btRup3Kpis").innerHTML;""", live=False)
+        assert "Fuera de muestra gana" in r2 and "Lo que se llevan los costes" in r2 and "por tu decisión" in r2
         _sin_null(r2)
 
 
