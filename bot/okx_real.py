@@ -91,12 +91,15 @@ PLANTILLA = """\
 # 1. Copia este archivo como «okx.env» en esta misma carpeta (M:\\BotFundamental-datos\\secretos\\okx.env) y rellena
 #    las cuatro líneas de abajo. Este archivo de ejemplo no se lee nunca.
 # 2. Crea la clave en https://my.okx.com -> Perfil -> API (API keys):
-#    - Permisos: «Lectura» (Read) y «Operar» (Trade). NUNCA «Retirar» (Withdraw): con ese permiso el bot se niega a
-#      operar.
+#    - Permisos: para empezar, SOLO «Lectura» (Read): basta para que el bot lea tu saldo y tus comisiones. «Operar»
+#      (Trade) solo el día que decidas activar el modo real. NUNCA «Retirar» (Withdraw): con ese permiso el bot se
+#      niega a operar.
 #    - Restricción de IP: pon la IP pública de tu PC. Sin IP, OKX caduca la clave tras 14 días sin uso.
 #    - La frase de paso (passphrase) la eliges tú al crear la clave. OKX no la guarda: si la pierdes, crea otra clave.
-# 3. Primero en DEMO: las claves de demo se crean aparte (Operar -> Trading demo -> Centro personal -> API de demo) y
-#    van con OKX_DEMO=1. Las claves reales van con OKX_DEMO=0.
+# 3. Las claves de tu cuenta van con OKX_DEMO=0 (así viene). Con ellas el paper pasa a cobrar la comisión real de tu
+#    cuenta y, si no tiene X-Perps, deja de abrir cortos. La DEMO de OKX es aparte: sus claves se crean en Operar ->
+#    Trading demo -> Centro personal -> API de demo, van con OKX_DEMO=1 y con ellas el bot puede mandar órdenes de
+#    dinero ficticio a la demo (solo si además pones BOT_BROKER=real).
 # 4. Con OKX_DEMO=0 el bot solo LEE la cuenta (saldo, comisiones, posiciones y órdenes) hasta que además:
 #    - arranques el bot con la variable de entorno BOT_MODO_REAL=1, y
 #    - escribas la confirmación en la web del bot (panel «Cuenta real»), ya con las claves reales puestas aquí.
@@ -114,7 +117,7 @@ PLANTILLA = """\
 OKX_API_KEY=
 OKX_API_SECRET=
 OKX_API_PASSPHRASE=
-OKX_DEMO=1
+OKX_DEMO=0
 """
 
 
@@ -665,10 +668,12 @@ def xperp_familia(coin: str) -> str:
     return f"{coin}-USD_UM_XPERP"
 
 
-def comision_pct(fila: dict | None) -> float | None:
-    """Comisión de tomador en % de una fila de account/trade-fee (un número negativo es comisión; positivo, reembolso).
-    Se toma la mayor de las que trae (taker, takerUSDC, takerU), por prudencia."""
-    vals = [_f((fila or {}).get(k)) for k in ("taker", "takerUSDC", "takerU")]
+def comision_pct(fila: dict | None, lado: str = "taker") -> float | None:
+    """Comisión de tomador (lado «taker») o de creador («maker») en % de una fila de account/trade-fee (un número
+    negativo es comisión; positivo, reembolso). Se toma la mayor de las que trae (taker, takerUSDC, takerU), por
+    prudencia."""
+    lado = "maker" if lado == "maker" else "taker"
+    vals = [_f((fila or {}).get(k)) for k in (lado, f"{lado}USDC", f"{lado}U")]
     vals = [max(0.0, -v) * 100 for v in vals if v is not None]
     return max(vals) if vals else None
 
@@ -832,7 +837,12 @@ class RealBroker:
         self.cuenta_id: str | None = None   # entorno + cuenta de OKX (resumen): los registros de otra se apartan
         self.instrumentos: dict[tuple[str, str], Instrumento] = {}
         self.cortos_ok, self.cortos_por_que = False, "Aún no se ha leído la cuenta"
+        # monedas con X-Perps en la cuenta (aunque el bot no pueda usarlos por acctLv o posMode): solo dice si la cuenta
+        # tiene X-Perps, para los cortos del perfil «cuenta» del paper (bot/comisiones.py); None = sin leer
+        self.xperps: list[str] | None = None
         self.comisiones: dict[str, float | None] = {"spot": None, "perp": None}
+        # comisión de creador (orden límite) de la cuenta: solo para el perfil «cuenta» del paper (bot/comisiones.py)
+        self.comisiones_creador: dict[str, float | None] = {"spot": None, "perp": None}
         self.positions: dict[str, dict] = {}  # abiertas (o «enviando») de la cuenta actual
         self.closed: list[dict] = []          # cerradas de la cuenta actual
         self.apartadas: dict[str, dict] = {}  # abiertas de otra cuenta o entorno (por id): nunca se tocan
@@ -1008,7 +1018,7 @@ class RealBroker:
         return None
 
     def _etq(self) -> str:
-        return {REAL: "dinero real", DEMO: "demo de OKX"}.get(self.estado.modo, "solo lectura")
+        return {REAL: "dinero real", DEMO: "demo de OKX", APAGADO: "apagado"}.get(self.estado.modo, "solo lectura")
 
     def opera(self) -> bool:
         return self.puede_abrir()
@@ -1199,6 +1209,7 @@ class RealBroker:
         if pos_mode and pos_mode != "net_mode":
             porque.append(f"el modo de posición es {pos_mode} (el bot necesita net_mode; cámbialo tú en la web de OKX)")
         perps = [c for c in config.COINS if (c, "perp") in out]
+        self.xperps = list(perps)
         if not perps:
             porque.append("tu cuenta no tiene X-Perps disponibles (test de idoneidad y cuenta de X-Perps en OKX)")
         self.cortos_ok = bool(perps) and acct != "1" and (not pos_mode or pos_mode == "net_mode")
@@ -1216,11 +1227,13 @@ class RealBroker:
         if spot:
             filas = await cli.privado("GET", "/api/v5/account/trade-fee", {"instType": "SPOT", "instId": spot_id(spot)})
             self.comisiones["spot"] = comision_pct(filas[0] if filas else None)
+            self.comisiones_creador["spot"] = comision_pct(filas[0] if filas else None, "maker")
         perp = next((c for c in config.COINS if (c, "perp") in self.instrumentos), None)
         if perp:
             filas = await cli.privado("GET", "/api/v5/account/trade-fee",
                                       {"instType": "FUTURES", "instFamily": xperp_familia(perp)})
             self.comisiones["perp"] = comision_pct(filas[0] if filas else None)
+            self.comisiones_creador["perp"] = comision_pct(filas[0] if filas else None, "maker")
 
     async def _leer_saldo(self, now: int) -> None:
         self._t["saldo"] = now
@@ -3056,6 +3069,8 @@ class RealBroker:
             self.listo, self.bloqueo, self._bloqueo_retirada, self.cuenta_id = False, None, False, None
             self.cuenta, self.instrumentos, self.externas = {}, {}, []
             self.comisiones = {"spot": None, "perp": None}
+            self.comisiones_creador = {"spot": None, "perp": None}
+            self.xperps = None
             self._lever = set()
             self._adoptar()
             self._t["arranque"] = 0
@@ -3214,7 +3229,10 @@ class RealBroker:
                        "posMode": self.cuenta.get("posMode"), "ip_atada": self.cuenta.get("ip"),
                        "permisos": self.cuenta.get("perm"), "saldo_at": self.cuenta.get("saldo_at"),
                        "day_pnl": round(pnl, 4), "day_pnl_pct": round(pct, 3), "inicio": self.inicio},
-            "comisiones": dict(self.comisiones), "cortos": {"ok": self.cortos_ok, "por_que": self.cortos_por_que},
+            "comisiones": dict(self.comisiones), "comisiones_creador": dict(self.comisiones_creador),
+            "cortos": {"ok": self.cortos_ok, "por_que": self.cortos_por_que},
+            "xperps": list(self.xperps) if self.xperps is not None else None,
+            "broker": "real" if config.BROKER == "real" else "paper", "resumen": self.resumen(),
             "instrumentos": [i.vista() for i in self.instrumentos.values()],
             "limites": dict(self.limites), "techos": techos(), "entradas_hoy": self.entradas_hoy(now),
             "posiciones": [self._vista_pos(p, prices) for p in self.positions.values()],
@@ -3226,6 +3244,20 @@ class RealBroker:
                                                              "mode": i.get("mode")} for i in self.pending.values()],
             "cerradas": list(reversed(self.closed[-20:])), "reconciliacion": self.reconciliacion,
             "ultimo_error": self.ultimo_error, "peticiones": self.cliente.peticiones if self.cliente else 0})
+
+    def resumen(self) -> str:
+        """Una línea para el panel: a quién van los tickets (BOT_BROKER) y si el modo real opera."""
+        modo = self.estado.modo
+        if config.BROKER != "real":
+            if modo == APAGADO:
+                return "Modo real apagado: el bot opera en paper"
+            if modo == SOLO_LECTURA:
+                return "Modo real en solo lectura: el bot opera en paper (solo lee tu cuenta de OKX)"
+            return (f"Modo {'demo de OKX' if modo == DEMO else 'real'} listo, pero el bot opera en paper "
+                    "(BOT_BROKER=paper: los tickets van al paper)")
+        if self.puede_abrir():
+            return "Operando en " + self._etq()
+        return "Modo real sin operar: " + (self._por_que_no() or modo)
 
     def publish_cuenta(self, now: int | None = None, force: bool = False) -> bool:
         """Publica «cuenta_real» (no «portfolio»: ese es del paper) solo si ha cambiado algo."""

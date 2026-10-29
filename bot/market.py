@@ -15,7 +15,7 @@ from .bus import Bus
 from .models import now_ms
 
 log = logging.getLogger("market")
-OKX_WS = "wss://wseea.okx.com:8443/ws/v5/public"
+OKX_WS = "wss://wseea.okx.com/ws/v5/public"   # puerto 443: OKX retira el 8443 (aviso 64010, docs/06)
 BN = "https://fapi.binance.com"
 FUNDING_INFO_S = 6 * 3600    # el periodo de funding casi nunca cambia
 FUNDING_H_DEFAULT = 8.0      # Binance liquida cada 8 h salvo los símbolos que lista fundingInfo

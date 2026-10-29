@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from bot import config, paper
+from bot import comisiones, config, paper
 from bot.bus import Bus
 from bot.paper import PaperBroker, day_start_ms, market_of, next_midnight_ms
 from bot.store import Store
@@ -19,7 +19,11 @@ FEE = 0.001   # 0,10 % por lado
 
 EVENT_KEYS = {"type", "ts", "id", "kind", "agent", "story", "title", "text", "coins", "patch"}
 RESULT_KEYS = {"coin", "side", "qty", "entry", "exit", "why", "pnl", "pnl_pct", "R", "fees", "opened", "closedAt",
-               "riskUsd", "notional", "headline", "strategy", "window"}
+               "riskUsd", "notional", "headline", "strategy", "window", "costes", "bruto"}
+# Las pruebas de la mecánica (salidas, cerrojo, funding…) usan una comisión plana del 0,10 % por lado en todo, como
+# antes de las comisiones por perfil; las del perfil de OKX EU (creador / tomador, sin X-Perps) van al final con env_okx.
+PLANA = {"nombre": "Prueba: 0,10 % por lado en todo", "spot": {"creador": 0.10, "tomador": 0.10},
+         "perp": {"creador": 0.10, "tomador": 0.10}, "cortos": True, "fuente": "pruebas"}
 TRADE_KEYS = {"id", "story", "strategy", "window", "market", "coin", "side", "qty", "entry", "exit", "sl_initial",
               "trail_pct", "opened", "closed", "reason", "pnl", "pnl_pct", "R", "fees", "headline", "news_score"}
 POS_KEYS = {"story", "coin", "side", "qty", "entry", "sl", "trail_pct", "high_water", "opened", "riskUsd", "notional",
@@ -96,9 +100,20 @@ def env(tmp_path, monkeypatch):
     for k, v in {"APPROVAL_MODE": "auto", "PAPER_EQUITY": 10000.0, "RISK_PER_TRADE_PCT": 0.5, "MAX_DAILY_LOSS_PCT": 3.0,
                  "MAX_POSITIONS": 4, "FEE_PCT": 0.10, "VETO_SECONDS": 30}.items():
         monkeypatch.setattr(config, k, v)
+    monkeypatch.setitem(comisiones.PERFILES, "prueba_plana", PLANA)
+    comisiones.elegir("prueba_plana")
     e = Env(tmp_path)
     yield e
     e.store.close()
+
+
+@pytest.fixture
+def env_okx(env):
+    """El paper con el perfil de comisiones por defecto (OKX EU con cuenta X-Perps: contado 0,08 / 0,10 %, X-Perps
+    0,02 / 0,05 %)."""
+    comisiones.reiniciar()
+    assert comisiones.activo() == comisiones.CON_XPERPS
+    return env
 
 
 def fees(qty, entry, exit_):
@@ -974,7 +989,7 @@ def test_parada_manual_veta_lo_nuevo_y_sigue_gestionando_lo_abierto(env):
     assert b.submit(ticket(stop=2), "n1")                  # abierta antes de la parada
     assert b.halt("Detenida desde la web") and not b.halt("otra vez")
     pf = env.bus.state["portfolio"]                        # sale al momento, sin esperar a la ronda de 2 s
-    assert pf["halted"] is True and pf["caps"] == ["halt", "cancel"] and pf["limits"]["halted"] is False
+    assert pf["halted"] is True and pf["caps"] == ["halt", "cancel", "comisiones"] and pf["limits"]["halted"] is False
     for agent in ("risk", "human", "exec"):
         assert env.bus.state[f"agent:{agent}"]["patch"]["now"].startswith("Paper detenido por ti")
     assert not b.submit(ticket(coin="ETH"), "n2")
@@ -1097,7 +1112,7 @@ async def test_mandos_por_el_websocket_con_el_paper_real(env):
         for m in ({"type": "decision", "story": "n1", "ok": "true"}, {"type": "halt"}, {"type": "cancel", "story": "n1"}):
             await ws.send_str(json.dumps(m))
         pf = await _portfolio(ws, lambda p: p["halted"] and not p["pending"])
-        assert pf["caps"] == ["halt", "cancel"] and not pf["positions"]   # la cadena "true" no aprobó nada
+        assert pf["caps"] == ["halt", "cancel", "comisiones"] and not pf["positions"]   # "true" no aprobó nada
         await ws.send_str(json.dumps({"type": "resume"}))
         await _portfolio(ws, lambda p: p["halted"] is False)
         await ws.close()
@@ -1541,3 +1556,227 @@ def test_stop_de_nombre_desconocido_cierra_igual(env):
     env.broker.positions["n1"]["sl_kind"] = "otro_futuro"
     env.at(5, BTC=97.0)
     assert env.result("n1")["why"] == "Stop"
+
+
+# ---------------------------------------------------------------- comisiones por perfil de OKX EU (29-10-2026)
+
+def test_okx_eu_el_objetivo_paga_creador_y_el_stop_tomador(env_okx):
+    """Perfil por defecto (OKX EU con cuenta X-Perps): entrada y stop a mercado pagan 0,10 % (tomador); el objetivo,
+    que es una orden límite, 0,08 % (creador). Cada operación lleva sus costes en USDC y en R y el bruto."""
+    env, b = env_okx, env_okx.broker
+    assert b.submit(ticket(stop=2, tp2=3), "n1") and b.submit(ticket(coin="ETH", stop=2), "n2")
+    p1, p2 = b.positions["n1"], b.positions["n2"]
+    q1, q2 = p1["qty"], p2["qty"]
+    assert p1["comision"] == {"perfil": "okx_eu_con_xperps", "creador": 0.08, "tomador": 0.10}
+    assert p1["fee_open"] == pytest.approx(p1["notional"] * 0.001)
+    f = env.evs("filled", "n1")[0]
+    assert f["patch"]["exec"]["stopLossUsd"] == pytest.approx(50, abs=0.01)   # el tamaño cuenta el tomador en los dos lados
+    assert "comisión de entrada" in f["text"] and "(0,10 % tomador)" in f["text"]
+    assert f["patch"]["exec"]["comision"]["tomador"] == 0.10
+    env.at(5, BTC=106.5, ETH=97.9)
+    r1, r2 = env.result("n1"), env.result("n2")
+    fee1 = q1 * 100 * 0.001 + q1 * 106 * 0.0008
+    assert r1["why"] == "Objetivo (3,0 R)" and r1["fees"] == pytest.approx(fee1, abs=1e-3)
+    assert r1["pnl"] == pytest.approx(6 * q1 - fee1, abs=1e-3) and r1["bruto"] == pytest.approx(6 * q1, abs=1e-3)
+    c1 = r1["costes"]
+    assert c1["perfil"] == "okx_eu_con_xperps" and c1["salida_tipo"] == "creador"
+    assert c1["entrada"] == pytest.approx(q1 * 0.1, abs=1e-4) and c1["salidas"] == pytest.approx(q1 * 106 * 0.0008, abs=1e-4)
+    assert c1["total"] == pytest.approx(fee1, abs=1e-3) and c1["funding"] == 0
+    assert c1["total_R"] == pytest.approx(fee1 / r1["riskUsd"], abs=1e-3)
+    fee2 = q2 * 100 * 0.001 + q2 * 97.9 * 0.001
+    assert r2["why"] == "Stop de pérdida" and r2["costes"]["salida_tipo"] == "tomador"
+    assert r2["fees"] == pytest.approx(fee2, abs=1e-3) and r2["pnl"] == pytest.approx(-2.1 * q2 - fee2, abs=1e-3)
+    assert "· bruto +" in env.evs("closed", "n1")[0]["text"]
+
+
+def test_okx_eu_perpetuo_paga_las_comisiones_de_x_perps(env_okx):
+    """Un corto en perpetuo (X-Perps): 0,05 % a la entrada y en el stop, 0,02 % en el objetivo."""
+    env, b = env_okx, env_okx.broker
+    assert b.submit(ticket(coin="SOL", side="short", stop=2, tp2=3, instrument="perp"), "n1")
+    p = b.positions["n1"]
+    q = p["qty"]
+    assert p["comision"] == {"perfil": "okx_eu_con_xperps", "creador": 0.02, "tomador": 0.05}
+    assert p["fee_open"] == pytest.approx(p["notional"] * 0.0005)
+    env.at(5, SOL=93.5)
+    r = env.result("n1")
+    fee = q * 100 * 0.0005 + q * 94 * 0.0002
+    assert r["why"] == "Objetivo (3,0 R)" and r["fees"] == pytest.approx(fee, abs=1e-4)
+    assert r["costes"]["entrada"] == pytest.approx(q * 100 * 0.0005, abs=1e-4)
+    assert r["costes"]["salidas"] == pytest.approx(q * 94 * 0.0002, abs=1e-4)
+
+
+def test_okx_eu_la_salida_parcial_paga_creador(env_okx):
+    env, b = env_okx, env_okx.broker
+    assert b.submit(ticket(stop=2, tp2=4, tp1Frac=0.5, beR=None), "n1")   # parcial del 50 % en 1,5R (103)
+    q = b.positions["n1"]["qty"]
+    env.at(1, BTC=103.2)
+    p = b.positions["n1"]
+    [part] = p["partials"]
+    assert part["tipo"] == "creador" and part["fee"] == pytest.approx(q / 2 * 103 * 0.0008, abs=1e-4)
+    pos = b.portfolio()["positions"][0]
+    assert pos["costes"]["salidas"] == pytest.approx(q / 2 * 103 * 0.0008, abs=1e-4)
+    env.at(2, BTC=97.0)                                                   # el resto, al stop (a mercado)
+    r = env.result("n1")
+    salidas = q / 2 * 103 * 0.0008 + q / 2 * 97 * 0.001
+    assert r["costes"]["salidas"] == pytest.approx(salidas, abs=1e-4) and r["costes"]["salida_tipo"] == "tomador"
+    assert r["fees"] == pytest.approx(q * 100 * 0.001 + salidas, abs=1e-3)
+
+
+def test_cartera_y_resultados_ensenan_las_comisiones(env_okx):
+    """La cartera lleva el perfil en uso y, por posición, lo pagado y lo que costaría salir ahora (tomador) o en el
+    objetivo (creador); Resultados, las comisiones pagadas, el funding, el bruto y el neto. Una operación cerrada antes de
+    las comisiones por perfil se estima con lo que guardó (pagó 0,10 % a la entrada)."""
+    env, b = env_okx, env_okx.broker
+    old = {"id": "tviejo", "story": "v1", "opened": T0 - 7200_000, "closed": T0 - 3600_000, "pnl": 10.0, "fees": 2.0,
+           "notional": 1000.0, "riskUsd": 20.0, "coin": "BTC", "side": "long", "strategy": "x", "window": "y"}
+    b._save_trade(old, old["closed"])
+    env.broker = b = env.new()
+    assert b.submit(ticket(stop=2, tp2=3), "n1")
+    env.at(1, BTC=101)
+    pf = b.portfolio()
+    v = pf["comisiones"]
+    assert v["perfil"] == "okx_eu_con_xperps" and v["cortos"] is True and v["spot"] == {"creador": 0.08, "tomador": 0.10}
+    assert v["perp"] == {"creador": 0.02, "tomador": 0.05} and "0,35 %" in v["aviso"] and "Sin cuenta X-Perps" in v["aviso"]
+    assert v["regla_coste_pct"] == {"spot": 0.24, "perp": 0.14}
+    [pos] = pf["positions"]
+    c, q = pos["costes"], b.positions["n1"]["qty"]
+    assert c["entrada"] == pytest.approx(q * 0.1, abs=1e-4) and c["salidas"] == 0 and c["tomador"] == 0.10
+    assert c["salir_ahora"] == pytest.approx(q * 101 * 0.001, abs=1e-4)
+    assert c["objetivo"] == pytest.approx(q * 106 * 0.0008, abs=1e-4)
+    assert c["entrada_R"] == pytest.approx(c["entrada"] / pos["riskUsd"], abs=1e-3)
+    viejo = next(t for t in pf["closed"] if t["id"] == "tviejo")
+    assert viejo["costes"]["estimado"] and viejo["costes"]["entrada"] == 1.0 and viejo["bruto"] == 12.0
+    env.at(2, BTC=106.5)
+    res = b.results()
+    nuevo = next(t for t in res["trades"] if t["story"] == "n1")
+    comm = 2.0 + nuevo["costes"]["comisiones"]
+    assert res["comisiones_total"] == pytest.approx(comm, abs=0.01) and res["funding_total"] == 0
+    assert res["neto"] == pytest.approx(10.0 + nuevo["pnl"], abs=0.01)
+    assert res["bruto"] == pytest.approx(res["neto"] + res["comisiones_total"] - res["funding_total"], abs=0.01)
+    assert res["costes_estimados"] == 1 and res["comisiones"]["perfil"] == "okx_eu_con_xperps"
+    assert "costes" not in b.closed[0]   # la guardada no se reescribe
+
+
+def test_sin_cuenta_xperps_no_hay_cortos_y_el_contado_cuesta_035(env_okx, monkeypatch):
+    env, b = env_okx, env_okx.broker
+    assert b.submit(ticket(stop=2, tp2=3), "n1")                     # abierta con X-Perps: sigue con sus tasas
+    res = b.set_comisiones("okx_eu_sin_xperps")
+    assert res["ok"] and res["comisiones"]["perfil"] == "okx_eu_sin_xperps" and res["comisiones"]["cortos"] is False
+    pf = env.bus.state["portfolio"]                                    # sale al momento
+    assert pf["comisiones"]["perfil"] == "okx_eu_sin_xperps" and pf["comisiones"]["perp"] is None
+    assert pf["comisiones"]["spot"] == {"creador": 0.20, "tomador": 0.35}
+    riesgo = env.bus.state["agent:risk"]["patch"]["now"]               # el agente de riesgo dice el perfil en uso
+    assert "comisiones: OKX EU sin cuenta X-Perps (contado 0,20 % creador / 0,35 % tomador; sin cortos)" in riesgo
+    assert not b.submit(ticket(coin="ETH", side="short", stop=2, tp2=3), "n2")
+    ko = env.evs("riskko", "n2")[0]["patch"]["risk"]
+    assert ko["motivo_codigo"] == "sin_cortos" and ko["why"].startswith("Sin cuenta X-Perps: no hay cortos")
+    assert not b.submit(ticket(coin="SOL", stop=2, tp2=3, instrument="perp"), "n3")   # ni perpetuos
+    assert env.evs("riskko", "n3")[0]["patch"]["risk"]["motivo_codigo"] == "sin_cortos"
+    assert paper.motivo_codigo(ko["why"]) == "sin_cortos"
+    assert b.submit(ticket(coin="XRP", stop=2, tp2=3), "n4")
+    p4 = b.positions["n4"]
+    assert p4["comision"] == {"perfil": "okx_eu_sin_xperps", "creador": 0.20, "tomador": 0.35}
+    assert p4["fee_open"] == pytest.approx(p4["notional"] * 0.0035)
+    assert p4["notional"] < b.positions["n1"]["notional"]              # más comisión: menos nominal para el mismo riesgo
+    assert env.evs("filled", "n4")[0]["patch"]["exec"]["stopLossUsd"] == pytest.approx(50, abs=0.01)
+    assert b.positions["n1"]["comision"]["tomador"] == 0.10            # la de antes sigue con las suyas
+    # La regla del 3 % neto con 0,74 % de ida y vuelta: 1,75 % × 2R = 3,5 % ya no llega
+    assert paper.cost_rt_pct() == pytest.approx(0.74) and not paper.rule_win_ok(2.0, 1.75)
+    b.set_comisiones("okx_eu_con_xperps")
+    assert paper.cost_rt_pct() == pytest.approx(0.24) and paper.rule_win_ok(2.0, 1.75)
+    assert paper.cost_rt_pct("perp") == pytest.approx(0.14)
+    assert not b.set_comisiones("binance")["ok"] and comisiones.activo() == "okx_eu_con_xperps"
+    # Se guarda: tras reiniciar sigue el elegido; si cambia BOT_COMISIONES, manda la configuración
+    b.set_comisiones("okx_eu_sin_xperps")
+    comisiones.reiniciar()
+    env.broker = env.new()
+    assert comisiones.activo() == "okx_eu_sin_xperps"
+    comisiones.reiniciar()
+    monkeypatch.setattr(config, "COMISIONES", "prueba_plana")
+    env.broker = env.new()
+    assert comisiones.activo() == "prueba_plana"
+    assert env.broker._get_state("comisiones") == {"perfil": "prueba_plana", "config": "prueba_plana"}
+
+
+def test_la_comision_real_de_la_cuenta_manda(env_okx):
+    """Con la comisión de la cuenta leída por el conector real (cuenta_real, solo lectura), el perfil es «cuenta»;
+    sin X-Perps en la cuenta, no hay cortos. Si deja de haberla, vuelve el perfil elegido."""
+    env, b = env_okx, env_okx.broker
+    real = {"type": "cuenta_real", "modo": "solo_lectura", "demo": False}   # la cuenta de verdad (no la demo)
+    comisiones.observar({**real, "comisiones": {"spot": 0.35, "perp": None}, "xperps": [],
+                         "comisiones_creador": {"spot": 0.2, "perp": None},
+                         "cortos": {"ok": False, "por_que": "Sin cortos: tu cuenta no tiene X-Perps"}})
+    assert comisiones.activo() == "cuenta" and not comisiones.hay_cortos()
+    v = b.portfolio()["comisiones"]
+    assert v["cuenta"] is True and v["spot"] == {"creador": 0.2, "tomador": 0.35} and v["cortos"] is False
+    assert not b.submit(ticket(coin="ETH", side="short", stop=2, tp2=3), "n1")
+    assert env.evs("riskko", "n1")[0]["patch"]["risk"]["motivo_codigo"] == "sin_cortos"
+    ok, why = comisiones.elegir("okx_eu_con_xperps")
+    assert ok and "manda" in why and comisiones.activo() == "cuenta"
+    comisiones.observar({**real, "comisiones": {"spot": 0.1, "perp": 0.05}, "xperps": ["BTC"],
+                         "comisiones_creador": {"spot": None, "perp": 0.02}, "cortos": {"ok": True}})
+    assert comisiones.hay_cortos() and comisiones.tasas("perp")["creador"] == 0.02
+    assert comisiones.tasas("spot")["creador"] == 0.1   # sin la de creador: la de tomador (por el lado seguro)
+    comisiones.observar({**real, "comisiones": {"spot": None, "perp": None}})
+    assert comisiones.activo() == "okx_eu_con_xperps"
+    comisiones.observar({"type": "portfolio"})                             # otros mensajes no tocan nada
+    comisiones.observar({**real, "comisiones": "roto"})                    # ni rompen
+    assert comisiones.activo() == "okx_eu_con_xperps"
+
+
+def test_posicion_abierta_antes_de_los_perfiles_sigue_con_el_010(env_okx):
+    """Una posición guardada antes de las comisiones por perfil (sin «comision») pagó 0,10 % a la entrada y sale con
+    0,10 % también en el objetivo, como se abrió."""
+    env, b = env_okx, env_okx.broker
+    assert b.submit(ticket(stop=2, tp2=3), "n1")
+    p = b.positions["n1"]
+    del p["comision"]
+    b._save_trade(p)
+    env.broker = b = env.new()
+    q = b.positions["n1"]["qty"]
+    assert b.portfolio()["positions"][0]["costes"]["perfil"] is None
+    env.at(5, BTC=106.5)
+    r = env.result("n1")
+    assert r["fees"] == pytest.approx(q * 100 * 0.001 + q * 106 * 0.001, abs=1e-3) and r["costes"]["perfil"] is None
+
+
+def test_pendiente_que_el_perfil_nuevo_no_admite_no_entra(env_okx, monkeypatch):
+    """Lo que depende del perfil de comisiones se vuelve a mirar al ejecutar: un corto en perpetuo aceptado con X-Perps
+    que espera al veto no se abre si entre medias se pasa a «sin X-Perps» (blocked, sin_cortos), y un largo con 2,2R y
+    stop 1,5 % (3,06 % neto con X-Perps) aprobado a mano tras el cambio tampoco (2,56 % neto: reglas)."""
+    monkeypatch.setattr(config, "USER_RULES", True)
+    env, b = env_okx, env_okx.broker
+    b.set_mode("manual")
+    assert b.submit(ticket(coin="BTC", stop=1.5, tp2=2.2), "n2")
+    b.set_mode("veto")
+    assert b.submit(ticket(coin="SOL", side="short", stop=2, tp2=3, instrument="perp"), "n1")
+    b.set_comisiones("okx_eu_sin_xperps")
+    env.at(0.5)                                                        # el veto de n1 vence: aprobada sola
+    assert env.evs("humanok", "n1") and "n1" not in b.positions and "n1" not in b.pending
+    bl = env.evs("blocked", "n1")[0]
+    assert bl["patch"]["exec"]["motivo_codigo"] == "sin_cortos" and bl["text"].startswith("Sin cuenta X-Perps")
+    assert "el perfil de comisiones ha cambiado desde que se envió" in bl["text"]
+    assert b.decide("n2", True) and "n2" not in b.positions
+    bl = env.evs("blocked", "n2")[0]
+    assert bl["patch"]["exec"]["motivo_codigo"] == "reglas" and "deja 2,56 % neto de costes" in bl["text"]
+    b.set_comisiones("okx_eu_con_xperps")                              # con el perfil de siempre, la misma entra
+    assert b.submit(ticket(coin="BTC", stop=1.5, tp2=2.2), "n3") and b.decide("n3", True) and "n3" in b.positions
+
+
+def test_programada_con_cerrojo_que_el_perfil_nuevo_no_admite_no_entra(env_okx, monkeypatch):
+    """Una entrada programada solo con cerrojo (suelo 2R con stop 1,7 %: 3,16 % neto con X-Perps) no se abre sin cerrojo
+    ni objetivo si al romper el rango el perfil ya es «sin X-Perps» (2,66 % neto): se bloquea por la regla."""
+    monkeypatch.setattr(config, "USER_RULES", True)
+    env, b = env_okx, env_okx.broker
+    at = T0 + 10 * MIN
+    t = {**ticket_a(), "stopPct": 1.7, "timing": "window", "winAt": at}
+    assert paper.exit_rules(t)["lock_r"] == 3.0
+    assert b.submit(t, "n1") and "n1" in b.scheduled
+    b.set_comisiones("okx_eu_sin_xperps")
+    assert paper.exit_rules(t)["lock_r"] is None                      # con este perfil, el cerrojo ya no vale
+    env.at(5, BTC=100)
+    env.at(8, BTC=100.2)
+    env.at(11, BTC=101)                                                # rompe el rango: no entra
+    assert "n1" not in b.positions and "n1" not in b.scheduled
+    bl = env.evs("blocked", "n1")[0]
+    assert bl["patch"]["exec"]["motivo_codigo"] == "reglas" and "el cerrojo no vale" in bl["text"]

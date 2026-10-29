@@ -240,7 +240,8 @@ async def test_apertura_completa_entra_rechazo_por_exposicion_cierre_y_reinicio(
     tr = out["btc_trade"]
     assert c["coin"] == "BTC" and c["decision"] == "cerrada" and c["motivo_codigo"] == "objetivo"
     assert c["trade_id"] == tr["id"] == by["BTC"][3]["trade_id"] and c["story"] == tr["story"]
-    assert c["datos"]["R"] == pytest.approx(tr["R"]) and c["datos"]["R"] == pytest.approx(2.864, abs=0.01)
+    # el objetivo es una orden límite: paga comisión de creador (0,08 %), no de tomador
+    assert c["datos"]["R"] == pytest.approx(tr["R"]) and c["datos"]["R"] == pytest.approx(2.878, abs=0.01)
     assert c["impulso_pct"] == pytest.approx(0.3) and c["lado"] == "largo" and "Objetivo" in c["motivo"]
     assert out["btc_run"] == "terminada" and len(out["cierre"]) == len(rows) + 1   # el motor no la vuelve a apuntar
     dec.close()
@@ -255,7 +256,7 @@ async def test_api_de_decisiones_y_la_web_contra_la_ruta_real(tmp_path, reglas):
         assert r.status == 200
         body = await r.json()
         assert body["n"] == n == len(body["rows"]) and body["desde"] == 0
-        assert body["rows"][0]["fase"] == "cierre" and body["rows"][0]["datos"]["R"] == pytest.approx(2.864, abs=0.01)
+        assert body["rows"][0]["fase"] == "cierre" and body["rows"][0]["datos"]["R"] == pytest.approx(2.878, abs=0.01)
         assert [x["ts"] for x in body["rows"]] == sorted((x["ts"] for x in body["rows"]), reverse=True)
         assert set(body["rows"][0]) == set(D.COLS)
         x = await (await client.get(f"/api/decisiones?desde=0&ventana_id={VID}&coin=XRP")).json()
@@ -282,9 +283,10 @@ async def test_api_de_decisiones_y_la_web_contra_la_ruta_real(tmp_path, reglas):
       return {{box, md: H.el("#mdDec").innerHTML, api: S.decApi, n: S.dec.length}};""")
     assert r["api"] == "ok" and r["n"] == n
     md, box = r["md"], r["box"]
-    assert "Tokio: entra en ETH y SOL; BTC cerrada (objetivo +2,86 R); XRP rechazada (exposición)" in md
+    # +2,88 R: el objetivo paga comisión de creador (0,08 %) con el perfil de OKX EU por defecto
+    assert "Tokio: entra en ETH y SOL; BTC cerrada (objetivo +2,88 R); XRP rechazada (exposición)" in md
     assert "Tokio y Seúl" in box and "6 diarias" in box and "Guardado en el bot" in box
-    for chip in ("Cerrada: objetivo · +2,86 R", "Abierta (paper)", "Rechazada por el riesgo"):
+    for chip in ("Cerrada: objetivo · +2,88 R", "Abierta (paper)", "Rechazada por el riesgo"):
         assert chip in box, chip
     assert "Medida: esperando" in box and "Entrada: entra" in box and "Paper: abierta" in box and "Cierre: cerrada" in box
     assert "Exposición total" in box and "+0,30 %" in box and "-0,40 %" in box
@@ -743,7 +745,7 @@ def test_catalogo_cerrado_sin_repetir_y_ts_en_orden(tmp_path):
     assert c["datos"] == {"x": None, "y": [1, None]} and c["dia"] == "2026-10-29"
     assert set(D.MOTIVOS) == {"entra", "impulso_nulo", "impulso_bajo", "tarde", "sin_velas", "veto_noticia", "tope_dia",
                               "riesgo_dia", "perdida_dia", "exposicion", "moneda_ocupada", "max_posiciones", "reglas",
-                              "aprobacion", "bot_parado", "objetivo", "stop", "cerrojo", "tiempo", "otro"}
+                              "aprobacion", "bot_parado", "objetivo", "stop", "cerrojo", "tiempo", "sin_cortos", "otro"}
     assert set(D.DECISIONES) == {"entra", "no_entra", "rechazada", "perdida", "abierta", "parcial", "cerrada",
                                  "esperando"}   # «parcial»: la salida parcial, la posición sigue abierta a medias
     assert [r["id"] for r in filas(dec)] == [a["id"], b["id"], c["id"]]
@@ -1054,5 +1056,36 @@ async def test_reinicio_con_la_ultima_fila_parcial_no_repite(tmp_path, reglas):
     await eng.step()
     run = wrun(eng, "BTC")
     assert run.done and not sent and run.end_why == "Salida parcial" and eng.windows[VID]["seq"]["BTC"] == 1
+    dec.close()
+    store.close()
+
+
+async def test_sin_cuenta_xperps_el_motor_no_abre_cortos(tmp_path, reglas):
+    """Perfil de comisiones sin X-Perps (29-10-2026): el corto de ETH no se envía (no_entra con el código «sin_cortos»)
+    y los largos entran al contado pagando la comisión de tomador de ese perfil (0,35 %)."""
+    from bot import comisiones
+    comisiones.elegir(comisiones.SIN_XPERPS)
+    now = [T - 10 * MIN]
+    store, bus, dec, broker = entorno(tmp_path, now, PX)
+    sent = []
+
+    def submit(*a):
+        sent.append(a)
+        return broker.submit(*a)
+
+    eng = motor(now, MOVES, bus, submit, broker.portfolio, dec)
+    await eng.step()
+    now[0] = T + 2 * MIN
+    await eng.step()
+    now[0] = T + 15 * MIN + 3000
+    await eng.step()
+    eth = filas(dec, coin="ETH")
+    assert traza(eth)[-1] == ("entrada", "no_entra", "sin_cortos")
+    assert "sin cuenta X-Perps no hay cortos" in eth[-1]["motivo"] and eth[-1]["datos"]["comisiones"] == "okx_eu_sin_xperps"
+    assert sent and all(a[0]["coin"] != "ETH" and a[0]["side"] == "long" for a in sent)
+    btc = next(p for p in broker.positions.values() if p["coin"] == "BTC")
+    assert btc["comision"] == {"perfil": "okx_eu_sin_xperps", "creador": 0.20, "tomador": 0.35}
+    assert btc["fee_open"] == pytest.approx(btc["notional"] * 0.0035)
+    assert wrun(eng, "ETH").last_why.startswith("Entrada no ejecutada: sin cuenta X-Perps")
     dec.close()
     store.close()

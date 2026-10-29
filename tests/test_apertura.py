@@ -1183,13 +1183,16 @@ def test_plan_impulso_horquilla_y_3_por_ciento_neto(monkeypatch):
     assert pl["ok"] and pl["stop_px"] == pytest.approx(97) and pl["target_px"] == pytest.approx(109)
     assert pl["tp2R"] == pl["tp1R"] == 3 and pl["tp1Frac"] == 0 and pl["beR"] is None and pl["trailPct"] is None
     assert pl["net_pct"] == pytest.approx(9 - 0.24) and pl["instrument"] == "spot"
-    small = ap.impulse_params({"sl_pct": 1.5, "target_r": 2.0})[0]   # +3 % bruto: 2,76 % neto, no llega
-    pl = ap.impulse_plan(-1, 100.0, small, 0.0, "perp")
-    assert not pl["ok"] and "quedan 2,76 % netos < 3,00 %" in pl["why"] and pl["target_px"] == pytest.approx(97)
+    small = ap.impulse_params({"sl_pct": 1.5, "target_r": 2.0})[0]   # +3 % bruto: no llega al 3 % neto
+    pl = ap.impulse_plan(1, 100.0, small)                             # al contado (0,24 % de ida y vuelta): 2,76 %
+    assert not pl["ok"] and "quedan 2,76 % netos < 3,00 %" in pl["why"]
+    pl = ap.impulse_plan(-1, 100.0, small, 0.0, "perp")                # en X-Perps (0,05 % tomador): 0,14 %, 2,86 %
+    assert not pl["ok"] and "quedan 2,86 % netos < 3,00 %" in pl["why"] and pl["target_px"] == pytest.approx(97)
+    assert pl["cost_pct"] == pytest.approx(0.14)
     # Funding esperado en la duración media (65 h = 8,125 liquidaciones): el largo en perpetuo paga la tasa positiva.
     pl = ap.impulse_plan(1, 100.0, p, 1.0, "perp")
     assert pl["funding_pct"] == pytest.approx(65 / 8) and not pl["ok"] and "funding esperado" in pl["why"]
-    assert ap.impulse_plan(1, 100.0, p, 0.7, "perp")["ok"]                  # 9 - 0,24 - 5,69 = 3,07 %
+    assert ap.impulse_plan(1, 100.0, p, 0.7, "perp")["ok"]                  # 9 - 0,14 - 5,69 = 3,17 %
     assert ap.impulse_plan(-1, 100.0, p, 0.7, "perp")["funding_pct"] == 0   # el corto lo cobraría: no se cuenta
     assert ap.impulse_plan(1, 100.0, p, 0.7, "spot")["funding_pct"] == 0     # al contado no hay funding
     monkeypatch.setattr(config, "USER_RULES", False)
@@ -1722,10 +1725,10 @@ def test_plan_seis2_el_suelo_cuenta_el_funding_hasta_el_tope_activado(monkeypatc
     monkeypatch.setattr(config, "USER_RULES", True)
     p = ap.impulse_params(ap.SEIS2)[0]
     ok = ap.impulse_plan(-1, 100.0, p, -0.03, "perp")      # el corto paga 0,03 %/8 h: 0,63 % en 168 h
-    assert ok["ok"] and ok["net_pct"] == pytest.approx(4 - 0.24 - 0.63)
+    assert ok["ok"] and ok["net_pct"] == pytest.approx(4 - 0.14 - 0.63)   # X-Perps: 0,14 % de ida y vuelta
     assert [(x["que"], x["funding_h"], x["funding_pct"]) for x in ok["partes"]] == [("parcial", 16.0, 0.06),
                                                                                      ("suelo", 168.0, 0.63)]
-    ko = ap.impulse_plan(-1, 100.0, p, -0.05, "perp")      # 1,05 % en 168 h: el suelo deja 2,71 % neto
+    ko = ap.impulse_plan(-1, 100.0, p, -0.05, "perp")      # 1,05 % en 168 h: el suelo deja 2,81 % neto
     assert not ko["ok"] and "el suelo del cerrojo da +4,00 %" in ko["why"] and "funding esperado en 168 h (1,050 %)" in ko["why"]
     assert ko["funding_pct"] == pytest.approx(0.1)          # el de la duración media, como siempre
     assert ap.impulse_plan(1, 100.0, p, -0.05, "perp")["ok"]                     # el largo lo cobraría: no cuenta

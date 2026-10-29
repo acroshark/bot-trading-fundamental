@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 
 from aiohttp import WSCloseCode, WSMsgType, web
 
-from . import aprendizaje, config, reaccion, reflejo, resumen_backtest
+from . import aprendizaje, comisiones, config, reaccion, reflejo, resumen_backtest
 from .backtest import filter_results
 from .bus import Bus
 from .market import bias_of, funding_8h
@@ -36,7 +36,13 @@ SEMANA = re.compile(r"\d{4}-W\d{2}")
 # GET /api/velas: tamaños de vela admitidos y tope de velas por respuesta (las más recientes)
 VELAS_TF = {"1m": 60_000, "5m": 300_000, "15m": 900_000}
 VELAS_MAX = 2000
+VELAS_FUENTES = ("okx", "bot")   # okx: las públicas de OKX EU del par que se operaría (por defecto); bot: las del bot
 MIN_MS = 60_000
+# Mandos del modo real ({"type": "real", "accion": …}). Todos exigen la cabecera Origin de la propia web y una conexión
+# desde este PC, salvo la parada (solo reduce el riesgo). El Origin frena a otras webs abiertas en el navegador, no a un
+# proceso de este PC (puede poner la cabecera que quiera): lo que ninguno se salta son las otras puertas del modo real
+# (okx.env con tus claves, BOT_MODO_REAL=1 al arrancar, tu frase escrita y BOT_BROKER=real), que pones tú (docs/06).
+REAL_ACCIONES = ("confirmar", "parar", "limites", "detener", "reanudar", "aprobacion")
 
 
 @dataclass
@@ -61,6 +67,9 @@ class Services:
     # ordenadas y sin repetidas (velas_de: la vigilancia en memoria si llega hasta «desde»; si no, aprendizaje.CacheBars.get,
     # la caché de HIST_DIR/1m más la vigilancia en memoria).
     velas: Callable[[str, int, int], Any] | None = None
+    # Velas públicas de OKX EU (bot/velas_okx.py: VelasOKX.respuesta), sin claves; si faltan o fallan, las del bot.
+    velas_okx: Any = None
+    real: Any = None         # RealBroker (bot/okx_real.py): modo real con OKX EU, APAGADO salvo que el usuario lo active
 
 
 def _hora(ms: int) -> str:
@@ -180,6 +189,23 @@ def ws_origins() -> set[str]:
     """Orígenes que pueden abrir /events desde un navegador: la propia web del bot (y los de BOT_WS_ORIGINS)."""
     hosts = {"127.0.0.1", "localhost", "[::1]", config.HOST}
     return {f"http://{h}:{config.PORT}" for h in hosts} | set(config.WS_ORIGINS)
+
+
+def origen_web(origin: str | None, remote: str | None = None) -> bool:
+    """Origen estricto de los mandos del modo real (docs/06, contrato de cableado): solo la propia web del bot,
+    http://127.0.0.1:PUERTO o http://localhost:PUERTO, y la conexión desde este PC (remote en LOOPBACK: con
+    BOT_HOST=0.0.0.0, un equipo de la red con el Origin falsificado no pasa). Sin cabecera Origin o con los orígenes
+    extra de BOT_WS_ORIGINS, no. Ojo: el Origin solo frena a otras webs abiertas en el navegador; un proceso de este PC
+    puede poner la cabecera que quiera (lo frenan las otras puertas del modo real, que pones tú: docs/06)."""
+    return (remote in LOOPBACK and isinstance(origin, str)
+            and origin.rstrip("/") in {f"http://127.0.0.1:{config.PORT}", f"http://localhost:{config.PORT}"})
+
+
+def real_apagado() -> dict:
+    """GET /api/real sin el conector construido."""
+    return {"modo": "apagado", "etiqueta": "apagado", "broker": "paper", "puede_abrir": False,
+            "resumen": "Modo real apagado: el bot opera en paper",
+            "por_que": "El conector del modo real no está en marcha en este arranque"}
 
 
 def _story(m: dict) -> str | None:
@@ -411,10 +437,85 @@ def make_app(bus: Bus, health, services: Services | None = None) -> web.Applicat
         elif not evo.orden_web(m):   # valida la acción y la atiende en una tarea
             log.warning("Orden de la evolución no válida: %s", str(m)[:200])
 
-    def on_ws_message(data: str) -> None:
+    def commission_order(m: dict) -> None:
+        """{"type": "comisiones", "perfil": "okx_eu_con_xperps|okx_eu_sin_xperps"}: perfil de comisiones del paper
+        (PaperBroker.set_comisiones, guardado). Respuesta en «orden_web» (area comisiones)."""
+        perfil = m.get("perfil")
+        if not isinstance(perfil, str) or perfil not in comisiones.PERFILES:
+            return order_done("comisiones", "perfil", None, {"ok": False, "why": "Perfil de comisiones desconocido: usa "
+                                                                               + " o ".join(comisiones.PERFILES)})
+        if sv.broker is None or not callable(getattr(sv.broker, "set_comisiones", None)):
+            return order_done("comisiones", "perfil", perfil, {"ok": False, "why": "El paper no está en marcha"})
+        res = sv.broker.set_comisiones(perfil)
+        order_done("comisiones", "perfil", perfil, res if isinstance(res, dict) else {"ok": bool(res)})
+
+    def real_story(story: str | None) -> bool:
+        """¿Es una story del modo real (esperando aprobación, en curso o con posición en OKX)?"""
+        r = sv.real
+        return bool(story and r is not None and any(story in (getattr(r, k, None) or {})
+                                                    for k in ("pending", "en_curso", "positions")))
+
+    def real_order(m: dict, origin: str | None, remote: str | None) -> None:
+        """{"type": "real", "accion": …}: mandos del panel «Cuenta real». La parada se admite sin Origin (solo reduce el
+        riesgo); el resto exige el de la propia web y una conexión desde este PC. Respuesta en «orden_web» (area real);
+        nunca toca okx.env."""
+        acc, r = m.get("accion"), sv.real
+        if acc not in REAL_ACCIONES:
+            return order_done("real", None, None, {"ok": False, "why": "Acción del modo real desconocida"})
+        if r is None:
+            return order_done("real", acc, None, {"ok": False, "why": "El conector del modo real no está en marcha"})
+        if acc != "parar" and not origen_web(origin, remote):
+            log.warning("Mando del modo real «%s» rechazado: sin el origen de la propia web (%s desde %s)", acc, origin,
+                        remote)
+            return order_done("real", acc, None, {"ok": False, "why": "Solo desde la propia web del bot (cabecera Origin)"})
+        if acc == "confirmar":
+            frase = m.get("frase")
+            res = r.confirmar(frase if isinstance(frase, str) else "")
+        elif acc == "parar":
+            cerrar = m.get("cerrar") is True   # solo el true de JSON cierra posiciones (la cadena "true", no)
+            hecho = r.parada_emergencia("Parada de emergencia desde la web", cerrar)
+            res = {"ok": True, "why": None if hecho else "La parada ya estaba pedida"}
+        elif acc == "limites":
+            lim = m.get("limites")
+            res = r.set_limites(lim) if isinstance(lim, dict) else {"ok": False, "why": "Faltan los límites"}
+        elif acc in ("detener", "reanudar"):
+            hecho = r.halt("Detenido desde la web") if acc == "detener" else r.resume("Reanudado desde la web")
+            res = {"ok": True, "why": None if hecho else ("Ya estaba detenido" if acc == "detener" else "No estaba detenido")}
+        else:   # aprobacion
+            res = {"ok": bool(r.set_mode(m.get("mode"))) if m.get("mode") in ("auto", "veto", "manual") else False}
+            if not res["ok"]:
+                res["why"] = "Aprobación no válida (la automática solo en la demo de OKX)"
+        order_done("real", acc, None, {k: res.get(k) for k in ("ok", "why")} if isinstance(res, dict) else {"ok": False})
+        try:
+            r.publish_cuenta(force=True)
+        except Exception:
+            log.exception("No pude publicar la cuenta real tras un mando")
+
+    def real_story_order(kind: str, story: str, m: dict, origin: str | None, remote: str | None) -> None:
+        """decision, close y cancel de una story del modo real: van al RealBroker y solo desde la propia web."""
+        if not origen_web(origin, remote):
+            log.warning("Orden «%s» sobre %s (modo real) rechazada: sin el origen de la propia web (%s desde %s)", kind,
+                        story, origin, remote)
+            return order_done("real", kind, story, {"ok": False, "why": "Solo desde la propia web del bot (cabecera Origin)"})
+        r = sv.real
+        if kind == "decision":
+            ok = m.get("ok")
+            if not isinstance(ok, bool):
+                log.warning("Decisión de la web sobre %s (modo real) sin ok booleano (%r): ignorada", story, ok)
+                return
+            done = r.decide(story, ok, "Aprobada por ti" if ok else "Rechazada por ti")
+        elif kind == "close":
+            done = r.close(story, "Cierre manual desde la web")
+        else:
+            done = r.cancel(story, "Cancelada por ti desde la web")
+        order_done("real", kind, story, {"ok": bool(done), "why": None if done else "Nada que hacer"})
+
+    def on_ws_message(data: str, origin: str | None = None, remote: str | None = None) -> None:
         """Órdenes de la web: sobre el paper (aprobar o rechazar, cerrar una posición, cambiar el modo de aprobación,
-        detener o reanudar la ejecución y cancelar una orden pendiente o programada), sobre las fuentes (fuente), la
-        evolución (evolucion: aplicar, descartar o revertir propuestas, evaluar y modo) y los pesos de los medios."""
+        detener o reanudar la ejecución, cancelar una orden pendiente o programada y el perfil de comisiones), sobre el
+        modo real (real; y decision, close y cancel de sus stories, con el origen estricto), sobre las fuentes (fuente),
+        la evolución (evolucion: aplicar, descartar o revertir propuestas, evaluar y modo) y los pesos de los medios.
+        origin: la cabecera Origin con la que se abrió el WebSocket (None si no la traía); remote: la IP de la conexión."""
         try:
             m = json.loads(data)
         except ValueError:
@@ -428,9 +529,15 @@ def make_app(bus: Bus, health, services: Services | None = None) -> web.Applicat
             return evolution_order(m)
         if kind in ("peso_medio", "revertir_peso", "aprendizaje_peso", "aprendizaje_revertir"):
             return weight_order(kind, m)
+        if kind == "comisiones":
+            return commission_order(m)
+        if kind == "real":
+            return real_order(m, origin, remote)
+        story = _story(m)
+        if kind in ("decision", "close", "cancel") and real_story(story):
+            return real_story_order(kind, story, m, origin, remote)
         if not sv.broker:
             return
-        story = _story(m)
         if kind == "decision" and story:
             ok = m.get("ok")
             if not isinstance(ok, bool):   # solo true o false de JSON: la cadena "false" no aprueba nada
@@ -500,10 +607,11 @@ def make_app(bus: Bus, health, services: Services | None = None) -> web.Applicat
         try:
             await ws.send_str(json.dumps(snap, ensure_ascii=False))
             sender = asyncio.create_task(pump())
+            origin, remote = request.headers.get("Origin"), request.remote
             async for msg in ws:
                 if msg.type == WSMsgType.TEXT:
                     try:
-                        on_ws_message(msg.data)
+                        on_ws_message(msg.data, origin, remote)
                     except Exception:
                         log.exception("Mensaje de la web no procesado")
         finally:
@@ -715,7 +823,10 @@ def make_app(bus: Bus, health, services: Services | None = None) -> web.Applicat
     async def api_results(_request: web.Request) -> web.Response:
         return j(sv.broker.results() if sv.broker else {"start_equity": config.PAPER_EQUITY, "equity": config.PAPER_EQUITY,
                                                           "trades": [], "by_strategy": [], "by_window": [], "by_coin": [],
-                                                          "equity_curve": [], "daily": []})
+                                                          "equity_curve": [], "daily": [], "comisiones_total": 0.0,
+                                                          "funding_total": 0.0, "costes_total": 0.0, "bruto": 0.0,
+                                                          "neto": 0.0, "costes_estimados": 0,
+                                                          "comisiones": comisiones.vista()})
 
     async def api_portfolio(_request: web.Request) -> web.Response:
         return j(sv.broker.portfolio() if sv.broker else bus.state.get("portfolio"))
@@ -791,9 +902,11 @@ def make_app(bus: Bus, health, services: Services | None = None) -> web.Applicat
 
     async def api_velas(request: web.Request) -> web.Response:
         """Velas de una moneda para la gráfica de cada posición (contrato §3): ?coin=BTC&desde=<ms>&tf=1m|5m|15m
-        (&hasta=<ms>, por defecto ahora). Solo las que el bot ya tiene (caché de 1 min y la vigilancia en memoria): no
-        pide nada a la red. Como mucho VELAS_MAX, las más recientes. 400 con un parámetro no válido; 404 sin la fuente de
-        velas o sin ninguna vela en ese tramo."""
+        (&hasta=<ms>, por defecto ahora)&fuente=okx|bot. Con fuente okx (por defecto), las públicas de OKX EU del par que
+        se operaría (BTC-USDC…, sin claves; caché y límite de peticiones en VelasOKX); si OKX no responde o no tiene
+        velas, caen a las del bot y lo dicen (fuente «bot», pedida «okx» y aviso). Con fuente bot, solo las que el bot ya
+        tiene (caché de 1 min de Binance y la vigilancia en memoria), sin red. Como mucho VELAS_MAX, las más recientes.
+        400 con un parámetro no válido; 404 sin ninguna vela en ese tramo."""
         q = request.query
         coin = (q.get("coin") or "").upper()
         if coin not in config.COINS:
@@ -801,16 +914,45 @@ def make_app(bus: Bus, health, services: Services | None = None) -> web.Applicat
         tf = q.get("tf") or "5m"
         if tf not in VELAS_TF:
             raise web.HTTPBadRequest(text=f"tf debe ser uno de: {', '.join(VELAS_TF)}")
+        fuente = (q.get("fuente") or "okx").lower()
+        if fuente not in VELAS_FUENTES:
+            raise web.HTTPBadRequest(text=f"fuente debe ser una de: {', '.join(VELAS_FUENTES)}")
         hasta = q_int(request, "hasta", now_ms(), 1, 10 ** 14)
         desde = q_int(request, "desde", hasta - 3 * 3600_000, 0, 10 ** 14)
         if desde >= hasta:
             raise web.HTTPBadRequest(text="desde debe ser anterior a hasta")
+        aviso = None
+        if fuente == "okx":
+            if sv.velas_okx is None:
+                aviso = "Las velas de OKX EU no están enganchadas en este arranque"
+            else:
+                try:
+                    res = await sv.velas_okx.respuesta(coin, desde, hasta, tf, VELAS_MAX)
+                except Exception as e:
+                    log.warning("Velas de OKX EU de %s: %s; se usan las del bot", coin, e)
+                    res, aviso = None, f"OKX EU no respondió ({str(e)[:160]})"
+                if res is not None:
+                    return j(res)
+                aviso = aviso or f"OKX EU no tiene velas de {coin}-{config.QUOTE} en ese tramo"
         if not sv.velas:
-            raise web.HTTPNotFound(text="Las velas no están disponibles: el bot en marcha no tiene la caché enganchada")
+            raise web.HTTPNotFound(text="Las velas no están disponibles: el bot en marcha no tiene la caché enganchada"
+                                        + (f" ({aviso})" if aviso else ""))
         res = await asyncio.to_thread(velas_hilo, coin, desde, hasta, tf)
         if res is None:
-            raise web.HTTPNotFound(text=f"Sin velas de {coin} en la caché del bot en ese tramo")
+            raise web.HTTPNotFound(text=f"Sin velas de {coin} en la caché del bot en ese tramo"
+                                        + (f" ({aviso})" if aviso else ""))
+        res.update(fuente="bot", mercado="Binance (al contado)", instId=f"{coin}USDT",
+                   nota=f"velas del bot (Binance, {coin}USDT, 1 min)")
+        if fuente == "okx":
+            res.update(pedida="okx", aviso=aviso + ": velas del bot")
         return j(res)
+
+    async def api_real(_request: web.Request) -> web.Response:
+        """Panel «Cuenta real» (docs/06, contrato de cableado): RealBroker.vista_real() o, sin el conector, «apagado».
+        Nunca lleva claves."""
+        if sv.real is None:
+            return j(real_apagado())
+        return j(sv.real.vista_real())
 
     app = web.Application()
     app.on_shutdown.append(close_ws)
@@ -833,6 +975,7 @@ def make_app(bus: Bus, health, services: Services | None = None) -> web.Applicat
     app.router.add_get("/api/noticias_fiables", api_fiables)
     app.router.add_get("/api/decisiones", api_decisiones)
     app.router.add_get("/api/velas", api_velas)
+    app.router.add_get("/api/real", api_real)
     app.router.add_get("/api/vigilancia", api_vigilancia)
     app.router.add_get("/api/cripto_aperturas", api_cripto_aperturas)
     app.router.add_get("/api/fuentes_vivas", api_fv)

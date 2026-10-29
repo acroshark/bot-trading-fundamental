@@ -61,7 +61,14 @@ CONTEXT_MAX_S = 6 * 3600     # entre FRESH_MAX_S y esto la noticia entra como «
 # Datos históricos y backtest
 HIST_DIR = DATA_DIR / "historico"
 BACKTEST_DIR = DATA_DIR / "backtest"
-FEE_PCT = 0.10               # comisión por lado en los backtests y el paper trading (OKX EU, base)
+FEE_PCT = 0.10               # comisión por lado en los backtests (tomador del contado de OKX EU con cuenta X-Perps)
+# Comisiones del paper y de la regla del 3 % neto (bot/comisiones.py): okx_eu_con_xperps (por defecto: contado 0,08 /
+# 0,10 %, X-Perps 0,02 / 0,05 %, con cortos) u okx_eu_sin_xperps (contado 0,20 / 0,35 %, sin cortos). La web puede
+# cambiarlo; con la comisión real de la cuenta leída en solo lectura (modo real con claves), manda esa.
+COMISIONES = os.environ.get("BOT_COMISIONES", "okx_eu_con_xperps")
+# Broker que recibe los tickets: paper (por defecto, siempre salvo que el usuario lo cambie en su PC) o real (OKX EU,
+# bot/okx_real.py; además necesita sus claves, BOT_MODO_REAL=1 y su confirmación escrita en la web: docs/06).
+BROKER = os.environ.get("BOT_BROKER", "paper").strip().lower()
 
 # Paper trading (dinero ficticio con precios reales de OKX EU)
 PAPER_EQUITY = float(os.environ.get("BOT_PAPER_EQUITY", "10000"))

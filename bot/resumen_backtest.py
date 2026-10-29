@@ -10,15 +10,45 @@
 - «seis2» (con la misma seis_summary): seis2_resumen.json, la réplica del motor con el preset SEIS2 («6 diarias v2»:
   las entradas de SEIS y la salida «A», la mitad en 3R y el resto con el cerrojo) en 3 años. También pierde: tal cual.
 
+Cada resumen lleva «costes»: con qué comisiones está calculado (29-10-2026, «las comisiones dentro del sistema»). Las
+réplicas del motor y el laboratorio van con config.FEE_PCT (0,10 % por lado, también en los perpetuos de las réplicas) y
+2 pb de deslizamiento por lado: el perfil «okx_eu_con_xperps» con la comisión de tomador del contado. Sin cuenta X-Perps
+(contado 0,35 % tomador y sin cortos) las cifras serían peores, y lo dice.
+
 Los usa /api/backtest/impulso (bot/server.py) y scripts/incrustar_backtest.py para la demostración.
 """
 import json
 from pathlib import Path
 
-from . import config
+from . import comisiones, config
 
 LAB_MAX = 10       # estrategias prometedoras o robustas como mucho
 CURVE_POINTS = 150
+SLIP_BPS = 2.0     # deslizamiento por lado de las réplicas y del laboratorio
+
+
+def _pct(x: float) -> str:
+    return f"{x:.2f}".replace(".", ",")
+
+
+def costes(fee_pct=None, slip_bps=None, fee_perp_pct=None) -> dict:
+    """Con qué comisiones está calculado un backtest: el perfil al que corresponde (okx_eu_con_xperps si la comisión es
+    la de tomador del contado con X-Perps), las cifras y el aviso de lo que pasa sin cuenta X-Perps."""
+    fee = float(fee_pct if isinstance(fee_pct, (int, float)) and not isinstance(fee_pct, bool) else config.FEE_PCT)
+    slip = float(slip_bps if isinstance(slip_bps, (int, float)) and not isinstance(slip_bps, bool) else SLIP_BPS)
+    con = comisiones.PERFILES[comisiones.CON_XPERPS]["spot"]["tomador"]
+    perfil = comisiones.CON_XPERPS if abs(fee - con) < 1e-9 else None
+    perp = (f"; perpetuos {_pct(float(fee_perp_pct))} %" if isinstance(fee_perp_pct, (int, float))
+            and not isinstance(fee_perp_pct, bool) else " (también en los perpetuos)")
+    texto = (f"Calculado con {_pct(fee)} % de comisión por lado{perp} y {_pct(slip).rstrip('0').rstrip(',')} pb de "
+             "deslizamiento por lado" + (": el perfil «OKX EU con cuenta X-Perps» (tomador del contado)" if perfil else ""))
+    return {"perfil": perfil, "comision_pct": fee, "deslizamiento_bps": slip,
+            **({"comision_perp_pct": float(fee_perp_pct)} if isinstance(fee_perp_pct, (int, float))
+               and not isinstance(fee_perp_pct, bool) else {}),
+            "coste_rt_pct": round(2 * (fee + slip / 100), 4), "texto": texto,
+            "aviso": ("Sin cuenta X-Perps el contado cuesta 0,35 % por lado (tomador) y no hay cortos: con ese perfil "
+                      "estas cifras serían peores"),
+            "perfil_en_uso": comisiones.activo()}
 
 
 def lab_summary(lab: dict) -> dict:
@@ -35,7 +65,9 @@ def lab_summary(lab: dict) -> dict:
     avance = {k: acc[k] for k in ("days", "trades", "total_pct", "max_dd_pct") if k in acc}
     if avance:
         avance.update({"desde": wf.get("from"), "top": wf.get("top"), "periodo": wf.get("period")})
+    pr = lab.get("params") if isinstance(lab.get("params"), dict) else {}
     return {"generated": lab.get("generated"), "period": lab.get("period"), "frozen": (lab.get("frozen") or {}).get("date"),
+            "costes": costes(pr.get("fee_pct"), pr.get("slip_bps"), pr.get("fee_perp_pct")),
             "summary": {k: sm[k] for k in ("tested", "promising", "robust", "expected_by_chance", "beat_base", "base_tested",
                                            "expected_by_chance_all") if k in sm},
             "promising": [strat(s) for s in (lab.get("promising") or [])[:LAB_MAX] if isinstance(s, dict)],
@@ -67,6 +99,8 @@ def per_trade(curve: list, n) -> dict:
 
 def impulso_summary(d: dict, points: int = CURVE_POINTS) -> dict:
     out = {k: d.get(k) for k in ("generated", "split", "sl_pct", "nota")}
+    pr = d.get("params") if isinstance(d.get("params"), dict) else {}
+    out["costes"] = costes(d.get("fee_pct", pr.get("fee_pct")), d.get("slip_bps", pr.get("slip_bps")))
     for part in ("fuera", "dentro"):
         b = dict(d.get(part) or {})
         curve = b.get("curva_R") or []
@@ -110,4 +144,5 @@ def load() -> dict:
     return {"impulso": impulso_summary(imp) if isinstance(imp, dict) else None,
             "lab": lab_summary(lab) if isinstance(lab, dict) else None,
             "seis": seis_summary(seis) if isinstance(seis, dict) else None,
-            "seis2": seis_summary(seis2) if isinstance(seis2, dict) else None}
+            "seis2": seis_summary(seis2) if isinstance(seis2, dict) else None,
+            "costes": costes()}

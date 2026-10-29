@@ -24,7 +24,7 @@ YAHOO_HEADERS = {   # con el User-Agent de Python Yahoo responde 429
     "Accept": "application/json,text/plain,*/*",
     "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
 }
-OKX_WS = "wss://wseea.okx.com:8443/ws/v5/public"
+OKX_WS = "wss://wseea.okx.com/ws/v5/public"   # puerto 443: OKX retira el 8443 (aviso 64010, docs/06)
 BN_WS = "wss://data-stream.binance.vision/stream?streams="
 BN_KLINES = "https://data-api.binance.vision/api/v3/klines"
 VENUE = "OKX EU (libro) + Binance (operaciones)"

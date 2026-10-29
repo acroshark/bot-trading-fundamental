@@ -1189,9 +1189,10 @@ def test_plantilla_vacia_y_nunca_okx_env(tmp_path):
     ruta = crear_plantilla(d)
     assert ruta == d / "okx.env.ejemplo" and not (d / "okx.env").exists()
     txt = ruta.read_text(encoding="utf-8")
-    for nombre in ("OKX_API_KEY=\n", "OKX_API_SECRET=\n", "OKX_API_PASSPHRASE=\n", "OKX_DEMO=1"):
+    for nombre in ("OKX_API_KEY=\n", "OKX_API_SECRET=\n", "OKX_API_PASSPHRASE=\n", "OKX_DEMO=0\n"):
         assert nombre in txt
     assert "NUNCA «Retirar»" in txt and "IP" in txt and "frase de paso" in txt and "PARAR_REAL" in txt
+    assert "SOLO «Lectura»" in txt and "OKX_DEMO=1" in txt   # para empezar, solo lectura; la demo es aparte
     assert crear_plantilla(d) is None
     assert evaluar_modo(d, {"BOT_MODO_REAL": "1"}).modo == APAGADO   # el ejemplo no se lee nunca
     e = Env(tmp_path / "otro", "apagado")
@@ -1964,3 +1965,68 @@ async def test_una_parada_con_cierre_sin_hacer_se_hace_tras_reiniciar(env):
     assert any("Parada de emergencia hecha" in m["text"] for m in env.evs("real_aviso"))
     b3 = await env.reiniciar()
     assert b3.parada and not b3._cola and not b3._parando
+
+
+# ---------------------------------------------------------------- comisiones de la cuenta y cableado (29-10-2026)
+
+def test_comision_de_creador_de_la_cuenta():
+    assert comision_pct({"taker": "-0.001", "maker": "-0.0008"}, "maker") == pytest.approx(0.08)
+    assert comision_pct({"maker": "-0.0008", "makerUSDC": "-0.002"}, "maker") == pytest.approx(0.2)
+    assert comision_pct({"taker": "-0.001"}, "maker") is None
+
+
+async def test_solo_lectura_lee_la_comision_real_y_manda_en_el_perfil_del_paper(tmp_path):
+    """Con las claves del usuario (solo lectura) el conector lee la comisión de tomador y de creador de su cuenta
+    (account/trade-fee, GET firmado que no mueve nada); el mensaje cuenta_real la lleva y el perfil de comisiones del
+    paper pasa a «cuenta». Los tickets siguen yendo al paper (BOT_BROKER=paper) y el panel lo dice."""
+    from bot import comisiones
+    e = Env(tmp_path, "solo_lectura")
+    comisiones_bus = []
+    publish = e.bus.publish
+    e.bus.publish = lambda m: (publish(m), comisiones.observar(m), comisiones_bus.append(m.get("type")))[0]
+    assert await e.broker.arrancar()
+    assert e.broker.comisiones_creador == {"spot": pytest.approx(0.08), "perp": pytest.approx(0.08)}
+    v = e.broker.vista_real()
+    assert v["comisiones_creador"]["spot"] == pytest.approx(0.08) and v["broker"] == "paper"
+    assert v["resumen"] == "Modo real en solo lectura: el bot opera en paper (solo lee tu cuenta de OKX)"
+    assert "cuenta_real" in comisiones_bus and comisiones.activo() == "cuenta"
+    assert comisiones.tasas("spot") == {"perfil": "cuenta", "inst": "spot", "creador": pytest.approx(0.08),
+                                        "tomador": pytest.approx(0.1)}
+    assert e.okx.post() == []   # solo lectura: ninguna orden
+
+
+async def test_perfil_cuenta_del_paper_ni_con_la_demo_ni_sin_x_perps_por_el_modo_de_posicion(tmp_path):
+    """La demo de OKX no es la cuenta del usuario: su comisión no pasa al paper. Con X-Perps en la cuenta pero en
+    long_short_mode, el conector no puede abrir cortos (cortos.ok False), pero el paper sí los mide («xperps»)."""
+    from bot import comisiones
+    d = Env(tmp_path / "demo", "demo")
+    assert await d.broker.arrancar()
+    v = d.broker.vista_real()
+    assert v["demo"] is True and v["comisiones"]["spot"] is not None
+    comisiones.observar({"type": "cuenta_real", **v})
+    assert comisiones.activo() == comisiones.CON_XPERPS
+    e = Env(tmp_path / "lsm", "solo_lectura")
+    e.okx.cfg["posMode"] = "long_short_mode"
+    assert await e.broker.arrancar()
+    v = e.broker.vista_real()
+    assert v["cortos"]["ok"] is False and v["xperps"] == list(config.COINS) and v["comisiones"]["perp"] is None
+    comisiones.observar({"type": "cuenta_real", **v})
+    assert comisiones.activo() == "cuenta" and comisiones.hay_cortos()
+    assert comisiones.tasas("perp")["tomador"] == 0.05                    # la oficial con X-Perps: no la leyó
+    a = Env(tmp_path / "apagado", "apagado")
+    v = a.broker.vista_real()
+    assert v["modo"] == "apagado" and v["etiqueta"] == "apagado" and v["xperps"] is None
+    comisiones.observar({"type": "cuenta_real", **v})
+    assert comisiones.activo() == comisiones.CON_XPERPS
+
+
+async def test_resumen_del_panel_segun_el_modo_y_bot_broker(tmp_path, monkeypatch):
+    e = Env(tmp_path, "apagado")
+    assert e.broker.vista_real()["resumen"] == "Modo real apagado: el bot opera en paper"
+    assert e.broker.vista_real()["broker"] == "paper" and e.okx.calls == []
+    r = Env(tmp_path / "otro", "real")
+    assert await r.broker.arrancar()
+    assert r.broker.resumen().startswith("Modo real listo, pero el bot opera en paper (BOT_BROKER=paper")
+    monkeypatch.setattr(config, "BROKER", "real")
+    assert r.broker.resumen() == "Operando en dinero real" and r.broker.vista_real()["broker"] == "real"
+    assert e.broker.resumen().startswith("Modo real sin operar: Modo real no activo")

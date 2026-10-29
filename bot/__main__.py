@@ -6,7 +6,12 @@ post-mortems), fuentes vivas (estado de cada fuente y descubrimiento), evolució
 propuestas e informe semanal), reacción (la cripto en cada apertura de bolsa: «cripto_aperturas»), reflejo (¿la cripto
 refleja las noticias macro y geopolíticas?), noticias fiables (los grupos que aciertan ≥ 60 % de forma constante), la
 entrada por noticia fiable confirmada por el precio y las decisiones de las aperturas (por qué entra o no, tabla
-decisiones_apertura). Si uno no arranca, el bot sigue sin él."""
+decisiones_apertura). Si uno no arranca, el bot sigue sin él.
+Modo real con OKX EU (docs/06): el conector (RealBroker) se construye siempre y queda APAGADO sin las claves del usuario
+(secretos/okx.env): no hace ninguna petición privada. Los tickets van al paper (BOT_BROKER=paper, por defecto); con
+BOT_BROKER=real irían al conector, que además necesita las claves, BOT_MODO_REAL=1 y la confirmación escrita en la web.
+Comisiones (bot/comisiones.py): el perfil de OKX EU en uso; si el conector lee la comisión real de la cuenta (solo
+lectura), manda esa. La gráfica de cada operación usa las velas públicas de OKX EU del par (bot/velas_okx.py)."""
 import asyncio
 import logging
 import os
@@ -19,7 +24,7 @@ import aiohttp
 import truststore
 from aiohttp import web
 
-from . import agenda, config
+from . import agenda, comisiones, config
 from .apertura import OpeningEngine, pick_strategy, signal_getter
 from .aprendizaje import Aprendizaje, CacheBars
 from .backtest import Backtester
@@ -36,6 +41,8 @@ from .hunters import SOURCES, SourceState, run_source
 from .local_ai import LocalAI
 from .market import Market
 from .models import now_ms
+from .okx_firma import FiltroSecretos
+from .okx_real import RealBroker
 from .paper import PaperBroker
 from .predict import Predictor, results_getter
 from .reaccion import Reaccion
@@ -43,6 +50,7 @@ from .reflejo import Reflejo
 from .server import Services, make_app, velas_de
 from .store import Store, in_batches
 from .trend import Trend
+from .velas_okx import VelasOKX
 from .vigilancia import Vigilancia
 
 log = logging.getLogger("bot")
@@ -81,14 +89,22 @@ def observe_bus(bus: Bus, fn) -> None:
     bus.publish = publish_and_observe
 
 
-def setup_logging() -> None:
+def log_handlers() -> list[logging.Handler]:
+    """Registro del bot: archivo rotativo y consola. Los dos con FiltroSecretos (okx_firma), no solo el logger
+    «okx_real»: una excepción que suba desde el cliente de OKX hasta otro módulo (server, el arranque…) sale igual de
+    enmascarada."""
     config.LOG_DIR.mkdir(parents=True, exist_ok=True)
     fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
     fh = RotatingFileHandler(config.LOG_DIR / "bot.log", maxBytes=5_000_000, backupCount=5, encoding="utf-8")
-    fh.setFormatter(fmt)
     sh = logging.StreamHandler(sys.stdout)
-    sh.setFormatter(fmt)
-    logging.basicConfig(level=logging.INFO, handlers=[fh, sh])
+    for h in (fh, sh):
+        h.setFormatter(fmt)
+        h.addFilter(FiltroSecretos())
+    return [fh, sh]
+
+
+def setup_logging() -> None:
+    logging.basicConfig(level=logging.INFO, handlers=log_handlers())
     logging.getLogger("aiohttp.access").setLevel(logging.WARNING)
 
 
@@ -136,6 +152,23 @@ async def main() -> None:
         if decs is not None:
             observe_bus(bus, decs.observe)
         broker = PaperBroker(bus, store, lambda: state("market", {}), lambda: state("orderflow", {}))
+        # Modo real con OKX EU (docs/06, contrato de cableado): sin secretos/okx.env queda apagado y no hace ninguna
+        # petición privada. Con las claves del usuario lee su cuenta en solo lectura (saldo y comisiones); opera solo con
+        # BOT_MODO_REAL=1 y su confirmación escrita en la web. Mismo mercado del bus que el paper.
+        real = optional("El conector del modo real", lambda: RealBroker(
+            bus, store, lambda: state("market", {}), session=session, get_orderflow=lambda: state("orderflow", {})))
+        # La comisión real de la cuenta (cuenta_real, solo lectura) manda en el perfil de comisiones del paper.
+        observe_bus(bus, comisiones.observar)
+        # Quién recibe los tickets del motor de aperturas y de la entrada por noticia: el paper (BOT_BROKER=paper, por
+        # defecto) o el conector real (BOT_BROKER=real). La fase 2 siempre va al paper.
+        if config.BROKER not in ("paper", "real"):
+            log.warning("BOT_BROKER=%s no es paper ni real: los tickets van al paper", config.BROKER)
+        usar_real = config.BROKER == "real" and real is not None
+        if config.BROKER == "real" and real is None:
+            log.error("BOT_BROKER=real pero el conector del modo real no arrancó: los tickets van al paper")
+        ticket_submit, ticket_pf = (real.submit, real.portfolio) if usar_real else (broker.submit, broker.portfolio)
+        log.info("Tickets del motor y de la entrada por noticia: %s · comisiones: %s (%s)",
+                 "conector real de OKX EU" if usar_real else "paper", comisiones.activo(), comisiones.texto())
         phase2 = Phase2(bus, store, session, local, lambda: state("predictions"), lambda: state("trend"),
                         lambda: state("orderflow"), lambda: state("market"), bt, broker.portfolio, broker.submit)
         # Motor de aperturas en modo impulso (la operativa del usuario: seguir el impulso de los primeros minutos,
@@ -144,7 +177,7 @@ async def main() -> None:
         # reglas del usuario; si no hay archivo, el preset.
         os.environ.setdefault("BOT_APERTURAS_ESTRATEGIA", "impulso")
         activa = config.DATA_DIR / ESTRATEGIA_ACTIVA if pick_strategy(None) == "impulso" else None
-        openings = OpeningEngine(bus, session, signal_getter(bus), broker.submit, broker.portfolio, activa_path=activa,
+        openings = OpeningEngine(bus, session, signal_getter(bus), ticket_submit, ticket_pf, activa_path=activa,
                                  decisiones=decs)
         log.info("Motor de aperturas en modo %s (parámetros: %s)", getattr(openings, "strategy", "ruptura"),
                  getattr(openings, "source", "?"))
@@ -169,7 +202,7 @@ async def main() -> None:
         entrada = None
         if ENTRADA_NOTICIAS:
             entrada = optional("La entrada por noticia fiable", lambda: EntradaNoticias(
-                bus, store, broker.submit, broker.portfolio, bars=CacheBars(live=lambda c: vigil.bars.get(c)).get))
+                bus, store, ticket_submit, ticket_pf, bars=CacheBars(live=lambda c: vigil.bars.get(c)).get))
         if entrada is not None:
             observe_bus(bus, entrada.observe)
         # Reacción: la cripto en cada apertura de bolsa (cripto_aperturas); la historia, en un hilo y una vez al día.
@@ -198,16 +231,20 @@ async def main() -> None:
                     "market": {"ok": market.ok, "err": market.err, "prices": market.prices},
                     "trend": {"ok": trend.ok, "err": trend.err}, "feeds": feeds.summary(),
                     "local_ai": {"queue": local.q.qsize(), "done": local.done},
-                    "clients": len(bus.clients)}
+                    "clients": len(bus.clients), "broker": "real" if usar_real else "paper",
+                    "real": {"modo": real.estado.modo} if real is not None else {"modo": "apagado"},
+                    "comisiones": comisiones.activo()}
 
-        # Velas de la gráfica de cada posición (GET /api/velas): las de la vigilancia en memoria (guarda semanas) y, si no
-        # llegan, las de la caché de 1 min en disco, sin pedir nada a la red. Con su propia caché de meses (4 monedas × 2
-        # meses; las lee el servidor en un hilo).
+        # Velas de la gráfica de cada posición (GET /api/velas): por defecto las públicas de OKX EU del par que se operaría
+        # (BTC-USDC…, sin claves, con caché y límite de peticiones); si OKX falla, las del bot: las de la vigilancia en
+        # memoria (guarda semanas) y, si no llegan, las de la caché de 1 min en disco, sin pedir nada a la red. Con su
+        # propia caché de meses (4 monedas × 2 meses; las lee el servidor en un hilo).
         services = Services(feeds=feeds, predictor=predictor, broker=broker, phase2=phase2, backtest=bt, openings=openings,
                             vigilancia=vigil, aprendizaje=learn, evolucion=evo, fuentes_vivas=vivas, reaccion=react,
                             reflejo=refl, fiables=fiab, entrada_noticias=entrada, decisiones=decs,
                             velas=velas_de(lambda c: vigil.bars.get(c),
-                                           CacheBars(live=lambda c: vigil.bars.get(c), keep=8).get))
+                                           CacheBars(live=lambda c: vigil.bars.get(c), keep=8).get),
+                            velas_okx=VelasOKX(session), real=real)
         runner = web.AppRunner(make_app(bus, health, services))
         await runner.setup()
         await web.TCPSite(runner, config.HOST, config.PORT).start()
@@ -230,8 +267,8 @@ async def main() -> None:
                     bus.publish({"type": "sources", "sources": view})
                 await asyncio.sleep(3)
 
-        extra = [m.run() for m in (learn, vivas, evo, refl, react, fiab, entrada)
-                 if m is not None]   # cada run() atrapa sus fallos
+        extra = [m.run() for m in (learn, vivas, evo, refl, react, fiab, entrada, real)
+                 if m is not None]   # cada run() atrapa sus fallos (el del modo real, apagado, no pide nada a OKX)
         try:
             await asyncio.gather(*(run_source(st, session, desk) for st in states),
                                  market.run(), agenda.run(bus, session), local.run(), report_sources(),

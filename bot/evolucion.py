@@ -78,7 +78,7 @@ from zoneinfo import ZoneInfo
 
 import numpy as np
 
-from . import config
+from . import comisiones, config
 from .models import now_ms
 
 log = logging.getLogger("evolucion")
@@ -333,8 +333,9 @@ def _semilla(s: str) -> int:
 
 
 def coste_rt_pct() -> float:
-    """Coste de ida y vuelta en % del nominal (como paper.cost_rt_pct: 0,24 % con 0,10 % de comisión y 2 pb)."""
-    return 2 * (config.FEE_PCT + COST_SLIP_BPS / 100)
+    """Coste de ida y vuelta en % del nominal con el perfil de comisiones en uso (como paper.cost_rt_pct al contado:
+    0,24 % con cuenta X-Perps, 0,74 % sin ella). Al contado por el lado seguro: es el más caro del perfil."""
+    return comisiones.coste_rt_pct("spot")
 
 
 # ---------------------------------------------------------------- semanas (lunes a domingo, hora de Madrid)

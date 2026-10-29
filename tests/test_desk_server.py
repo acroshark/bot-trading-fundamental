@@ -1,6 +1,7 @@
 import asyncio
 import functools
 import json
+import logging
 import random
 import sqlite3
 import threading
@@ -878,3 +879,284 @@ def test_velas_de_sale_de_la_memoria_si_llega_y_si_no_de_la_cache():
     assert get("BTC", T - 60_000, T + 60_000) == [[T - 60_000, 1, 1, 1, 1]]   # empieza antes de la memoria: la caché
     assert get("ETH", T, T + 60_000) == [[T, 1, 1, 1, 1]] and get("XRP", T, T + 60_000) == [[T, 1, 1, 1, 1]]
     assert disco == [("BTC", T - 60_000, T + 60_000), ("ETH", T, T + 60_000), ("XRP", T, T + 60_000)]
+
+
+# ---------------------------------------------------------------- velas de OKX EU, modo real y comisiones (29-10-2026)
+
+class _VelasOKX:
+    """VelasOKX de mentira: responde, falla o no tiene velas, y apunta lo que le piden."""
+
+    def __init__(self, modo="ok"):
+        self.modo, self.calls = modo, []
+
+    async def respuesta(self, coin, desde, hasta, tf, maximo):
+        self.calls.append((coin, desde, hasta, tf, maximo))
+        if self.modo == "falla":
+            raise RuntimeError("sin red")
+        if self.modo == "vacio":
+            return None
+        return {"coin": coin, "tf": tf, "desde": desde, "hasta": hasta, "hasta_datos": hasta, "recortada": False,
+                "n": 1, "velas": [[desde, 1.0, 2.0, 0.5, 1.5]], "fuente": "okx", "mercado": "OKX EU",
+                "instId": f"{coin}-USDC", "nota": f"velas de OKX EU, {coin}-USDC"}
+
+
+async def test_api_velas_de_okx_por_defecto_y_si_falla_las_del_bot(tmp_path):
+    """GET /api/velas: por defecto (fuente=okx) las públicas de OKX EU del par; si OKX falla o no tiene velas, las del
+    bot con fuente «bot», pedida «okx» y el aviso; fuente=bot no pide nada a OKX; una fuente desconocida, 400."""
+    T = 1_793_000_000_000 // 3_600_000 * 3_600_000
+    rows = [[T + i * 60_000, 100.0, 101.0, 99.0, 100.5] for i in range(10)]
+    bot = lambda c, a, b: [r for r in rows if a <= r[0] < b]
+    store = Store(tmp_path / "t.db")
+    bus = Bus(store)
+    q = f"coin=BTC&desde={T}&hasta={T + 600_000}&tf=1m"
+    ok = _VelasOKX()
+    async with TestClient(TestServer(make_app(bus, lambda: {}, Services(velas=bot, velas_okx=ok)))) as client:
+        j = await (await client.get("/api/velas?" + q)).json()
+        assert j["fuente"] == "okx" and j["instId"] == "BTC-USDC" and j["nota"] == "velas de OKX EU, BTC-USDC"
+        assert ok.calls == [("BTC", T, T + 600_000, "1m", server.VELAS_MAX)]
+        b = await (await client.get("/api/velas?" + q + "&fuente=bot")).json()
+        assert b["fuente"] == "bot" and b["n"] == 10 and "aviso" not in b and len(ok.calls) == 1
+        assert b["nota"] == "velas del bot (Binance, BTCUSDT, 1 min)"
+        assert (await client.get("/api/velas?" + q + "&fuente=binance")).status == 400
+    for modo, texto in (("falla", "OKX EU no respondió (sin red)"), ("vacio", "OKX EU no tiene velas de BTC-USDC")):
+        async with TestClient(TestServer(make_app(bus, lambda: {}, Services(velas=bot, velas_okx=_VelasOKX(modo))))) as client:
+            j = await (await client.get("/api/velas?" + q)).json()
+            assert j["fuente"] == "bot" and j["pedida"] == "okx" and j["aviso"].startswith(texto) and j["n"] == 10
+    async with TestClient(TestServer(make_app(bus, lambda: {}, Services(velas_okx=_VelasOKX("falla"))))) as client:
+        r = await client.get("/api/velas?" + q)
+        assert r.status == 404 and "OKX EU no respondió" in await r.text()
+    store.close()
+
+
+class _Real:
+    """RealBroker de mentira para los mandos: apunta las llamadas."""
+
+    def __init__(self):
+        self.calls, self.pending, self.en_curso, self.positions = [], {"r1": {}}, {}, {"r2": {}}
+
+    def vista_real(self):
+        return {"modo": "solo_lectura", "broker": "paper", "resumen": "Modo real en solo lectura: el bot opera en paper"}
+
+    def confirmar(self, frase):
+        self.calls.append(("confirmar", frase))
+        return {"ok": False, "why": "La frase no coincide"}
+
+    def parada_emergencia(self, motivo, cerrar=False):
+        self.calls.append(("parar", cerrar))
+        return True
+
+    def set_limites(self, lim):
+        self.calls.append(("limites", lim))
+        return {"ok": True, "why": None, "limites": lim, "techos": {}}
+
+    def halt(self, why):
+        self.calls.append(("detener",))
+        return True
+
+    def resume(self, why):
+        self.calls.append(("reanudar",))
+        return True
+
+    def set_mode(self, mode):
+        self.calls.append(("aprobacion", mode))
+        return mode != "auto"
+
+    def decide(self, story, ok, by=None):
+        self.calls.append(("decide", story, ok))
+        return True
+
+    def close(self, story, why=""):
+        self.calls.append(("close", story))
+        return True
+
+    def cancel(self, story, why=""):
+        self.calls.append(("cancel", story))
+        return True
+
+    def publish_cuenta(self, force=False):
+        self.calls.append(("publica",))
+
+
+async def test_api_real_apagado_sin_conector_y_con_el_de_verdad(tmp_path):
+    """GET /api/real: sin conector, «apagado» y el paper; con el RealBroker de verdad sin okx.env, apagado, el texto
+    «Modo real apagado: el bot opera en paper» y ninguna clave."""
+    from bot.okx_real import RealBroker
+    store = Store(tmp_path / "t.db")
+    bus = Bus(store)
+    real = RealBroker(bus, store, lambda: {}, session=None, carpeta=tmp_path / "secretos", env={})
+    assert (tmp_path / "secretos" / "okx.env.ejemplo").exists() and not (tmp_path / "secretos" / "okx.env").exists()
+    async with TestClient(TestServer(make_app(bus, lambda: {}))) as client:
+        j = await (await client.get("/api/real")).json()
+        assert j["modo"] == "apagado" and j["broker"] == "paper" and j["resumen"] == "Modo real apagado: el bot opera en paper"
+    async with TestClient(TestServer(make_app(bus, lambda: {}, Services(real=real)))) as client:
+        j = await (await client.get("/api/real")).json()
+        assert j["modo"] == "apagado" and j["broker"] == "paper" and j["puede_abrir"] is False
+        assert j["resumen"] == "Modo real apagado: el bot opera en paper" and j["archivos"]["claves"] is False
+        assert j["comisiones"] == {"spot": None, "perp": None} and "frase_confirmacion" in j
+    assert real.cliente is None   # apagado: ni cliente ni peticiones privadas
+    store.close()
+
+
+async def _orden_web(q, area, n=1, tries=100):
+    out = []
+    for _ in range(tries):
+        while not q.empty():
+            m = json.loads(q.get_nowait())
+            if m.get("type") == "orden_web" and m.get("area") == area:
+                out.append(m)
+        if len(out) >= n:
+            break
+        await asyncio.sleep(0.02)
+    return out
+
+
+async def test_mandos_del_modo_real_solo_desde_la_propia_web(tmp_path):
+    """{"type": "real"}: sin Origin (otro proceso del PC, p. ej. el OpenClaw) solo pasa la parada; con el de la propia
+    web, todos. «cerrar» tiene que ser true de JSON. decision, close y cancel de una story del modo real van al
+    conector real y también exigen el Origin; las del paper siguen yendo al paper."""
+    store, bus, _, _ = setup(tmp_path)
+    r, b = _Real(), _Broker()
+    q = bus.subscribe()
+    mandos = [{"type": "real", "accion": "confirmar", "frase": "ACTIVO EL MODO REAL"},
+              {"type": "real", "accion": "limites", "limites": {"max_usdc": 5}},
+              {"type": "real", "accion": "detener"}, {"type": "real", "accion": "reanudar"},
+              {"type": "real", "accion": "aprobacion", "mode": "manual"},
+              {"type": "decision", "story": "r1", "ok": True}, {"type": "close", "story": "r2"},
+              {"type": "cancel", "story": "r1"},
+              {"type": "real", "accion": "parar", "cerrar": "true"}]
+    async with TestClient(TestServer(make_app(bus, lambda: {}, Services(broker=b, real=r)))) as client:
+        ws = await client.ws_connect("/events")   # sin Origin: desde este PC, pero no es la web
+        await ws.receive()
+        for m in mandos:
+            await ws.send_str(json.dumps(m))
+        got = await _orden_web(q, "real", len(mandos))
+        await ws.close()
+        assert [c for c in r.calls if c != ("publica",)] == [("parar", False)]   # la cadena "true" no cierra
+        assert b.calls == [] and sum(not m["ok"] for m in got) == len(mandos) - 1
+        assert all("propia web" in m["why"] for m in got if not m["ok"])
+        r.calls.clear()
+        ws = await client.ws_connect("/events", origin=f"http://localhost:{config.PORT}")
+        await ws.receive()
+        for m in [*mandos[:-1], {"type": "real", "accion": "parar", "cerrar": True},
+                  {"type": "real", "accion": "aprobacion", "mode": "auto"}, {"type": "real", "accion": "otra"},
+                  {"type": "decision", "story": "n1", "ok": True}]:
+            await ws.send_str(json.dumps(m))
+        await _orden_web(q, "real", 11)
+        for _ in range(50):
+            if b.calls:
+                break
+            await asyncio.sleep(0.02)
+        await ws.close()
+    assert [c for c in r.calls if c != ("publica",)] == [
+        ("confirmar", "ACTIVO EL MODO REAL"), ("limites", {"max_usdc": 5}), ("detener",), ("reanudar",),
+        ("aprobacion", "manual"), ("decide", "r1", True), ("close", "r2"), ("cancel", "r1"), ("parar", True),
+        ("aprobacion", "auto")]
+    assert b.calls == [("decide", "n1", True)]   # la story del paper sigue yendo al paper
+    store.close()
+
+
+async def test_origen_estricto_del_modo_real():
+    assert server.origen_web(f"http://127.0.0.1:{config.PORT}", "127.0.0.1")
+    assert server.origen_web(f"http://localhost:{config.PORT}/", "::1")
+    for bad in (None, "", "null", f"http://[::1]:{config.PORT}", f"http://127.0.0.1:{config.PORT + 1}",
+                "http://evil.example", f"https://127.0.0.1:{config.PORT}"):
+        assert not server.origen_web(bad, "127.0.0.1"), bad
+    # el Origin bueno desde otro equipo (BOT_HOST=0.0.0.0 y la cabecera falsificada) o sin saber desde dónde, no
+    for remote in ("192.168.1.20", "10.0.0.5", None, ""):
+        assert not server.origen_web(f"http://127.0.0.1:{config.PORT}", remote), remote
+
+
+async def test_mandos_del_modo_real_con_origin_falsificado_desde_otro_equipo(tmp_path):
+    """Un equipo de la red local (BOT_HOST=0.0.0.0) que abre el WebSocket con el Origin de la propia web falsificado
+    pasa la puerta del WebSocket, pero no llega a los mandos del modo real (salvo la parada); el paper sigue igual."""
+    store, bus, _, _ = setup(tmp_path)
+    r, b = _Real(), _Broker()
+    q = bus.subscribe()
+    app = make_app(bus, lambda: {}, Services(broker=b, real=r))
+
+    @web.middleware
+    async def desde_la_red(request, handler):   # la conexión llega desde otro equipo
+        return await handler(request.clone(remote="192.168.1.20"))
+
+    app.middlewares.append(desde_la_red)
+    mandos = [{"type": "real", "accion": "confirmar", "frase": "ACTIVO EL MODO REAL"},
+              {"type": "real", "accion": "limites", "limites": {"max_usdc": 5}},
+              {"type": "decision", "story": "r1", "ok": True}, {"type": "real", "accion": "parar", "cerrar": False}]
+    async with TestClient(TestServer(app)) as client:
+        ws = await client.ws_connect("/events", origin=f"http://127.0.0.1:{config.PORT}")
+        await ws.receive()
+        for m in mandos:
+            await ws.send_str(json.dumps(m))
+        got = await _orden_web(q, "real", len(mandos))
+        await ws.close()
+    assert [c for c in r.calls if c != ("publica",)] == [("parar", False)]
+    assert [m["ok"] for m in got] == [False, False, False, True]
+    assert all("propia web" in m["why"] for m in got if not m["ok"])
+    store.close()
+
+
+async def test_mando_de_comisiones_va_al_paper(tmp_path):
+    """{"type": "comisiones", "perfil"}: lo atiende el paper (set_comisiones) y la respuesta sale en «orden_web»; un
+    perfil desconocido no llega al paper."""
+    store, bus, _, _ = setup(tmp_path)
+    b = _Broker()
+    b.set_comisiones = lambda perfil: b.calls.append(("comisiones", perfil)) or {"ok": True, "why": None}
+    q = bus.subscribe()
+    async with TestClient(TestServer(make_app(bus, lambda: {}, Services(broker=b)))) as client:
+        ws = await client.ws_connect("/events", origin=f"http://127.0.0.1:{config.PORT}")
+        await ws.receive()
+        for m in ({"type": "comisiones", "perfil": "okx_eu_sin_xperps"}, {"type": "comisiones", "perfil": "binance"},
+                  {"type": "comisiones"}):
+            await ws.send_str(json.dumps(m))
+        got = await _orden_web(q, "comisiones", 3)
+        await ws.close()
+    assert b.calls == [("comisiones", "okx_eu_sin_xperps")]
+    assert [m["ok"] for m in got] == [True, False, False] and got[0]["id"] == "okx_eu_sin_xperps"
+    async with TestClient(TestServer(make_app(bus, lambda: {}))) as client:   # sin paper: resultados con las comisiones
+        res = await (await client.get("/api/resultados")).json()
+        assert res["comisiones_total"] == 0 and res["comisiones"]["perfil"] == "okx_eu_con_xperps"
+    store.close()
+
+
+def test_websocket_publico_de_okx_en_el_puerto_443():
+    """OKX retira el puerto 8443 de WebSocket (aviso 64010): mercado y tendencia usan el 443."""
+    from bot import market, trend
+    assert market.OKX_WS == trend.OKX_WS == "wss://wseea.okx.com/ws/v5/public"
+
+
+def test_arranque_engancha_el_modo_real_apagado_y_los_tickets_al_paper():
+    """__main__ construye el conector real (apagado sin okx.env) y manda los tickets al paper salvo BOT_BROKER=real."""
+    import inspect
+    from bot import __main__ as main
+    src = inspect.getsource(main.main)
+    assert "RealBroker(" in src and "comisiones.observar" in src and "VelasOKX(session)" in src
+    assert 'config.BROKER == "real"' in src and "real=real" in src
+    assert config.BROKER == "paper"   # por defecto (las pruebas no ponen BOT_BROKER)
+
+
+
+def test_el_registro_del_bot_enmascara_las_claves_en_todos_los_modulos(tmp_path, monkeypatch):
+    """FiltroSecretos va en los manejadores del registro (archivo y consola), no solo en el logger okx_real: una
+    excepción con una clave que llegue a otro módulo (server, el arranque…) sale enmascarada."""
+    from bot import __main__ as main
+    from bot.okx_firma import Claves, FiltroSecretos
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path)
+    secreto = "clave-de-prueba-XYZ-0123"
+    Claves(secreto, "secreto-de-prueba-ABC-4567", "frase-de-prueba-890")   # quedan apuntadas para enmascararlas
+    hs = main.log_handlers()
+    try:
+        assert len(hs) == 2 and all(any(isinstance(f, FiltroSecretos) for f in h.filters) for h in hs)
+        lg = logging.getLogger("prueba.registro")
+        lg.propagate = False
+        lg.setLevel(logging.INFO)
+        lg.addHandler(hs[0])
+        try:
+            raise RuntimeError(f"OKX rechazó {secreto}")
+        except RuntimeError:
+            lg.exception("Mensaje de la web no procesado con %s", secreto)
+        lg.removeHandler(hs[0])
+    finally:
+        for h in hs:
+            h.close()
+    txt = (tmp_path / "bot.log").read_text(encoding="utf-8")
+    assert "Mensaje de la web no procesado" in txt and "RuntimeError" in txt and secreto not in txt and "***" in txt

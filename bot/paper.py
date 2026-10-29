@@ -17,7 +17,13 @@ UN periodo de liquidación, y se da por hecho que ese periodo es de 8 h (lo norm
 liquida esa moneda cada 4 h o 1 h, la tasa es por ese periodo y el paper cobraría de menos, salvo que la fila traiga
 «funding_h» (fundingIntervalHours de /fapi/v1/fundingInfo; hoy market.py no lo envía), con la que se escala a 8 h.
 Tampoco es la tasa de OKX X-Perps EU, donde se ejecutaría de verdad: es una aproximación.
-Mandos de la web (server.on_ws_message): decide, close, set_mode, halt / resume (parada manual, persistente) y cancel."""
+Comisiones (29-10-2026, bot/comisiones.py): las del perfil en uso (por defecto OKX EU con cuenta X-Perps). La entrada,
+el stop y los cierres a mercado pagan comisión de tomador; el objetivo y la parcial (órdenes límite), de creador. Cada
+posición guarda las tasas con que se abrió («comision») y las usa hasta cerrarse; cada operación lleva sus costes
+(«costes»: entrada, salidas, funding y total, en USDC y en R) y la cartera, el perfil en uso («comisiones»). Sin cuenta
+X-Perps (perfil okx_eu_sin_xperps, o la cuenta real sin X-Perps) no hay cortos ni perpetuos: se vetan («sin_cortos»).
+Mandos de la web (server.on_ws_message): decide, close, set_mode, halt / resume (parada manual, persistente), cancel y
+set_comisiones (perfil de comisiones, persistente)."""
 import asyncio
 import hashlib
 import json
@@ -28,7 +34,7 @@ import time
 from datetime import datetime, time as dtime, timedelta
 from zoneinfo import ZoneInfo
 
-from . import config, regions
+from . import comisiones, config, regions
 from .bus import Bus
 from .models import now_ms
 from .store import Store
@@ -64,7 +70,8 @@ INSTRUMENTS = ("spot", "perp")
 PERP_MAX_LEVERAGE = 2.0        # nominal en perpetuos ≤ 2 × capital (máximo para particulares en España)
 FUNDING_EVERY_MS = 8 * 3600_000   # liquidaciones del funding: 00:00, 08:00 y 16:00 UTC
 HALT_WHY = "Paper detenido por ti"   # parada manual desde la web (no es la pausa por pérdida diaria)
-CAPS = ("halt", "cancel")            # mandos de la web que admite este paper (portfolio.caps)
+CAPS = ("halt", "cancel", "comisiones")   # mandos de la web que admite este paper (portfolio.caps)
+SIN_CORTOS_WHY = "Sin cuenta X-Perps"     # principio del veto de un corto o un perpetuo sin X-Perps (código sin_cortos)
 # Campos sin los que una operación guardada no se puede cargar (los que escribe _fill / _close).
 NEED_OPEN = ("id", "story", "coin", "side", "qty", "entry", "sl", "sl_initial", "sl_kind", "sl_pub", "stop_pct",
              "trail_pct", "high_water", "opened", "riskUsd", "notional", "fee_open", "tp2", "tp2R", "be", "hold_until",
@@ -167,6 +174,8 @@ def motivo_codigo(why: str | None, kind: str = "riskko") -> str:
     t = " ".join(str(why or "").split())
     if t.startswith(HALT_WHY):
         return "otro"
+    if t.startswith(SIN_CORTOS_WHY):
+        return "sin_cortos"   # el perfil de comisiones no tiene X-Perps: ni cortos ni perpetuos
     if kind == "humanko" or t.startswith("Cancelada"):
         return "aprobacion"   # rechazada o cancelada por ti, o caducada sin respuesta
     if t.startswith("Aprobada ") and "después de enviarla" in t:
@@ -195,30 +204,34 @@ def market_of(window: str) -> str | None:
 
 # ---------------------------------------------------------------- salidas (funciones puras, también para el backtest)
 
-def cost_rt_pct() -> float:
-    """Coste de ida y vuelta en % del nominal: comisión y deslizamiento en cada lado (0,24 % con 0,10 % y 2 pb)."""
-    return 2 * (config.FEE_PCT + COST_SLIP_BPS / 100)
+def cost_rt_pct(inst: str = "spot") -> float:
+    """Coste de ida y vuelta previsto en % del nominal con el perfil de comisiones en uso (comisiones.coste_rt_pct):
+    tomador a la entrada y a la salida y 2 pb de deslizamiento por lado (0,24 % al contado con cuenta X-Perps, 0,14 % en
+    X-Perps, 0,74 % al contado sin X-Perps)."""
+    return comisiones.coste_rt_pct(inst)
 
 
-def stop_loss_frac(side: str, stop_pct: float, exit_slip_bps: float) -> float:
+def stop_loss_frac(side: str, stop_pct: float, exit_slip_bps: float, fee_pct: float | None = None) -> float:
     """Pérdida al saltar el stop inicial, por unidad de nominal: el recorrido hasta el stop, el deslizamiento al salir y
-    las comisiones de entrada y salida. Un hueco que salte más allá del stop no se puede prever."""
+    las comisiones de entrada y salida (las dos a mercado: fee_pct, por defecto la de tomador del contado del perfil en
+    uso). Un hueco que salte más allá del stop no se puede prever."""
+    fee = comisiones.tasa("spot", "tomador") if fee_pct is None else fee_pct
     d = 1 if side == "long" else -1
     k = (1 - d * stop_pct / 100) * (1 - d * exit_slip_bps / 10000)   # precio de salida / precio de entrada
-    return abs(1 - k) + config.FEE_PCT / 100 * (1 + k)
+    return abs(1 - k) + fee / 100 * (1 + k)
 
 
-def be_offset_pct() -> float:
+def be_offset_pct(inst: str = "spot") -> float:
     """Distancia del break-even a la entrada: coste de ida y vuelta + 2 pb (no la entrada pelada)."""
-    return cost_rt_pct() + BE_MARGIN_BPS / 100
+    return cost_rt_pct(inst) + BE_MARGIN_BPS / 100
 
 
-def rule_win_ok(r: float | None, stop_pct: float | None) -> bool:
+def rule_win_ok(r: float | None, stop_pct: float | None, inst: str = "spot") -> bool:
     """Regla del usuario para una salida que gana (objetivo, parcial o suelo del cerrojo) a r R con stop de stop_pct %:
-    r ≥ RULE_MIN_RR (2R) y r × stop − coste de ida y vuelta ≥ RULE_MIN_NET_PCT (3 % neto)."""
+    r ≥ RULE_MIN_RR (2R) y r × stop − coste de ida y vuelta (cost_rt_pct del instrumento) ≥ RULE_MIN_NET_PCT (3 %)."""
     r, sp = _f(r), _f(stop_pct)
     return bool(r and sp and r >= config.RULE_MIN_RR - 1e-9
-                and r * sp - cost_rt_pct() >= config.RULE_MIN_NET_PCT - 1e-9)
+                and r * sp - cost_rt_pct(inst) >= config.RULE_MIN_NET_PCT - 1e-9)
 
 
 def exit_rules(t: dict) -> dict:
@@ -235,9 +248,10 @@ def exit_rules(t: dict) -> dict:
     suelo la cumple (si no, no hay cerrojo; entonces el ticket necesita un objetivo fijo ≥ 2R: _invalid). Lo que el
     ticket pedía y la regla descarta va en «dropped» (textos), para decirlo al abrir. Un valor no finito no vale."""
     trail = _f(t.get("trailPct"))
+    inst = instrument_of(t)
     if "beR" in t:
         be_r = _f(t.get("beR"))
-        be_r, be_pct = (be_r if be_r and be_r > 0 else None), be_offset_pct()
+        be_r, be_pct = (be_r if be_r and be_r > 0 else None), be_offset_pct(inst)
     else:
         be_r, be_pct = 1.0, 0.0
     ts, tp1R, tp2R = _f(t.get("trailStartR")), _f(t.get("tp1R")), _f(t.get("tp2R"))
@@ -253,11 +267,11 @@ def exit_rules(t: dict) -> dict:
     if config.USER_RULES:   # o gano más de 2 o pierdo 1: nada mueve el stop antes de ganar el mínimo
         trail, be_r, ts = None, None, None
         stop = _f(t.get("stopPct"))
-        if frac and not rule_win_ok(tp1R, stop):
+        if frac and not rule_win_ok(tp1R, stop, inst):
             dropped.append(f"salida parcial en {_n(tp1R, 1)} R descartada por tu regla (≥ {_n(config.RULE_MIN_RR, 0)}R "
                            f"y ≥ {_n(config.RULE_MIN_NET_PCT, 0)} % neto)")
             frac = 0.0
-        if lock and not rule_win_ok(floor, stop):
+        if lock and not rule_win_ok(floor, stop, inst):
             dropped.append(f"cerrojo con suelo en {_n(floor, 1)} R descartado por tu regla (≥ {_n(config.RULE_MIN_RR, 0)}R "
                            f"y ≥ {_n(config.RULE_MIN_NET_PCT, 0)} % neto)")
             lock = floor = ltrail = None
@@ -410,6 +424,16 @@ class PaperBroker:
                 log.warning("Paper: BOT_APPROVAL_MODE ha cambiado desde que elegiste «%s» en la web: se usa «%s»",
                             saved["mode"], self.mode)
             self._set_state("mode", {"mode": self.mode, "config": config.APPROVAL_MODE})
+        com = self._get_state("comisiones")   # perfil de comisiones elegido desde la web (set_comisiones)
+        if isinstance(com, dict) and com.get("perfil") in comisiones.PERFILES:
+            if com.get("config") == comisiones.config_perfil():
+                comisiones.elegir(com["perfil"])   # el último cambio hecho desde la web sigue valiendo
+            else:   # BOT_COMISIONES ha cambiado después: manda la configuración y queda guardada
+                if com["perfil"] != comisiones.config_perfil():
+                    log.warning("Paper: BOT_COMISIONES ha cambiado desde que elegiste «%s» en la web: se usa «%s»",
+                                com["perfil"], comisiones.config_perfil())
+                comisiones.elegir(comisiones.config_perfil())
+                self._set_state("comisiones", {"perfil": comisiones.config_perfil(), "config": comisiones.config_perfil()})
         cuenta = self._get_state("cuenta")   # la deja scripts/nueva_cartera_paper.py: su capital manda sobre BOT_PAPER_EQUITY
         self.cuenta = cuenta if isinstance(cuenta, dict) and (_f(cuenta.get("usdc")) or 0) > 0 else None
         if self.cuenta:
@@ -581,7 +605,8 @@ class PaperBroker:
         risk, stop = _f(t.get("risk"), 0.0), _f(t.get("stopPct"), 0.0)
         if stop <= 0 or risk <= 0 or eq <= 0:
             return 0.0
-        loss = stop_loss_frac(t.get("side"), stop, self._exit_slip_bps(t.get("coin")))
+        fee = comisiones.tasa(instrument_of(t), "tomador")   # entrada y stop, a mercado
+        loss = stop_loss_frac(t.get("side"), stop, self._exit_slip_bps(t.get("coin")), fee)
         return min(eq * risk / 100 / loss, eq * MAX_NOTIONAL_PCT / 100)
 
     def _committed(self) -> float:
@@ -633,7 +658,8 @@ class PaperBroker:
         if self.halt_until:
             return "Operativa detenida por la pérdida máxima del día hasta la medianoche de Madrid"
         return (f"Límites: {_n(config.RISK_PER_TRADE_PCT)} % por operación (en el stop, con costes), "
-                f"{_n(config.MAX_DAILY_LOSS_PCT)} % de pérdida al día, {config.MAX_POSITIONS} posiciones")
+                f"{_n(config.MAX_DAILY_LOSS_PCT)} % de pérdida al día, {config.MAX_POSITIONS} posiciones · comisiones: "
+                f"{comisiones.perfil()['nombre']} ({comisiones.texto()})")
 
     def _human_text(self) -> str:
         t = _mode_text(self.mode)
@@ -673,6 +699,18 @@ class PaperBroker:
         self._status("human", self._human_text())
         self._after_command()
         return True
+
+    def set_comisiones(self, perfil: str) -> dict:
+        """Perfil de comisiones desde la web ({"type": "comisiones", "perfil"}), guardado para después de un reinicio
+        (salvo que cambie BOT_COMISIONES). Vale para las entradas nuevas: cada posición abierta sigue con las tasas con
+        que se abrió. Con la comisión real de la cuenta leída (modo real con claves), manda esa."""
+        ok, why = comisiones.elegir(perfil) if isinstance(perfil, str) else (False, "Perfil no válido")
+        if ok:
+            self._set_state("comisiones", {"perfil": perfil, "config": comisiones.config_perfil()})
+            log.warning("Paper: perfil de comisiones «%s» (%s)", perfil, comisiones.texto(perfil))
+            self._status("risk", self._risk_text())
+        self._after_command()
+        return {"ok": ok, "why": why, "comisiones": comisiones.vista()}
 
     def halt(self, why: str = "Detenido por ti") -> bool:
         """Parada manual, guardada para después de un reinicio: no entran órdenes nuevas ni se ejecutan las pendientes
@@ -768,6 +806,9 @@ class PaperBroker:
             return f"Lado desconocido: {t.get('side')}"
         if t.get("instrument") not in (None, *INSTRUMENTS):
             return f"Instrumento desconocido: {t.get('instrument')} (spot o perp)"
+        bad = self._sin_cortos(t)
+        if bad:
+            return bad
         if not 0 < stop <= 20:
             return f"Stop no válido: {_n(stop)} %"
         if risk <= 0:
@@ -778,21 +819,52 @@ class PaperBroker:
             rr = _f(t.get("tp2R"))
             if rr and rr < config.RULE_MIN_RR - 1e-9:
                 return f"Regla del usuario: objetivo de {_n(rr)} R por debajo del mínimo de {_n(config.RULE_MIN_RR)} R"
-            if rr and not rule_win_ok(rr, stop):   # el objetivo deja ≥ 3 % neto de comisión y deslizamiento
-                return (f"Regla del usuario: el objetivo de {_n(rr)} R con stop de {_n(stop)} % deja "
-                        f"{_n(rr * stop - cost_rt_pct())} % neto de costes (mínimo {_n(config.RULE_MIN_NET_PCT, 0)} %)")
-            if not rr and exit_rules(t)["lock_r"] is None:   # sin objetivo fijo, solo con un cerrojo que cumpla
-                if _f(t.get("lockR")):
-                    return (f"Regla del usuario: sin objetivo fijo y el cerrojo no vale (su suelo tiene que ser ≥ "
-                            f"{_n(config.RULE_MIN_RR)} R y dejar ≥ {_n(config.RULE_MIN_NET_PCT, 0)} % neto de costes)")
-                return (f"Regla del usuario: sin objetivo fijo ni cerrojo (hace falta al menos "
-                        f"{_n(config.RULE_MIN_RR, 0)}R)")
+            bad = self._regla_neta(t, stop)
+            if bad:
+                return bad
         if t.get("timing") not in ("now", "window"):
             return f"Momento de entrada desconocido: {t.get('timing')}"
         if t.get("timing") == "window" and not _f(t.get("winAt")):
             return "Entrada programada sin hora (winAt)"
         if story in self.positions or story in self.pending or story in self.scheduled:
             return "Ya hay una operación en curso para esta noticia"
+        return None
+
+    # Lo que depende del perfil de comisiones en uso lo mira submit (_invalid) y otra vez _blockers al ejecutar: el
+    # perfil puede cambiar entre medias (desde la web, o solo, cuando el conector lee la comisión real de la cuenta), y
+    # una pendiente (veto o a mano) o una programada no entra con un perfil con el que no se habría aceptado.
+
+    @staticmethod
+    def _sin_cortos(t: dict) -> str | None:
+        """Sin cuenta X-Perps (perfil sin X-Perps, o la cuenta real sin ellos) no hay cortos ni perpetuos."""
+        if (t.get("side") == "short" or instrument_of(t) == "perp") and not comisiones.hay_cortos():
+            return (f"{SIN_CORTOS_WHY}: no hay cortos ni perpetuos con el perfil de comisiones "
+                    f"«{comisiones.perfil()['nombre']}» (el contado cuesta {_n(comisiones.tasa('spot', 'tomador'))} % "
+                    "como tomador)")
+        return None
+
+    @staticmethod
+    def _regla_neta(t: dict, stop: float) -> str | None:
+        """Regla del usuario que depende del coste (el perfil de comisiones): el objetivo fijo deja ≥ 3 % neto o, sin
+        él, hay un cerrojo cuyo suelo lo cumple (exit_rules lo quita si no)."""
+        inst = instrument_of(t)
+        rr = _f(t.get("tp2R"))
+        if rr and not rule_win_ok(rr, stop, inst):   # el objetivo deja ≥ 3 % neto de costes
+            return (f"Regla del usuario: el objetivo de {_n(rr)} R con stop de {_n(stop)} % deja "
+                    f"{_n(rr * stop - cost_rt_pct(inst))} % neto de costes (mínimo {_n(config.RULE_MIN_NET_PCT, 0)} %)")
+        if not rr and exit_rules(t)["lock_r"] is None:   # sin objetivo fijo, solo con un cerrojo que cumpla
+            if _f(t.get("lockR")):
+                return (f"Regla del usuario: sin objetivo fijo y el cerrojo no vale (su suelo tiene que ser ≥ "
+                        f"{_n(config.RULE_MIN_RR)} R y dejar ≥ {_n(config.RULE_MIN_NET_PCT, 0)} % neto de costes)")
+            return f"Regla del usuario: sin objetivo fijo ni cerrojo (hace falta al menos {_n(config.RULE_MIN_RR, 0)}R)"
+        return None
+
+    def _invalid_perfil(self, t: dict) -> str | None:
+        """Al ejecutar: lo que depende del perfil de comisiones en uso (cortos y regla del 3 % neto), con el aviso de
+        que el perfil ha cambiado desde que se envió (al enviarla, pasó)."""
+        bad = self._sin_cortos(t) or (self._regla_neta(t, _f(t.get("stopPct"), 0.0)) if config.USER_RULES else None)
+        if bad:
+            return f"{bad} · el perfil de comisiones ha cambiado desde que se envió"
         return None
 
     def _risk_checks(self, t: dict, story: str, now: int, prices: dict) -> tuple[list[dict], float]:
@@ -946,13 +1018,17 @@ class PaperBroker:
         self._fill(item, now, prices)
 
     def _blockers(self, item: dict, now: int, prices: dict) -> tuple[str | None, str | None]:
-        """Lo que impide entrar ahora: (definitivo, pasajero). Lo pasajero solo hace esperar a una entrada programada."""
+        """Lo que impide entrar ahora: (definitivo, pasajero). Lo pasajero solo hace esperar a una entrada programada.
+        Lo que depende del perfil de comisiones (cortos, regla del 3 % neto) se vuelve a mirar: es definitivo."""
         t = item["ticket"]
         coin = t["coin"]
         self._check_halt(now, prices)
         eq = self.equity(prices)
         hard = soft = None
-        if self.halt_until:
+        perfil = self._invalid_perfil(t)
+        if perfil:
+            hard = perfil
+        elif self.halt_until:
             hard = "Operativa detenida por la pérdida máxima del día hasta la medianoche de Madrid"
         elif len(self.positions) >= config.MAX_POSITIONS:
             hard = f"Ya hay {len(self.positions)} posiciones abiertas (máximo {config.MAX_POSITIONS})"
@@ -1051,7 +1127,10 @@ class PaperBroker:
         ref = prices[coin]
         eq = self.equity(prices)
         notional = self._notional(eq, t)
-        stop_loss = notional * stop_loss_frac(side, stop, self._exit_slip_bps(coin))   # pérdida prevista en el stop
+        inst = instrument_of(t)
+        tas = comisiones.tasas(inst)   # las tasas con que se abre: valen hasta cerrarla aunque cambie el perfil
+        com = {"perfil": tas["perfil"], "creador": tas["creador"], "tomador": tas["tomador"]}
+        stop_loss = notional * stop_loss_frac(side, stop, self._exit_slip_bps(coin), com["tomador"])   # en el stop
         ex = {**(item.get("exec") or {}), "sent": now}
         self._event("order", "exec", story, coin, f"{_verb(side)} {_qty(coin, notional / ref)} {coin}",
                     f"{t.get('entryType') or 'A mercado'} · referencia {_px(ref)} {config.QUOTE} · "
@@ -1068,7 +1147,7 @@ class PaperBroker:
         pos = {"id": "t" + hashlib.sha1(f"{story}|{now}".encode()).hexdigest()[:12], "story": story, "coin": coin, "side": side,
                "qty": qty, "entry": px, "sl": sl, "sl_initial": sl, "sl_kind": "inicial", "sl_pub": sl, "stop_pct": stop,
                "trail_pct": trail, "high_water": px, "last": px, "opened": now, "riskUsd": notional * stop / 100,
-               "notional": notional, "fee_open": notional * config.FEE_PCT / 100,
+               "notional": notional, "fee_open": notional * com["tomador"] / 100, "comision": com,
                "tp1": px + d * r * tp1R if tp1R else None, "tp2": px + d * r * tp2R if tp2R else None, "tp2R": tp2R,
                "be": False, "hold_until": hold_until, "hold_label": hold_label, "headline": item["headline"],
                "strategy": item["strategy"], "window": item["window"], "market": item["market"],
@@ -1088,7 +1167,7 @@ class PaperBroker:
             pos["hold_active_label"] = str(t.get("holdActiveLabel") or "cerrojo activado")
         if isinstance(t.get("tags"), dict):   # etiquetas del motor (noticia, apertura anterior…) para Resultados
             pos["tags"] = dict(t["tags"])
-        pos["instrument"] = inst = instrument_of(t)
+        pos["instrument"] = inst
         if inst == "perp":   # funding: cobrado (+) o pagado (−) en cada liquidación mientras siga abierta
             pos.update(funding=0.0, funding_n=0, funding_next=next_funding_ms(now),
                        funding_rate=self._funding_rate(coin))
@@ -1097,6 +1176,7 @@ class PaperBroker:
                   beR=rules["be_r"], trailStartR=rules["trail_start_r"], stopLossUsd=round(stop_loss, 2),
                   instrument=inst, lockR=rules["lock_r"], floorR=rules["floor_r"], lockTrailR=rules["lock_trail_r"],
                   floor=pos["floor"], holdUntil=hold_until, holdActive=pos["hold_active"],
+                  comision=dict(com), feeOpen=round(pos["fee_open"], 4),
                   **({"descartado": list(rules["dropped"])} if rules["dropped"] else {}))
         pos["exec"] = ex
         self.positions[story] = pos
@@ -1126,6 +1206,7 @@ class PaperBroker:
                      else " · perpetuo: funding cada 8 h (sin tasa aún)")
         self._event("filled", "exec", story, coin, f"{'Comprado' if d > 0 else 'Vendido'} {_qty(coin, qty)} {coin} a {_px(px)}",
                     f"Deslizamiento {_n(slip, 1)} pb · latencia {_n(ex['ms'], 0)} ms · nominal {_n(notional, 0)} {config.QUOTE}"
+                    f" · comisión de entrada {_n(pos['fee_open'])} {config.QUOTE} ({_n(com['tomador'])} % tomador)"
                     f" · riesgo {_n(pos['riskUsd'])} {config.QUOTE} ({_n(stop_loss)} con costes) · stop {_px(sl)}" + plan,
                     {"exec": dict(ex), "trade_id": pos["id"]}, now)
         log.info("Paper: %s %s %.6f a %.4f (%s)", side, coin, qty, px, story)
@@ -1200,14 +1281,15 @@ class PaperBroker:
             if self._partial(p, now):   # parcial del 100 %: ya está cerrada
                 return
         why = exit_px = None
-        if p["tp2"] and d * (px - p["tp2"]) >= 0:
-            why, exit_px = f"Objetivo ({_n(p['tp2R'], 1)} R)", p["tp2"]   # orden límite: sale al precio del objetivo
+        limite = False
+        if p["tp2"] and d * (px - p["tp2"]) >= 0:   # orden límite: sale al precio del objetivo y paga como creador
+            why, exit_px, limite = f"Objetivo ({_n(p['tp2R'], 1)} R)", p["tp2"], True
         elif d * (px - p["sl"]) <= 0:
             why, exit_px = STOP_NAMES.get(p["sl_kind"], "Stop"), self._exit_px(p, px)
         elif now >= p["hold_until"]:
             why, exit_px = f"Cierre por tiempo ({p['hold_label']})", self._exit_px(p, px)
         if why:
-            self._close(p, exit_px, why, now)
+            self._close(p, exit_px, why, now, limite)
 
     def _funding(self, p: dict, px: float, now: int) -> None:
         """Perpetuo: en cada liquidación pasada desde la última, cobra o paga el funding sobre el nominal a precio de
@@ -1245,14 +1327,14 @@ class PaperBroker:
         d, coin, px = self._dir(p["side"]), p["coin"], p["tp1"]
         q = min(p["qty"], p["qty0"] * p["tp1_frac"])
         if q >= p["qty"] * (1 - 1e-9):
-            self._close(p, px, f"Objetivo ({_n(p.get('tp1R') or 0.0, 1)} R)", now)
+            self._close(p, px, f"Objetivo ({_n(p.get('tp1R') or 0.0, 1)} R)", now, limite=True)
             return True
-        fee = q * px * config.FEE_PCT / 100
+        fee = q * px * self._tasas(p)["creador"] / 100   # orden límite: creador
         net = d * (px - p["entry"]) * q - fee
         p["qty"] -= q
         p["realized"] = p.get("realized", 0.0) + net
         p["fees_exit"] = p.get("fees_exit", 0.0) + fee
-        part = {"qty": q, "px": px, "at": now, "pnl": round(net, 4), "fee": round(fee, 4),
+        part = {"qty": q, "px": px, "at": now, "pnl": round(net, 4), "fee": round(fee, 4), "tipo": "creador",
                 "why": f"Objetivo parcial ({_n(p.get('tp1R') or 0.0, 1)} R)"}
         part["R"] = round(net / p["riskUsd"], 4) if p.get("riskUsd") else None   # en R de la posición entera
         part["tp1R"] = p.get("tp1R")
@@ -1276,12 +1358,69 @@ class PaperBroker:
         self._save_trade(p)
         return False
 
-    def _close(self, p: dict, exit_px: float, why: str, now: int) -> dict:
-        """Cierra lo que queda. pnl, comisiones y R incluyen las salidas parciales; qty es la inicial y exit, el precio
-        medio de todas las salidas (así pnl = ±(exit − entry) × qty − comisiones también con parciales)."""
+    @staticmethod
+    def _tasas(p: dict) -> dict:
+        """Tasas con que se abrió la posición (en % por lado). Una abierta antes de las comisiones por perfil pagó
+        config.FEE_PCT en los dos lados y sigue así."""
+        c = p.get("comision")
+        if isinstance(c, dict) and _f(c.get("tomador")) is not None:
+            return {"perfil": c.get("perfil"), "tomador": _f(c["tomador"]),
+                    "creador": _f(c.get("creador"), _f(c["tomador"]))}
+        return {"perfil": None, "tomador": config.FEE_PCT, "creador": config.FEE_PCT}
+
+    @staticmethod
+    def _costes(entrada: float, salidas: float, funding: float, risk: float | None, perfil: str | None) -> dict:
+        """Costes de una operación en USDC y en R: comisión de entrada y de salidas, funding (+ cobrado, − pagado) y
+        total = comisiones − funding (lo que costó)."""
+        comm = entrada + salidas
+        total = comm - funding
+        out = {"perfil": perfil, "entrada": round(entrada, 4), "salidas": round(salidas, 4), "comisiones": round(comm, 4),
+               "funding": round(funding, 4), "total": round(total, 4)}
+        for k, v in (("entrada", entrada), ("salidas", salidas), ("funding", funding), ("total", total)):
+            out[f"{k}_R"] = round(v / risk, 4) if risk else None
+        return out
+
+    def _costes_pos(self, p: dict, px: float) -> dict:
+        """Costes de una posición abierta: los ya pagados (entrada, parciales y funding), lo que costaría salir ahora a
+        mercado con lo que queda (tomador, sin el deslizamiento) y lo que costaría salir en el objetivo (creador)."""
+        tas = self._tasas(p)
+        out = self._costes(p["fee_open"], p.get("fees_exit", 0.0), p.get("funding", 0.0), p.get("riskUsd"),
+                           tas["perfil"])
+        salir = p["qty"] * px * tas["tomador"] / 100
+        out.update(tomador=tas["tomador"], creador=tas["creador"], salir_ahora=round(salir, 4),
+                   salir_ahora_R=round(salir / p["riskUsd"], 4) if p.get("riskUsd") else None,
+                   objetivo=round(p["qty"] * p["tp2"] * tas["creador"] / 100, 4) if p.get("tp2") else None)
+        return out
+
+    def _costes_trade(self, t: dict) -> dict:
+        """Costes de una operación cerrada; las cerradas antes de las comisiones por perfil no los traen y se sacan de
+        lo que guardaron (pagaron config.FEE_PCT a la entrada): van con «estimado»."""
+        if isinstance(t.get("costes"), dict):
+            return t["costes"]
+        fund = _f(t.get("funding"), 0.0) or 0.0
+        comm = _f(t.get("commissions"))
+        comm = (_f(t.get("fees"), 0.0) or 0.0) + fund if comm is None else comm
+        entrada = min(comm, (_f(t.get("notional"), 0.0) or 0.0) * config.FEE_PCT / 100)
+        out = self._costes(entrada, comm - entrada, fund, _f(t.get("riskUsd")), None)
+        out["estimado"] = True
+        return out
+
+    def _con_costes(self, t: dict) -> dict:
+        """La operación cerrada con «costes» y «bruto» (sin tocar la guardada)."""
+        if isinstance(t.get("costes"), dict) and "bruto" in t:
+            return t
+        c = self._costes_trade(t)
+        return {**t, "costes": c, "bruto": round((_f(t.get("pnl"), 0.0) or 0.0) + c["total"], 4)}
+
+    def _close(self, p: dict, exit_px: float, why: str, now: int, limite: bool = False) -> dict:
+        """Cierra lo que queda (limite: con una orden límite, el objetivo, que paga como creador; si no, a mercado, como
+        tomador). pnl, comisiones y R incluyen las salidas parciales; qty es la inicial y exit, el precio medio de todas
+        las salidas (así pnl = ±(exit − entry) × qty − comisiones también con parciales)."""
         d, qty = self._dir(p["side"]), p["qty"]
         parts = p.get("partials") or []
-        comm = p["fee_open"] + p.get("fees_exit", 0.0) + qty * exit_px * config.FEE_PCT / 100
+        tas = self._tasas(p)
+        fee_last = qty * exit_px * tas["creador" if limite else "tomador"] / 100
+        comm = p["fee_open"] + p.get("fees_exit", 0.0) + fee_last
         fund = p.get("funding", 0.0)
         fees = comm - fund   # el funding pagado suma a los costes y el cobrado resta (contrato 3.2)
         q_all = qty + sum(x["qty"] for x in parts)
@@ -1309,6 +1448,10 @@ class PaperBroker:
         if p.get("tags"):
             trade["tags"] = p["tags"]
         trade.update(instrument=p.get("instrument") or "spot", funding=round(fund, 4), commissions=round(comm, 4))
+        trade["costes"] = self._costes(p["fee_open"], p.get("fees_exit", 0.0) + fee_last, fund, p["riskUsd"],
+                                       tas.get("perfil"))
+        trade["costes"]["salida_tipo"] = "creador" if limite else "tomador"
+        trade["bruto"] = round(pnl + fees, 4)   # antes de comisiones y funding (con el deslizamiento en los precios)
         del self.positions[p["story"]]
         self.closed.append(trade)
         self._save_trade(trade, now)
@@ -1317,11 +1460,14 @@ class PaperBroker:
                   "fees": trade["fees"], "opened": trade["opened"], "closedAt": now, "riskUsd": trade["riskUsd"],
                   "notional": trade["notional"], "headline": trade["headline"], "strategy": trade["strategy"],
                   "window": trade["window"]}
+        result["costes"] = dict(trade["costes"])
+        result["bruto"] = trade["bruto"]
         fund_t = (f" (con funding {_sg(fund)} {config.QUOTE} de {p.get('funding_n', 0)} liquidaciones)"
                   if p.get("instrument") == "perp" else "")
         self._event("closed", "exec", p["story"], p["coin"], f"{p['coin']} cerrada: {_sg(pnl)} {config.QUOTE}",
-                    f"{why} · {_sg(R)} R · comisiones {_n(fees)} {config.QUOTE}{fund_t}",
-                    {"result": result, "trade_id": trade["id"]}, now, tone="good" if pnl >= 0 else "bad")
+                    f"{why} · {_sg(R)} R · comisiones {_n(fees)} {config.QUOTE}{fund_t} · bruto {_sg(pnl + fees)} "
+                    f"{config.QUOTE}", {"result": result, "trade_id": trade["id"]}, now,
+                    tone="good" if pnl >= 0 else "bad")
         log.info("Paper: cerrada %s %s (%s): %.2f %s", p["coin"], p["story"], why, pnl, config.QUOTE)
         self._exec_status()
         return trade
@@ -1463,20 +1609,24 @@ class PaperBroker:
                 "hold_label": p.get("hold_label"), "qty0": round(p.get("qty0") or p["qty"], 8),
                 "lock_r": p.get("lock_r"), "floor_r": p.get("floor_r"), "lock_trail_r": p.get("lock_trail_r"),
                 "locked": bool(p.get("locked")), "floor": p.get("floor"), "hold_active": p.get("hold_active"),
-                "sl_kind": p.get("sl_kind")})
+                "sl_kind": p.get("sl_kind"),
+                # Costes (comisiones por perfil): entrada, salidas, funding, total y lo que costaría salir ahora.
+                "costes": self._costes_pos(p, px)})
         return {"type": "portfolio", "ts": now, "equity": round(eq, 2), "start_equity": self.start_equity,
                 "day_pnl": round(pnl, 2), "day_pnl_pct": round(pct, 3), "positions": positions,
                 "pending": [{"story": i["story"], "deadline": i["deadline"], "mode": i["mode"],
                              "coin": i["ticket"]["coin"], "side": i["ticket"]["side"]} for i in self.pending.values()],
                 "scheduled": [{"story": i["story"], "at": i["at"], "expires": i["expires"],
                                "coin": i["ticket"]["coin"], "side": i["ticket"]["side"]} for i in self.scheduled.values()],
-                "closed": list(reversed(self.closed[-CLOSED_IN_PORTFOLIO:])),
+                "closed": [self._con_costes(t) for t in reversed(self.closed[-CLOSED_IN_PORTFOLIO:])],
                 "limits": {"risk_per_trade_pct": config.RISK_PER_TRADE_PCT, "max_daily_loss_pct": config.MAX_DAILY_LOSS_PCT,
                            "max_positions": config.MAX_POSITIONS, "day_loss_pct": round(max(0.0, -pct), 3),
                            "halted": bool(self.halt_until), "halt_until": self.halt_until or None},
                 "mode": self.mode,
                 # Parada manual (halt / resume desde la web); limits.halted es la pausa por pérdida diaria.
-                "halted": bool(self.halted), "caps": list(CAPS), "cuenta": self.cuenta}
+                "halted": bool(self.halted), "caps": list(CAPS), "cuenta": self.cuenta,
+                # Perfil de comisiones en uso (bot/comisiones.py): tasas, si hay cortos y el aviso sin X-Perps.
+                "comisiones": comisiones.vista()}
 
     def publish_portfolio(self, now: int | None = None, force: bool = False) -> bool:
         """Publica «portfolio» solo si ha cambiado algo además de la hora."""
@@ -1491,7 +1641,7 @@ class PaperBroker:
     def results(self) -> dict:
         """Operaciones cerradas y agregados para GET /api/resultados (contrato 3.2)."""
         start = self.start_equity
-        trades = sorted(self.closed, key=lambda t: t["closed"])
+        trades = sorted((self._con_costes(t) for t in self.closed), key=lambda t: t["closed"])
 
         def agg(key: str) -> list[dict]:
             groups: dict[str, dict] = {}
@@ -1522,6 +1672,15 @@ class PaperBroker:
             daily.append({"date": d, "pnl": round(x["pnl"], 2), "pnl_pct": round(x["pnl"] / base * 100, 3) if base else 0.0,
                           "n": x["n"]})
             base += x["pnl"]
+        comm = sum(t["costes"]["comisiones"] for t in trades)
+        fund = sum(t["costes"]["funding"] for t in trades)
+        neto = sum(t["pnl"] for t in trades)
         return {"start_equity": start, "cuenta": self.cuenta, "equity": round(self.equity(), 2), "trades": list(reversed(trades)),
                 "by_strategy": agg("strategy"), "by_window": agg("window"), "by_coin": agg("coin"),
-                "equity_curve": curve, "daily": daily}
+                "equity_curve": curve, "daily": daily,
+                # Comisiones en el sistema: lo pagado en comisiones, el funding (+ cobrado, − pagado), el resultado
+                # bruto (antes de comisiones y funding) y el neto (el de verdad), de las cerradas; y el perfil en uso.
+                "comisiones_total": round(comm, 2), "funding_total": round(fund, 2),
+                "costes_total": round(comm - fund, 2), "bruto": round(neto + comm - fund, 2), "neto": round(neto, 2),
+                "costes_estimados": sum(1 for t in trades if t["costes"].get("estimado")),
+                "comisiones": comisiones.vista()}

@@ -56,7 +56,7 @@ from zoneinfo import ZoneInfo
 
 import aiohttp
 
-from . import config, paper, reflejo, regions
+from . import comisiones, config, paper, reflejo, regions
 from .models import now_ms
 
 log = logging.getLogger("apertura")
@@ -877,7 +877,15 @@ def session_case(coin: str, d: int, open_ms: int, bars: list, vol_sum=None, prev
     """Primera ruptura de una sesión pasada que cumple la misma regla (CoinRun con dirección d) y su resultado con el
     mismo plan: entrada en la apertura de la vela siguiente, puerta R:R desde ahí y simulate_plan. Si la puerta R:R la
     rechaza, se sigue buscando como en vivo. None si no hubo ruptura válida o faltan velas (de la sesión o de antes:
-    pre_coverage_ok, como en el backtest)."""
+    pre_coverage_ok, como en el backtest). Todo con la comisión que cobra simulate_plan (fee, por defecto
+    config.FEE_PCT): la puerta R:R, el suelo del stop, el objetivo y la regla del 3 % neto no miran el perfil del bot
+    (comisiones.costes_de_backtest), como en backtest_aperturas."""
+    with comisiones.costes_de_backtest(None if fee is None else fee * 100):
+        return _session_case(coin, d, open_ms, bars, vol_sum, prev_opens, params, fee, slip)
+
+
+def _session_case(coin: str, d: int, open_ms: int, bars: list, vol_sum, prev_opens: list[int] | None,
+                  params: dict | None, fee: float | None, slip: float | None) -> dict | None:
     p = _params(params)
     slip = paper.COST_SLIP_BPS / 1e4 if slip is None else slip
     i0 = bar_index(bars, open_ms)
@@ -1943,7 +1951,7 @@ def impulse_plan(d: int, entry: float, params: dict | None = None, funding_pct: 
     lock, floor = (p["lock_r"], p["floor_r"]) if p.get("lock_r") else (None, None)
     stop = entry * (1 - d * sl / 100)
     tgt = entry * (1 + d * sl * R / 100) if R else None
-    cost = paper.cost_rt_pct()
+    cost = paper.cost_rt_pct(instrument)   # con el perfil de comisiones en uso (bot/comisiones.py)
     perp = instrument == "perp"
     fund = expected_funding_pct(d, funding_pct, p["avg_hold_h"]) if perp else 0.0
     hold_lock = p.get("max_hold_active_h") or p["avg_hold_h"]   # el suelo solo se cobra con el cerrojo activado
@@ -3149,6 +3157,11 @@ class OpeningEngine:
             return self._no_entra(w, coin, now, "moneda_ocupada")
         d, tags = act["dir"], act["tags"]
         inst = impulse_instrument(d, self.p)
+        if (d < 0 or inst == "perp") and not comisiones.hay_cortos():   # sin cuenta X-Perps: ni cortos ni perpetuos
+            why = (f"sin cuenta X-Perps no hay cortos ni perpetuos (perfil de comisiones "
+                   f"«{comisiones.perfil()['nombre']}»)")
+            run.on_rejected(now, why)
+            return self._no_entra(w, coin, now, "sin_cortos", {"comisiones": comisiones.activo()})
         entry = self._live_price(coin, now) or act["price"]
         plan = impulse_plan(d, entry, self.p, self._funding_now(coin), inst, (run.ctx or {}).get("atr_h_pct"))
         w["plans"][coin] = {k: plan[k] for k in ("stopPct", "tp2R", "rr", "ok", "why", "instrument", "gross_pct",

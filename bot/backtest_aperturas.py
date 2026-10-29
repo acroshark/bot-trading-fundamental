@@ -46,7 +46,7 @@ from zoneinfo import ZoneInfo
 
 import aiohttp
 
-from . import apertura, config, history, paper, regions
+from . import apertura, comisiones, config, history, paper, regions
 from .apertura import C, HI, LO, MIN, O, PRE_MIN, T, V
 from .models import now_ms
 
@@ -538,7 +538,7 @@ def window_excursion(bars: list, j: int, i_end: int, d: int, entry: float, stop_
     """Desde la entrada hasta el fin de la ventana, sin salidas: MFE y MAE (%) y si llegó a +3 % neto antes de tocar el
     stop inicial (1/0; una vela que toca los dos cuenta como stop)."""
     stop = entry * (1 - d * stop_pct / 100)
-    lvl = entry * (1 + d * (TARGET_PCT + paper.cost_rt_pct()) / 100)
+    lvl = entry * (1 + d * (TARGET_PCT + COST_RT_PCT) / 100)   # los costes del backtest (config.FEE_PCT), no el perfil
     best = worst = entry
     hit, alive = 0, True
     for k in range(j, i_end):
@@ -576,7 +576,14 @@ def run_coin(args: tuple) -> dict:
     las rupturas (apertura, ventana) que se perdieron porque otra ventana ocupaba la moneda.
     Una sola posición por moneda entre ventanas solapadas, por orden de ENTRADA como en vivo: entra la primera
     ruptura de cualquiera de ellas; las de las demás que llegan con la posición abierta se rechazan y se sigue
-    buscando tras su salida (find_entry con busy_until)."""
+    buscando tras su salida (find_entry con busy_until).
+    Con la comisión del backtest (fee, por lado) también en lo que mira el perfil de comisiones del bot (puerta R:R,
+    suelo del stop, objetivo, regla del 3 % neto): comisiones.costes_de_backtest."""
+    with comisiones.costes_de_backtest(args[6] * 100):
+        return _run_coin(args)
+
+
+def _run_coin(args: tuple) -> dict:
     coin, paths, openings, chain, combos, wids, fee, slip, with_gate, with_eff = args
     t0 = time.time()
     s = load_series(paths)

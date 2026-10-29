@@ -553,3 +553,28 @@ def test_motivos_por_ventana_fuera_de_muestra():
     out = bt.window_blocks([{"lost": lost}], 0, 0, 0, {"rows": rows, "sim": sim}, ["europa", "nuevayork"], T0 - 1)
     assert out == [{"window": "europa", "found": 4, "taken": 3, "busy": 0, "day_limit": 0, "account": 1},
                    {"window": "nuevayork", "found": 1, "taken": 0, "busy": 1, "day_limit": 1, "account": 0}]
+
+
+def test_el_backtest_no_mira_el_perfil_de_comisiones_del_bot(monkeypatch):
+    """El backtest cobra FEE por lado (config.FEE_PCT) y con esa misma comisión van la puerta R:R, el suelo del stop, el
+    objetivo y la regla del 3 % neto (comisiones.costes_de_backtest): con el perfil sin X-Perps elegido en el bot
+    (0,74 % de ida y vuelta), session_case da lo mismo que con el de siempre, y run_coin corre con los costes del
+    backtest. Fuera del bloque, el bot sigue con su perfil."""
+    from bot import comisiones, paper
+    p = {**bt.make_combo("or_mid", None, "3pct", 0.0, 1, range_min=5, rvol_min=1.5)["params"], "max_cost_r": 0.25}
+    bars = past_session(T0, True)
+    base = ap.session_case("SOL", 1, T0, bars, None, [], p, FEE, SLIP)
+    assert base is not None
+    comisiones.elegir(comisiones.SIN_XPERPS)
+    assert ap.session_case("SOL", 1, T0, bars, None, [], p, FEE, SLIP) == base
+    assert ap._session_case("SOL", 1, T0, bars, None, [], p, FEE, SLIP) != base   # sin el bloque, mezclaría costes
+    assert comisiones.activo() == comisiones.SIN_XPERPS and paper.cost_rt_pct() == pytest.approx(0.74)
+    with comisiones.costes_de_backtest(FEE * 100):
+        assert comisiones.activo() == comisiones.BACKTEST and comisiones.hay_cortos()
+        assert paper.cost_rt_pct() == pytest.approx(bt.COST_RT_PCT) == pytest.approx(paper.cost_rt_pct("perp"))
+        assert ap.stop_floor_pct(p) == pytest.approx(bt.COST_RT_PCT / 0.25)
+    assert comisiones.activo() == comisiones.SIN_XPERPS
+    seen = []
+    monkeypatch.setattr(bt, "_run_coin", lambda args: seen.append((comisiones.activo(), paper.cost_rt_pct())) or {})
+    assert bt.run_coin(("SOL", [], [], None, [], [], FEE, SLIP, False, False)) == {}
+    assert seen == [(comisiones.BACKTEST, pytest.approx(bt.COST_RT_PCT))]

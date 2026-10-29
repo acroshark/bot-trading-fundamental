@@ -737,3 +737,45 @@ ya capta) y de datos (liquidaciones, funding, flujos de ETF).
 La mejor elegida dentro (stop 3 %, todo sale en 1,5R, 24 h) gana el 44 % y pierde el 56 % (0,79 ganadas por perdida),
 −0,059 R fuera de muestra, −0,13 % de la cuenta por jornada. Ninguna variante da más ganadas que perdidas. La A
 (sección 21) gana el 39 % y da −0,075 R fuera.
+
+
+## 23. Comisiones en el sistema y modo real preparado (29-10-2026)
+
+**Qué pidió el usuario.** «Las comisiones debes incluirlas en este sistema, no vale solo con que me las menciones». Y,
+de momento, solo una conexión sin fondos para ver las gráficas reales de OKX; el modo real, preparado y apagado.
+
+**Comisiones (`bot/comisiones.py`).** Dos perfiles, de la ayuda oficial de OKX EU (docs/06, apartado 4):
+
+| Perfil | Contado (creador / tomador) | X-Perps (creador / tomador) | Cortos | Coste de ida y vuelta de la regla |
+|---|---|---|---|---|
+| `okx_eu_con_xperps` (por defecto, lo de antes) | 0,08 % / 0,10 % | 0,02 % / 0,05 % | sí | 0,24 % contado, 0,14 % X-Perps |
+| `okx_eu_sin_xperps` | 0,20 % / 0,35 % | — | **no** | 0,74 % |
+
+- El paper cobra la de **tomador** en la entrada, el stop y los cierres a mercado, y la de **creador** en el objetivo y la
+  parcial (órdenes límite). Antes cobraba 0,10 % en todo, también en los perpetuos. Con el perfil por defecto los largos
+  al contado pagan lo mismo a la entrada y en el stop y algo menos en el objetivo; los cortos en X-Perps, la mitad.
+- La regla del 3 % neto (paper, motor y evolución) usa el tomador en los dos lados y 2 pb por lado: por el lado seguro.
+- Sin cuenta X-Perps no hay cortos: el motor no los envía (`sin_cortos`) y el paper los veta. El contado cuesta 3,5 veces
+  más. Cuentas rápidas, sin backtest nuevo: con «6 diarias» (stop 1,5 %) cada operación costaría ≈ 0,49 R en vez de
+  ≈ 0,16 R; si el resto no cambiara, los −0,12 R por operación del backtest pasarían a ≈ −0,45 R (sin contar que
+  desaparecen los cortos). Con «6 diarias v2» (stop 2 %), ≈ 0,37 R en vez de ≈ 0,12 R.
+- Cada operación lleva sus costes (entrada, salidas, funding y total, en USDC y en R) y el bruto; Resultados, las
+  comisiones pagadas, el funding, el bruto y el neto; la cartera, el perfil en uso y lo que costaría salir.
+- Si el usuario pone claves, el conector lee la comisión real de su cuenta en solo lectura y manda esa (perfil `cuenta`).
+- Los backtests siguen calculados con 0,10 % por lado y 2 pb (el perfil con X-Perps): cada resumen lo dice.
+
+**Velas de OKX EU.** La gráfica de cada operación usa las velas reales del par que se operaría (`BTC-USDC`…, al
+contado), de las rutas públicas de `eea.okx.com` (sin claves; comprobado con un GET público el 29-10-2026). Si OKX
+falla, las del bot (Binance) y lo dice.
+
+**Modo real: preparado y apagado.** `RealBroker` está enganchado (arranque, `GET /api/real`, `cuenta_real`, mandos con
+el origen estricto de la web), pero sin `okx.env` no hace ninguna petición privada y los tickets van al paper
+(`BOT_BROKER=paper`). No se ha enviado ninguna petición firmada ni ninguna orden. Los WebSocket públicos de OKX pasan
+del puerto 8443, que OKX retira, al 443.
+
+**Revisión del 29-10-2026 (arreglos):**
+- **El perfil se vuelve a mirar al ejecutar.** Una orden pendiente (veto o a mano) o programada que se aceptó con un perfil no se abre si al ejecutarse el perfil ya no la admite (un corto sin X-Perps, o un objetivo que con el coste nuevo deja menos del 3 % neto): `blocked`, `sin_cortos` o `reglas`.
+- **Los backtests no miran el perfil del bot.** `backtest_aperturas.run_coin` y `apertura.session_case` corren dentro de `comisiones.costes_de_backtest()`: la puerta R:R, el suelo del stop, el objetivo y la regla del 3 % neto van con 0,10 % por lado, lo mismo que cobran. Antes, con el perfil sin X-Perps elegido, las puertas usaban 0,74 % y el resultado 0,10 %.
+- **Una errata en `BOT_COMISIONES`** usa el perfil más caro (sin X-Perps) y la web lo avisa.
+- **La comisión de la demo de OKX no pasa al paper**, y los cortos del perfil `cuenta` dependen de que la cuenta tenga X-Perps, no del modo de posición que necesita el conector.
+- **Tu regla ≥ 2:1 se mide en R de precio, antes de costes.** En dinero, después de costes, la horquilla de «6 diarias» (stop 1,5 %, objetivo 3R) gana ≈ 2,5 por cada 1 que pierde con X-Perps (objetivo 4,5 % − 0,10 − 0,08 − 0,02 = 4,30 %; stop 1,5 % + 0,20 + 0,04 = 1,74 %) y ≈ 1,8 sin ellas (3,93 % frente a 2,24 %): sin X-Perps queda por debajo de 2:1 en dinero. No se ha cambiado la regla: falta que decidas si el 2:1 es bruto (como ahora) o neto. La web lo enseña en «Comisiones del paper».

@@ -79,7 +79,7 @@ async def test_ruta_con_seis(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "BACKTEST_DIR", tmp_path)
     store = Store(tmp_path / "bot.db")
     (tmp_path / rb.SEIS_FILE).write_text(json.dumps(_seis()), encoding="utf-8")
-    assert set(rb.load()) == {"impulso", "lab", "seis", "seis2"}
+    assert set(rb.load()) == {"impulso", "lab", "seis", "seis2", "costes"}   # costes: con qué comisiones
     async with TestClient(TestServer(make_app(Bus(store), lambda: {}))) as client:
         r = await client.get("/api/backtest/impulso")   # solo con «6 diarias» ya responde
         assert r.status == 200
@@ -131,7 +131,7 @@ async def test_seis2_en_la_ruta_y_en_la_demostracion(tmp_path, monkeypatch):
     store = Store(tmp_path / "bot.db")
     (tmp_path / rb.SEIS2_FILE).write_text(json.dumps(_seis2()), encoding="utf-8")
     res = rb.load()
-    assert set(res) == {"impulso", "lab", "seis", "seis2"} and res["seis"] is None
+    assert set(res) == {"impulso", "lab", "seis", "seis2", "costes"} and res["seis"] is None
     s2 = res["seis2"]
     assert s2["nombre"] == "6 diarias v2" and s2["params"]["lock_r"] == 3.0 and s2["params"]["target_r"] is None
     assert s2["fuera"]["salidas"]["cerrojo"] == 57 and len(s2["fuera"]["curva_R"]) == rb.CURVE_POINTS + 1
@@ -180,3 +180,27 @@ def test_cuentas_por_operacion_con_la_curva_completa():
     assert f["ganadoras_bajo_2R"] == 90 and f["ganadoras_bajo_1R"] == 60 and len(f["curva_R"]) == 51
     assert "max_R" not in s["dentro"] and "ganadoras_n" not in s["dentro"]   # 5 puntos para 7 operaciones: no se sabe
     assert rb.per_trade([], 0) == {} and rb.per_trade(curva, None) == {}
+
+
+def test_cada_resumen_dice_con_que_comisiones_esta_calculado():
+    """Las réplicas del motor van con config.FEE_PCT (0,10 % por lado, también en perpetuos) y 2 pb: el perfil «OKX EU
+    con cuenta X-Perps» (tomador del contado); el laboratorio, con las de su archivo. Y el aviso de sin X-Perps."""
+    s = rb.impulso_summary(_impulso(), points=50)
+    c = s["costes"]
+    assert c["perfil"] == "okx_eu_con_xperps" and c["comision_pct"] == 0.10 and c["deslizamiento_bps"] == 2.0
+    assert c["coste_rt_pct"] == 0.24 and "0,10 % de comisión por lado (también en los perpetuos)" in c["texto"]
+    assert "0,35 %" in c["aviso"] and "no hay cortos" in c["aviso"] and c["perfil_en_uso"] == "okx_eu_con_xperps"
+    lab = rb.lab_summary({"params": {"fee_pct": 0.1, "slip_bps": 2.0, "fee_perp_pct": 0.05}})
+    assert lab["costes"]["comision_perp_pct"] == 0.05 and "perpetuos 0,05 %" in lab["costes"]["texto"]
+    caro = rb.costes(0.35)
+    assert caro["perfil"] is None and caro["coste_rt_pct"] == 0.74 and "X-Perps»" not in caro["texto"]
+
+
+async def test_ruta_impulso_lleva_los_costes(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "BACKTEST_DIR", tmp_path)
+    (tmp_path / "impulso_7d.json").write_text(json.dumps(_impulso()), encoding="utf-8")
+    store = Store(tmp_path / "bot.db")
+    async with TestClient(TestServer(make_app(Bus(store), lambda: {}))) as client:
+        d = await (await client.get("/api/backtest/impulso")).json()
+        assert d["costes"]["perfil"] == "okx_eu_con_xperps" and d["impulso"]["costes"]["comision_pct"] == 0.1
+    store.close()

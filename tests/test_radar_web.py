@@ -396,7 +396,7 @@ def test_expediente_sin_objetivo_final_ni_promesas():
 
 def test_simulacion_pinta_todas_las_pestanas():
     """La demostración (sin bot) arranca y pinta todas las pestañas sin errores; cerrar una posición funciona."""
-    r = run("""for (const t of ["live", "world", "mando", "pred", "trades", "results", "bt", "market", "evo", "ai"]) H.fire("click", {"data-tab": t});
+    r = run("""for (const t of ["live", "world", "mando", "pred", "trades", "results", "real", "bt", "market", "evo", "ai"]) H.fire("click", {"data-tab": t});
       S.tab = "world"; renderAll(true);
       const p = S.positions[0]; if (p) userClose(p.id);
       H.elFire("#killBtn", "click", {});
@@ -1260,6 +1260,7 @@ def test_backtest_muestra_la_estrategia_en_marcha_y_el_laboratorio():
     assert "+0,53 R" in live and "+0,10 R" in live and "Variante elegida &lt;b&gt;después&lt;/b&gt;" in live
     assert "E2 &lt;i&gt;" in lb and "la opera el motor" in lb and "<small>Probadas</small><b>2000" in lb and "lista congelada el 2026-10-26" in lb
     assert "<b>68 de 1358</b><span>por puro azar se esperan unas 68" in lb
+    assert "<b>Comisiones del backtest:</b> 0,10 % por lado y 2 pb de deslizamiento" in lb   # también el laboratorio lo dice
     assert "no trae el backtest del motor" in r["vacio"] and "no trae el laboratorio" in r["vacioLab"]
     _sin_null(live, lb)
     if 'id="impulsoData"' in page and 'id="labData"' in page:   # el incrustado real también se pinta sin huecos
@@ -2554,12 +2555,13 @@ const nVelas = () => H.fetches.filter(u => String(u).startsWith("/api/velas")).l
 
 
 def test_grafica_de_cada_posicion_con_las_velas_del_bot_y_en_vivo():
-    """En «En posición», justo debajo de cada operación abierta, su gráfica: velas del bot (GET /api/velas, una petición
-    por minuto) desde un poco antes de la entrada, el punto de la entrada, las líneas del stop, de la parcial en 3R y de la
+    """En «En posición», justo debajo de cada operación abierta, su gráfica: velas de OKX EU del par que se operaría
+    (GET /api/velas?fuente=okx, una petición por minuto) desde un poco antes de la entrada, el punto de la entrada, las líneas del stop, de la parcial en 3R y de la
     entrada, el precio de ahora y las cifras (ganancia de ahora en % y R, distancia al stop y a la parcial y lo que daría
     cada una). Se mueve con el precio en vivo; en el expediente sale más grande, con el suelo del cerrojo y el plazo."""
     r = run(FIAB + SEIS2 + GRAF + """H.open(); reset();
-      H.fetchReply = url => url.startsWith("/api/velas") ? velasOk({coin: "BTC", tf: "1m", velas: [...BARS, [now, null, 1, 1, 1], "x"], hasta_datos: now - 2*M}) : {ok: false};
+      H.fetchReply = url => url.startsWith("/api/velas") ? velasOk({coin: "BTC", tf: "1m", velas: [...BARS, [now, null, 1, 1, 1], "x"], hasta_datos: now - 2*M,
+        fuente: "okx", mercado: "OKX EU", instId: "BTC-USDC"}) : {ok: false};
       H.recv({type: "market", prices: {BTC: 100.4}}, pf({positions: [posA]}));
       S.tab = "trades"; renderAll(true); const antes = colsOf(H.el("#kanban").innerHTML)["En posición"];
       await esperaVelas(); renderAll(true); renderAll(true);
@@ -2573,8 +2575,8 @@ def test_grafica_de_cada_posicion_con_las_velas_del_bot_y_en_vivo():
       S.sel = "a-tok-btc-1"; renderTrace(); const tr = H.el("#trace").innerHTML;
       return {antes, kb, kb2, tr, url, n1, desde: DESDE, he: madHM(T0), rects: [...kb.matchAll(/<rect /g)].length};""")
     kb, kb2, tr = r["kb"], r["kb2"], r["tr"]
-    assert r["url"] == f"/api/velas?coin=BTC&desde={r['desde']}&tf=1m" and r["n1"] == 1   # una sola petición por minuto
-    assert "Cargando las velas del bot" in r["antes"] and '<span class="n">1</span>' in kb
+    assert r["url"] == f"/api/velas?coin=BTC&desde={r['desde']}&tf=1m&fuente=okx" and r["n1"] == 1   # una sola petición por minuto
+    assert "Cargando las velas de OKX EU, BTC-USDC…" in r["antes"] and '<span class="n">1</span>' in kb
     assert '<div class="pwrap"><button type="button" class="ticket" data-story="a-tok-btc-1">' in kb
     assert 'class="pchart" data-story="a-tok-btc-1" title="Abrir el expediente"' in kb and '<svg viewBox="0 0 244 156" role="img"' in kb
     assert "Apertura Tokio · Compra BTC &lt;b&gt;" in kb and "Compra BTC <b>" not in kb
@@ -2584,11 +2586,11 @@ def test_grafica_de_cada_posicion_con_las_velas_del_bot_y_en_vivo():
     assert '<small>Ahora</small><b class="pos">+0,40 %</b> <b class="pos">+0,40 R</b><span>100,40 · +0,20 USDC</span>' in kb
     assert '<small>Al stop</small><b>-2,39 %</b><span>daría <span class="neg">-1,00 R</span> · -0,50 USDC</span>' in kb
     assert '<small>A la parcial 3R</small><b>+5,58 %</b><span>sale la mitad: <span class="pos">+1,50 R</span> · +0,75 USDC</span>' in kb
-    assert "Velas de 3 min del bot y precio en vivo · hora de Madrid" in kb
+    assert "Velas de OKX EU, BTC-USDC, de 3 min y precio en vivo · hora de Madrid" in kb and "del bot" not in kb
     assert '<b class="pos">+1,00 %</b>' in kb2 and ">101,00</text>" in kb2 and "<b>-2,97 %</b>" in kb2   # se mueve con el precio
     assert '<svg viewBox="0 0 540 220" role="img"' in tr and f"Entrada {r['he']} · 100,00" in tr
     for t in ("Parcial 3R 106,00", "Suelo +2R 104,00", "Stop 98,00", "Ahora 101,00", "al menos +2,50 R en total", "cierra como tarde el",
-              "(tope de 24 h &lt;i&gt;)", "sin comisiones ni deslizamiento", "Velas de 1 min del bot"):
+              "(tope de 24 h &lt;i&gt;)", "sin comisiones ni deslizamiento", "Velas de OKX EU, BTC-USDC, de 1 min"):
         assert t in tr, t
     assert 'data-close="a-tok-btc-1"' in tr
     _sin_null(r["antes"], kb, kb2, tr)
@@ -2616,7 +2618,7 @@ def test_grafica_sin_velas_del_bot_404_fallo_cerrojo_y_campos_rotos():
     kb, tr = r["kb"], r["tr"]
     assert '<span class="n">6</span>' in kb and r["wraps"] == 3   # ETH, SOL y la de hora futura; las tres rotas, sin gráfica
     assert "El bot aún no da velas de ETH (la ruta llega al reiniciarlo): precio en vivo desde que abriste la web" in kb
-    assert "No se pudieron leer las velas del bot (se reintenta cada minuto)" in kb
+    assert "No se pudieron leer las velas de OKX EU ni las del bot (se reintenta cada minuto)" in kb
     assert '<small>Ahora</small><b class="pos">+7,00 %</b> <b class="pos">+4,00 R</b>' in kb
     assert '<small>Al stop (sigue)</small><b>+2,15 %</b><span>daría <span class="pos">+2,75 R</span> · +1,38 USDC</span>' in kb
     assert '<small>Cobrado</small><b class="pos">+1,50 R</b><span>la mitad en 3R · el resto corre sin objetivo</span>' in kb
@@ -2657,3 +2659,353 @@ def test_grafica_en_la_demostracion_con_velas_simuladas_coherentes():
     assert kb.count('<div class="pwrap">') == kb.count("Motor «6 diarias v2»") + r["sims"]
     assert "Ejemplo: velas simuladas de" in kb and "del bot" not in kb and kb == r["kb2"]   # el mismo en cada pintado
     _sin_null(kb)
+
+
+# ---------- Comisiones en el sistema, velas de OKX EU y modo real preparado (29-10-2026) ----------
+# Perfil de comisiones como lo manda la cartera (portfolio.comisiones = bot/comisiones.vista) y costes de cada operación
+# (paper._costes: entrada, salidas, funding, total y sus R; en las abiertas, además las tasas y lo que costaría salir).
+COM = r"""
+const vistaCom = (o = {}) => ({perfil: "okx_eu_con_xperps", nombre: "OKX EU con cuenta X-Perps", elegido: "okx_eu_con_xperps", config: "okx_eu_con_xperps",
+  por_defecto: "okx_eu_con_xperps", cuenta: false, spot: {creador: 0.08, tomador: 0.1}, perp: {creador: 0.02, tomador: 0.05}, cortos: true,
+  texto: "contado 0,08 % creador / 0,10 % tomador; X-Perps 0,02 % / 0,05 %; cortos en X-Perps", fuente: "Ayuda oficial de OKX EU",
+  regla_coste_pct: {spot: 0.24, perp: 0.14}, deslizamiento_bps: 2, aviso: "Sin cuenta X-Perps en OKX EU no hay cortos",
+  perfiles: [{id: "okx_eu_con_xperps", nombre: "OKX EU con cuenta X-Perps", cortos: true}, {id: "okx_eu_sin_xperps", nombre: "OKX EU sin cuenta X-Perps", cortos: false}], ...o});
+const SIN = {perfil: "okx_eu_sin_xperps", nombre: "OKX EU sin cuenta X-Perps", elegido: "okx_eu_sin_xperps", spot: {creador: 0.2, tomador: 0.35}, perp: null, cortos: false,
+  regla_coste_pct: {spot: 0.74}};
+const CAPS = ["halt", "cancel", "comisiones"];
+"""
+
+
+def test_comisiones_perfil_con_y_sin_xperps_y_su_selector():
+    """La cartera dice el perfil de comisiones en uso y la web lo enseña claro: tasas de tomador (a mercado) y creador
+    (orden límite), X-Perps, deslizamiento y coste de la regla del 3 % neto, y que sin X-Perps no hay cortos y el contado
+    cuesta 0,35 %. El selector solo sale si el bot admite el mando («comisiones» en caps), pide confirmación, envía
+    {type: "comisiones", perfil} y avisa con «orden_web». Sin X-Perps: sin cortos, también en Mando. Un bot de antes (sin
+    perfil) se ve como 0,10 % por lado; la comisión real de la cuenta, como tal."""
+    r = run(COM + """H.open(); reset();
+      H.recv(pf({caps: CAPS, comisiones: vistaCom({nombre: "OKX EU con cuenta X-Perps <b>"})}));
+      S.tab = "trades"; renderAll(true);
+      const con = H.el("#comBox").innerHTML, opts = H.el("#comSel").innerHTML, selVal = H.el("#comSel").value, selHid = H.el("#comSel").hidden;
+      const sel = H.el("#comSel");
+      H.confirmAnswer = false; sel.value = "okx_eu_sin_xperps"; H.elFire("#comSel", "change", {target: sel});
+      const nada = H.sent().length, vuelve = sel.value;
+      H.confirmAnswer = true; sel.value = "okx_eu_sin_xperps"; H.elFire("#comSel", "change", {target: sel});
+      const t1 = H.el("#toast").textContent, sent = H.sent().slice();
+      H.recv({type: "orden_web", ts: Date.now(), area: "comisiones", accion: "perfil", id: "okx_eu_sin_xperps", ok: true, why: null});
+      const t2 = H.el("#toast").textContent;
+      H.recv(pf({caps: CAPS, comisiones: vistaCom(SIN)})); renderAll(true);
+      const sin = H.el("#comBox").innerHTML;
+      S.tab = "mando"; renderAll(true); const md = H.el("#mdBook").innerHTML;
+      H.recv(pf({caps: ["halt", "cancel"], comisiones: vistaCom()})); S.tab = "trades"; renderAll(true); const hid = H.el("#comSel").hidden, noCap = H.el("#comBox").innerHTML;
+      H.recv(pf({caps: CAPS})); renderAll(true); const viejo = H.el("#comBox").innerHTML, hidV = H.el("#comSel").hidden;
+      H.recv(pf({caps: CAPS, comisiones: vistaCom({perfil: "cuenta", cuenta: true, elegido: "okx_eu_con_xperps", nombre: "Comisión real de tu cuenta de OKX EU (leída en solo lectura)",
+        spot: {creador: 0.08, tomador: 0.1}, perp: null, cortos: false, por_que: "Sin cortos: tu cuenta no tiene X-Perps"})})); renderAll(true);
+      const cuenta = H.el("#comBox").innerHTML, cselVal = H.el("#comSel").value;
+      H.recv(pf({caps: CAPS, comisiones: vistaCom({...SIN, config: "okx_eu_sin_xperps",
+        aviso_config: "BOT_COMISIONES=okx_eu_sin_xperp no es un perfil conocido (okx_eu_con_xperps o okx_eu_sin_xperps): se usa el más caro, «OKX EU sin cuenta X-Perps». Corrígelo <b>"})}));
+      renderAll(true);
+      return {con, opts, selVal, selHid, nada, vuelve, t1, sent, t2, sin, md, hid, noCap, viejo, hidV, cuenta, cselVal, errata: H.el("#comBox").innerHTML};""")
+    con, sin = r["con"], r["sin"]
+    assert "<b>OKX EU con cuenta X-Perps &lt;b&gt;</b>" in con and "Por defecto (con X-Perps)" in con and "Con cortos (X-Perps)" in con
+    assert "Hasta el 29-10-2026 el paper cobraba 0,10 % en todo; con este perfil, el objetivo y la parcial (orden límite) pagan 0,08 %" in con
+    # La horquilla de «6 diarias» en dinero, después de costes: 2,5:1 con X-Perps y 1,8:1 sin ellas (por debajo de 2:1)
+    assert '<small>«6 diarias» en dinero (stop 1,5 %, 3R)</small><b class="">2,5:1 neto</b>' in con
+    assert "(con X-Perps 2,5:1, sin X-Perps 1,8:1); tu regla ≥ 2:1 se mide en R de precio, antes de costes" in con
+    assert '<b class="neg">1,8:1 neto</b>' in sin and "Hasta el 29-10-2026" not in sin
+    for t in ("<small>Contado · a mercado (tomador)</small><b>0,10 %</b>", "<small>Contado · orden límite (creador)</small><b>0,08 %</b>",
+              "<b>0,05 % / 0,02 %</b>", "<b>2 pb + ½ diferencial</b>", "<b>0,24 % · 0,14 %</b>",
+              "Ojo: sin cuenta X-Perps no hay cortos y el contado cuesta 0,35 %"):
+        assert t in con, t
+    assert 'value="okx_eu_con_xperps"' in r["opts"] and 'value="okx_eu_sin_xperps"' in r["opts"] and 'value="cuenta"' not in r["opts"]
+    assert r["selVal"] == "okx_eu_con_xperps" and r["selHid"] is False
+    assert r["nada"] == 0 and r["vuelve"] == "okx_eu_con_xperps"   # sin confirmar: nada enviado y el selector vuelve
+    assert r["sent"] == [{"type": "comisiones", "perfil": "okx_eu_sin_xperps"}] and "Pendiente de que lo confirme" in r["t1"]
+    assert "Hecho: las comisiones del paper pasan a «OKX EU sin cuenta X-Perps»" in r["t2"]
+    assert "<b>OKX EU sin cuenta X-Perps</b>" in sin and "Sin cortos</span>" in sin and "<b>0,35 %</b>" in sin and "<b>0,20 %</b>" in sin
+    assert "Sin cuenta X-Perps: el motor no abre cortos" in sin and "<b>sin cortos</b>" in sin and "<b>0,74 %</b>" in sin and "Por defecto" not in sin
+    assert "OKX EU sin X-Perps · <span class=\"neg\">sin cortos</span>" in r["md"]
+    assert r["hid"] is True and "aún no admite cambiar el perfil desde la web" in r["noCap"]
+    assert r["hidV"] is True and "0,10 % por lado (el bot aún no dice su perfil)" in r["viejo"] and "aún no publica su perfil" in r["viejo"]
+    assert "Leída de tu cuenta (solo lectura)" in r["cuenta"] and "Manda la comisión real de tu cuenta de OKX" in r["cuenta"]
+    assert "Sin cortos: tu cuenta no tiene X-Perps" in r["cuenta"] and r["cselVal"] == "okx_eu_con_xperps"
+    assert "Solo la de tu cuenta de verdad (OKX_DEMO=0), nunca la de la demo" in r["cuenta"]
+    assert ('<div class="com-warn"><b>Ojo con tu configuración:</b> BOT_COMISIONES=okx_eu_sin_xperp no es un perfil conocido'
+            in r["errata"] and "Corrígelo &lt;b&gt;." in r["errata"] and "Ojo con tu configuración" not in r["con"])
+    _sin_null(con, sin, r["md"], r["noCap"], r["viejo"], r["cuenta"], r["errata"])
+
+
+def test_costes_de_cada_operacion_en_cartera_resultados_y_grafica():
+    """Cada operación del paper lleva sus costes (entrada, salidas, funding y total en USDC y en R): en la tarjeta de la
+    cartera (lo pagado y lo que costaría salir ahora y al stop), en la gráfica («Costes»: lo pagado, al stop a mercado y en
+    la parcial con orden límite), en las cerradas de la cartera y de Resultados (total, R y el desglose con su perfil) y en
+    los KPI de Resultados («Comisiones pagadas» y bruto frente a neto). Un bot de antes, sin totales, se suma de cada
+    operación; una cerrada antes de los perfiles sale como estimada."""
+    r = run(COM + FIAB + SEIS2 + GRAF + """H.open(); reset();
+      H.fetchReply = url => url.startsWith("/api/velas") ? velasOk({coin: "BTC", tf: "1m", velas: BARS, hasta_datos: now - 2*M, fuente: "okx", instId: "BTC-USDC"}) : {ok: false};
+      const costes = {perfil: "okx_eu_con_xperps", entrada: 0.025, salidas: 0, comisiones: 0.025, funding: 0, total: 0.025, entrada_R: 0.05, salidas_R: 0, funding_R: 0,
+        total_R: 0.05, tomador: 0.1, creador: 0.08, salir_ahora: 0.0251, salir_ahora_R: 0.0502, objetivo: null};
+      const pos = {...posA, costes};
+      const cerr = {id: "t1", story: "a-x-eth-9", strategy: "impulso-largo", window: "Europa", coin: "ETH", side: "long", qty: 0.01, entry: 2500, exit: 2650, opened: now - 9*3600e3,
+        closed: now - 3600e3, closedAt: now - 3600e3, reason: "Objetivo (3,0 R)", pnl: 1.44, pnl_pct: 5.8, R: 2.88, fees: 0.046, commissions: 0.046, funding: 0, riskUsd: 0.5, notional: 25,
+        headline: "Compra ETH", instrument: "spot", bruto: 1.486,
+        costes: {perfil: "okx_eu_con_xperps", entrada: 0.025, salidas: 0.0212, comisiones: 0.0462, funding: 0, total: 0.0462, total_R: 0.0924, salida_tipo: "creador"}};
+      const corto = {...cerr, id: "t2", story: "a-x-sol-9", coin: "SOL", side: "short", instrument: "perp", pnl: -0.53, R: -1.06, reason: "Stop de pérdida", fees: 0.02, commissions: 0.025,
+        funding: 0.005, bruto: -0.51, costes: {perfil: "okx_eu_con_xperps", entrada: 0.0125, salidas: 0.0125, comisiones: 0.025, funding: 0.005, total: 0.02, total_R: 0.04}};
+      const viejo = {...cerr, id: "t3", story: "a-x-xrp-9", coin: "XRP", pnl: 0.3, R: 0.6, fees: 0.05, commissions: 0.05, funding: 0, bruto: 0.35,
+        costes: {perfil: null, entrada: 0.025, salidas: 0.025, comisiones: 0.05, funding: 0, total: 0.05, total_R: 0.1, estimado: true}};
+      H.recv({type: "market", prices: {BTC: 100.4}}, pf({caps: CAPS, comisiones: vistaCom(), positions: [pos], closed: [cerr, corto, viejo]}));
+      S.results = {start_equity: 111.37, equity: 112.58, trades: [cerr, corto, viejo], by_strategy: [], by_window: [], by_coin: [], equity_curve: [], daily: [],
+        comisiones_total: 0.12, funding_total: 0.01, costes_total: 0.11, bruto: 1.32, neto: 1.21, costes_estimados: 1, comisiones: vistaCom()};
+      S.tab = "trades"; renderAll(true); await esperaVelas(); renderAll(true);
+      const kb = colsOf(H.el("#kanban").innerHTML)["En posición"], cl = H.el("#closedRows").innerHTML;
+      S.sel = "a-tok-btc-1"; renderTrace(); const tr = H.el("#trace").innerHTML;
+      S.tab = "results"; renderAll(true); renderResults();
+      const k = H.el("#resKpis").innerHTML, rows = H.el("#resRows").innerHTML, rc = H.el("#resCom").innerHTML;
+      S.results = {start_equity: 111.37, equity: 112.58, trades: [cerr, corto], by_strategy: [], by_window: [], by_coin: [], equity_curve: [], daily: []};
+      renderResults(); const k2 = H.el("#resKpis").innerHTML;
+      return {kb, cl, tr, k, rows, rc, k2};""")
+    kb, cl, tr, k, rows = r["kb"], r["cl"], r["tr"], r["k"], r["rows"]
+    # salir ahora (100,4) y al stop (98), con la misma base: 0,25 × precio × (0,10 % tomador + 3 pb de deslizamiento)
+    assert "Costes 0,025 USDC (0,05 R) pagados · salir ahora ≈ 0,033 · al stop ≈ 0,032" in kb
+    assert "<small>Costes</small><b>0,025</b> <b>0,05 R</b><span>pagados · salir ahora ≈ 0,033 · al stop ≈ 0,032 · a la parcial ≈ 0,011 USDC</span>" in kb
+    assert ("pagados (entrada 0,025) · salir ahora ≈ 0,033 · al stop ≈ 0,032 · a la parcial ≈ 0,011 USDC · a mercado (ahora y al stop) "
+            "tomador 0,10 % y deslizamiento; con orden límite (parcial) creador 0,08 %") in tr
+    assert "«Ahora» ya descuenta lo pagado (comisión de entrada, parciales y funding); «al stop» y «al objetivo», sin comisiones" in tr
+    assert "va en «Costes» (perfil OKX EU con X-Perps)" in tr and "USDC sin comisiones ni deslizamiento" not in tr
+    assert 'title="Comisiones 0,046 USDC (entrada 0,025 · salidas 0,021) (paper, perfil «OKX EU con cuenta X-Perps»)">0,046<br><span class="note">0,09 R</span>' in cl
+    assert "funding cobrado 0,01 USDC" in cl and "funding +0,01" in cl   # el corto en perpetuo cobró funding
+    assert "estimadas: cerrada antes de las comisiones por perfil" in cl
+    for h in (cl, rows):
+        assert h.count("<td class=\"r mono\" title=\"Comisiones") == 3
+    assert ("<small>Comisiones pagadas</small><b>0,120</b><span>USDC de comisión en 3 operaciones cerradas (1 estimada: de antes del "
+            "29-10) · +0,025 ya pagados en las abiertas · funding cobrado 0,01</span>") in k
+    assert '<small>Bruto → neto</small><b><span class="pos">+1,32</span> → <span class="pos">+1,21</span></b>' in k and "los costes se llevan el 8 % del bruto" in k
+    assert "Perfil en uso: OKX EU con cuenta X-Perps." in r["rc"]
+    # sin totales del bot (uno de antes): se suman de cada operación
+    assert "<small>Comisiones pagadas</small><b>0,071</b>" in r["k2"] and '<span class="pos">+0,98</span> → <span class="pos">+0,91</span>' in r["k2"]
+    _sin_null(kb, cl, tr, k, rows, r["rc"], r["k2"])
+
+
+def test_grafica_velas_de_okx_respaldo_del_bot_y_404():
+    """La gráfica pide las velas de OKX EU (fuente=okx) y lo dice en la nota con el par («velas de OKX EU, BTC-USDC»). Si
+    OKX falla, el bot da las suyas con fuente «bot» y su aviso, y la nota lo dice; un bot de antes (sin «fuente») da las
+    suyas y la nota avisa de que aún no pide las de OKX; un 404 se tolera con el precio en vivo."""
+    r = run(FIAB + SEIS2 + GRAF + """H.open(); reset();
+      const rep = {BTC: {fuente: "okx", instId: "BTC-USDC"}, ETH: {fuente: "bot", pedida: "okx", instId: "ETHUSDT", aviso: "OKX EU no respondió (timeout <x>)"}, SOL: {}};
+      H.fetchReply = url => { const c = /coin=(\\w+)/.exec(url)[1];
+        if (c==="XRP" && H.sinVelas) return {ok: false, status: 404, text: async () => "Sin velas de XRP en la caché del bot en ese tramo (OKX EU no respondió (<y>))"};
+        return rep[c] ? velasOk({coin: c, tf: "1m", velas: BARS, hasta_datos: now - 2*M, ...rep[c]}) : {ok: false, status: 404}; };
+      const mk = (coin, id) => ({...posA, coin, story: "s-" + coin, id, headline: "Compra " + coin});
+      H.recv({type: "market", prices: {BTC: 100.4, ETH: 100.4, SOL: 100.4, XRP: 100.4}}, pf({positions: [mk("BTC", "q1"), mk("ETH", "q2"), mk("SOL", "q3"), mk("XRP", "q4")]}));
+      S.tab = "trades"; renderAll(true); await esperaVelas(); renderAll(true);
+      const kb = colsOf(H.el("#kanban").innerHTML)["En posición"];
+      const urls = H.fetches.filter(u => String(u).startsWith("/api/velas"));
+      H.sinVelas = true; S.velas = {}; renderAll(true); await esperaVelas(); renderAll(true);
+      return {kb, urls, kb2: colsOf(H.el("#kanban").innerHTML)["En posición"]};""")
+    kb = r["kb"]
+    assert len(r["urls"]) == 4 and all(u.endswith("&tf=1m&fuente=okx") for u in r["urls"])
+    assert "Velas de OKX EU, BTC-USDC, de 3 min y precio en vivo · hora de Madrid" in kb
+    assert "Velas del bot de 3 min (Binance, ETHUSDT), no de OKX EU (OKX EU no respondió (timeout &lt;x&gt;)); se reintenta cada minuto" in kb
+    assert "Velas de 3 min del bot y precio en vivo · hora de Madrid (este bot aún no pide las de OKX EU: llega al reiniciarlo)" in kb
+    assert "El bot aún no da velas de XRP (la ruta llega al reiniciarlo)" in kb and "<x>" not in kb
+    # el bot de ahora sin velas de ese tramo (404 con su texto): no es «la ruta llega al reiniciarlo»
+    assert "Ni OKX EU ni el bot tienen velas de XRP de ese tramo (Sin velas de XRP en la caché del bot" in r["kb2"]
+    assert "El bot aún no da velas de XRP" not in r["kb2"] and "<y>" not in r["kb2"]
+    _sin_null(kb, r["kb2"])
+
+
+# Estado «cuenta_real» / GET /api/real (RealBroker.vista_real, docs/06 apartado 5) en cada modo.
+REAL = r"""
+const LIM = {max_usdc: 10, perdida_dia_pct: 3, max_posiciones: 4, max_entradas_dia: 6};
+const vista = (o = {}) => ({type: "cuenta_real", ts: now, modo: "apagado", motivos: ["Apagado: no hay archivo de claves (M:\\BotFundamental-datos\\secretos\\okx.env)"],
+  demo: false, opera: false, etiqueta: "solo lectura", listo: false, puede_abrir: false,
+  por_que: "Modo real no activo: Apagado: no hay archivo de claves (M:\\BotFundamental-datos\\secretos\\okx.env)", bloqueo: null, avisos: [], parada: null, parando: false,
+  halted: false, halt_until: null, aprobacion: "veto", archivos: {carpeta: "M:\\BotFundamental-datos\\secretos", claves: false, confirmado: null, parar: false},
+  frase_confirmacion: "ACTIVO EL MODO REAL", cuenta: {equity: null, usdc_disponible: null, monedas: null, acctLv: null, posMode: null, ip_atada: null, permisos: null,
+  saldo_at: null, day_pnl: 0, day_pnl_pct: 0, inicio: null}, comisiones: {spot: null, perp: null}, comisiones_creador: {spot: null, perp: null},
+  cortos: {ok: false, por_que: "Aún no se ha leído la cuenta"}, instrumentos: [], limites: LIM, techos: {...LIM}, entradas_hoy: 0, posiciones: [], sin_stop: [],
+  apartadas: [], externas: [], pendientes: [], cerradas: [], reconciliacion: null, ultimo_error: null, peticiones: 0, broker: "paper",
+  resumen: "Modo real apagado: el bot opera en paper", OKX_API_KEY: "clave-secreta-123", secret: "SECRETO_FALSO", ...o});
+const leida = (o = {}) => vista({modo: "solo_lectura", motivos: ["Solo lectura (ninguna orden)", "Falta arrancar el bot con BOT_MODO_REAL=1 <b>"], listo: true,
+  por_que: "Modo real no activo: falta <script>x</script>", avisos: ["La clave no está atada a la IP de tu PC (y OKX la caduca tras 14 días sin uso)"],
+  archivos: {carpeta: "M:\\BotFundamental-datos\\secretos", claves: true, confirmado: null, parar: false},
+  cuenta: {equity: 0, usdc_disponible: 0, monedas: {BTC: 0, ETH: 0, SOL: 0, XRP: 0}, acctLv: "1", posMode: "", ip_atada: false, permisos: "read_only,trade",
+    saldo_at: now - 30e3, day_pnl: 0, day_pnl_pct: 0, inicio: null},
+  comisiones: {spot: 0.35, perp: null}, comisiones_creador: {spot: 0.2, perp: null}, cortos: {ok: false, por_que: "Sin cortos: tu cuenta no tiene X-Perps disponibles"},
+  reconciliacion: {at: now - 60e3, cambios: ["Sin cambios <i>"], externas: []}, peticiones: 12,
+  resumen: "Modo real en solo lectura: el bot opera en paper (solo lee tu cuenta de OKX)", ...o});
+const posR = {story: "r-btc", coin: "BTC", side: "long", qty: 0.0001, entry: 100, sl: 98, sl_initial: 98, opened: now - 3600e3, riskUsd: 0.2, notional: 10, price: 101,
+  upnl: 0.09, R: 0.45, tp1: 106, tp1_frac: 0.5, floor: 104, locked: false, instId: "BTC-USDC", instrument: "spot", real: true, estado: "abierta", sin_stop: true,
+  sin_stop_desde: now - 120e3, partes: [{n: 1, sz: "0.00005", sl: "98", tp: "106", estado: "pendiente", algoId: null}, {n: 2, sz: "0.00005", sl: 98, tp: null, estado: "viva", algoId: "1"}]};
+const real = (o = {}) => leida({modo: "real", motivos: ["Modo real ACTIVO: opera con tu dinero en OKX EU"], puede_abrir: true, por_que: null, broker: "real",
+  resumen: "Operando en dinero real", archivos: {carpeta: "M:\\BotFundamental-datos\\secretos", claves: true, confirmado: "29-10-2026 10:15", parar: false},
+  cuenta: {equity: 52.4, usdc_disponible: 44.3, monedas: {BTC: 0.0001, ETH: 0}, acctLv: "2", posMode: "net_mode", ip_atada: true, permisos: "read_only,trade",
+    saldo_at: now - 20e3, day_pnl: -0.06, day_pnl_pct: -0.11, inicio: 50},
+  comisiones: {spot: 0.1, perp: 0.05}, comisiones_creador: {spot: 0.08, perp: 0.02}, cortos: {ok: true, por_que: "Cortos en X-Perps: BTC, ETH, SOL, XRP"},
+  posiciones: [posR, {story: "r-eth", coin: "ETH", side: "short", estado: "enviando", sin_stop: true}], sin_stop: ["BTC", "ETH"],
+  pendientes: [{story: "r-sol", coin: "SOL", side: "short", deadline: now + 20e3, mode: "veto"}],
+  externas: [{coin: "XRP", instId: "XRP-USD_UM_XPERP-310404", pos: "-3", avgPx: 1.3}],
+  apartadas: [{story: "x", coin: "ETH", side: "long", estado: "abierta", modo: "demo", entorno: "demo", instId: "ETH-USDC", sz: "0.01"}],
+  cerradas: [{coin: "BTC", side: "long", closed: now - 7200e3, reason: "Stop de pérdida <b>", pnl: -0.2, R: -1.05}],
+  ultimo_error: {at: now - 300e3, donde: "saldo", texto: "ErrorOKX: 50011 Rate limit <x>"}, ...o});
+const panel = () => { renderAll(true); return ["#realBand", "#realHead", "#realCuenta", "#realCtl", "#realLim", "#realPos", "#realTec"].map(s => H.el(s).innerHTML).join("\n"); };
+"""
+
+
+def test_cuenta_real_panel_en_sus_modos():
+    """Panel «Cuenta real» con lo que manda el bot: sin la ruta (404) dice que el modo real está apagado y el bot opera en
+    paper; apagado (sin okx.env) lo dice igual, sin mandos ni frase; en solo lectura enseña la cuenta (saldo, comisión
+    real, cortos, IP, permisos), los avisos, los límites con su techo, los mandos y la caja de la frase; en real, el modo
+    en grande, las posiciones con sus partes, la banda roja SIN STOP (y el aviso en la pestaña), pendientes con aprobar y
+    vetar, las de fuera del bot en rojo, las apartadas, las cerradas y el último error. Todo escapado y sin enseñar nunca
+    nada que no sea del contrato (ni un campo con una clave)."""
+    r = run(REAL + """H.open(); reset();
+      H.fetchReply = url => url === "/api/real" ? {ok: false, status: 404} : {ok: false};
+      H.fire("click", {"data-tab": "real"}); await loadReal();
+      const p404 = panel();
+      H.recv(vista()); const pOff = panel(), ctlOff = H.el("#realCtl").innerHTML, badgeOff = H.el("#realBadge").hidden, bandOff = H.el("#realBand").hidden;
+      S.tab = "trades"; renderAll(true); const nota = H.el("#tradesNoteTxt").innerHTML; S.tab = "real";
+      H.recv(leida()); const pRO = panel(), ctlRO = H.el("#realCtl").innerHTML;
+      H.recv(real()); const pReal = panel(), band = H.el("#realBand").innerHTML, bandHid = H.el("#realBand").hidden;
+      renderHeader(); const badge = H.el("#realBadge").textContent, badgeHid = H.el("#realBadge").hidden;
+      H.recv(real({parada: {motivo: "Parada de emergencia desde la web", cerrar: false, ms: now - 60e3, fecha: "29-10-2026 08:01"}, modo: "solo_lectura", puede_abrir: false,
+        sin_stop: [], posiciones: [{...posR, sin_stop: false}], archivos: {carpeta: "M:/x", claves: true, confirmado: null, parar: true}}));
+      const pPar = panel(), ctlPar = H.el("#realCtl").innerHTML;
+      S.tab = "mando"; renderAll(true);
+      return {p404, pOff, ctlOff, badgeOff, bandOff, nota, pRO, ctlRO, pReal, band, bandHid, badge, badgeHid, pPar, ctlPar, md: H.el("#mdAgents").innerHTML, fetches: H.fetches};""")
+    p404, pOff, pRO, pReal, pPar = r["p404"], r["pOff"], r["pRO"], r["pReal"], r["pPar"]
+    assert "/api/real" in r["fetches"]
+    assert "Modo real apagado: el bot opera en paper" in p404 and "GET /api/real no existe" in p404
+    assert '<div class="rmode apagado"><b>Apagado</b>' in pOff and "Modo real apagado: el bot opera en paper." in pOff and "Sin claves: el bot no lee nada" in pOff
+    assert "copia okx.env.ejemplo a okx.env" in pOff and 'id="realFrase"' not in pOff and "data-real-acc" not in r["ctlOff"]
+    # Para empezar, solo «Lectura»; y el aviso de que con tus claves el paper cobra tu comisión real (sin X-Perps, sin cortos)
+    assert "basta una clave con solo el permiso «Lectura» (saldo y comisiones)" in pOff and "Lectura y Operar" not in pOff
+    assert "el paper pasa a cobrar la comisión real de tu cuenta y, si no tiene X-Perps, deja de abrir cortos" in pOff
+    assert "como mucho cancela o protege con su stop órdenes que haya puesto él mismo" in pOff
+    assert "Con tus claves (las de tu cuenta, no las de la demo), el paper pasa a cobrar la comisión real" in pOff
+    assert r["badgeOff"] is True and r["bandOff"] is True
+    assert "Modo real apagado: el bot opera en paper" in r["nota"]
+    # solo lectura: cuenta leída, avisos, mandos, límites y la frase
+    assert '<div class="rmode solo_lectura"><b>Solo lectura</b>' in pRO and "Los tickets van al paper (BOT_BROKER=paper)" in pRO
+    assert "Modo real no activo: falta &lt;script&gt;x&lt;/script&gt;" in pRO and "BOT_MODO_REAL=1 &lt;b&gt;" in pRO and "<script>" not in pRO
+    assert "La clave no está atada a la IP de tu PC" in pRO and "<b>0,35 % tomador · 0,20 % creador</b>" in pRO and "<small>IP atada</small><b><span class=\"neg\">no</span>" in pRO
+    assert "Sin cortos: tu cuenta no tiene X-Perps disponibles" in pRO and "<b>1 (contado)</b>" in pRO and "USDC de verdad" in pRO
+    for t in ('data-real-acc="parar"', 'data-real-acc="parar_cerrar"', 'data-real-acc="detener"', 'data-real-aprob="veto" aria-pressed="true"',
+              'data-real-aprob="manual"', 'id="realFrase"', 'data-real-acc="confirmar"', "escribe exactamente «ACTIVO EL MODO REAL»"):
+        assert t in r["ctlRO"], t
+    assert 'data-real-aprob="auto"' not in r["ctlRO"]   # la automática solo en la demo de OKX
+    assert 'data-real-lim="max_usdc" min="0" max="10"' in pRO and "Entradas hoy: 0 de 6" in pRO and "Sin cambios &lt;i&gt;" in pRO
+    # real: modo en grande, posiciones, SIN STOP, pendientes, externas, apartadas, cerradas y error
+    assert '<div class="rmode real"><b>Dinero real</b>' in pReal and "Operando en dinero real." in pReal and "Los tickets van al modo real" in pReal
+    assert r["bandHid"] is False and "¡SIN STOP EN OKX: BTC, ETH!" in r["band"] and r["badgeHid"] is False and r["badge"] == "SIN STOP"
+    assert '<tr class="sinstop"><td><b>BTC</b> <span class="pill bad">SIN STOP desde' in pReal and "Enviando a OKX o en duda" in pReal
+    assert "1: pendiente 0.00005 · stop 98,00 · obj. 106,00<br>2: viva 0.00005 · stop 98,00" in pReal and 'data-real-close="r-btc"' in pReal
+    assert 'data-real-approve="r-sol"' in pReal and 'data-real-reject="r-sol"' in pReal and "sale sola en" in pReal
+    assert '<tr class="externa"><td><b>XRP</b></td><td class="mono">XRP-USD_UM_XPERP-310404</td>' in pReal and "<td>demo</td>" in pReal
+    assert "Stop de pérdida &lt;b&gt;" in pReal and "-1,05 R" in pReal and "50011 Rate limit &lt;x&gt;" in pReal
+    assert "<b>0,10 % tomador · 0,08 % creador</b>" in pReal and "<b>52,40 USDC</b>" in pReal and "confirmado el 29-10-2026 10:15" in pReal
+    # parada activa: se dice, «parar» ya no se ofrece y «parar y cerrar» sí; la frase la quita
+    assert "Parada de emergencia activa: Parada de emergencia desde la web (29-10-2026 08:01)" in pPar and "sin cerrar posiciones" in pPar
+    assert 'data-real-acc="parar"' not in r["ctlPar"] and 'data-real-acc="parar_cerrar"' in r["ctlPar"] and "Quitar la parada" in r["ctlPar"]
+    assert '<small>PARAR_REAL</small><b><span class="neg">existe</span>' in pPar
+    assert "Cuenta real" in r["md"]
+    for h in (p404, pOff, pRO, pReal, pPar):
+        assert "clave-secreta-123" not in h and "SECRETO_FALSO" not in h and "OKX_API_KEY" not in h
+    _sin_null(p404, pOff, pRO, pReal, pPar, r["nota"], r["md"])
+
+
+def test_cuenta_real_mandos_seguros():
+    """Mandos del panel: parada (cerrar=false) y parada con cierre (cerrar=true de JSON), cada una con su confirmación;
+    límites solo hacia abajo (por encima del techo o no válidos no se envía nada); la frase tiene que ser la exacta y se
+    confirma aparte; aprobación veto o a mano (la automática solo en la demo de OKX); aprobar, vetar y cerrar una de
+    las suyas. La respuesta «orden_web» (area real) se avisa, también cuando el bot la rechaza por el origen. Sin
+    conexión no se envía nada; un aviso «real_aviso» SIN STOP sale en rojo en el cable y lleva a la pestaña."""
+    r = run(REAL + """H.open(); reset();
+      H.recv(real()); H.fire("click", {"data-tab": "real"}); renderAll(true);
+      H.confirmAnswer = false; H.fire("click", {"data-real-acc": "parar"}); const n0 = H.sent().length;
+      H.confirmAnswer = true; H.fire("click", {"data-real-acc": "parar"}); H.fire("click", {"data-real-acc": "parar_cerrar"});
+      const tPar = H.el("#toast").textContent;
+      H.recv({type: "orden_web", ts: Date.now(), area: "real", accion: "parar", id: null, ok: true, why: "La parada ya estaba pedida"});
+      const tOk = H.el("#toast").textContent;
+      S.realForm.lim = {max_usdc: "25"}; H.fire("click", {"data-real-acc": "limites"}); const tTecho = H.el("#toast").textContent, n1 = H.sent().length;
+      S.realForm.lim = {max_posiciones: "1.5"}; H.fire("click", {"data-real-acc": "limites"}); const tMal = H.el("#toast").textContent, n2 = H.sent().length;
+      S.realForm.lim = {max_usdc: "5,5", max_entradas_dia: "3"}; H.fire("click", {"data-real-acc": "limites"}); const n3 = H.sent().length;
+      S.realForm.frase = "activo el modo"; H.fire("click", {"data-real-acc": "confirmar"}); const tFr = H.el("#toast").textContent, n4 = H.sent().length;
+      S.realForm.frase = "  activo   el modo REAL "; H.fire("click", {"data-real-acc": "confirmar"}); const frase = S.realForm.frase;
+      H.fire("click", {"data-real-aprob": "auto"}); const tAuto = H.el("#toast").textContent, n5 = H.sent().length;
+      H.fire("click", {"data-real-aprob": "manual"}); H.fire("click", {"data-real-approve": "r-sol"}); H.fire("click", {"data-real-reject": "r-sol"});
+      H.fire("click", {"data-real-close": "r-btc"}); H.fire("click", {"data-real-acc": "detener"});
+      H.recv({type: "orden_web", ts: Date.now(), area: "real", accion: "detener", id: null, ok: false, why: "Solo desde la propia web del bot (cabecera Origin)"});
+      const tOrig = H.el("#toast").textContent;
+      H.recv(ev("real_aviso", "real", {aviso: {sin_stop: true}, real: {modo: "real", demo: false}}, {agent: "real", title: "BTC sin stop en OKX <b>"}));
+      const tSin = H.el("#toast").textContent; S.tab = "live"; renderAll(true); const feed = H.el("#feed").innerHTML;
+      const sent = H.sent().slice(); H.ws().readyState = 3; H.fire("click", {"data-real-acc": "parar"}); const tSinCon = H.el("#toast").textContent;
+      return {n0, tPar, tOk, tTecho, n1, tMal, n2, n3, tFr, n4, frase, tAuto, n5, tOrig, tSin, feed, sent, after: H.sent().length, tSinCon};""")
+    assert r["n0"] == 0 and "Pendiente de que la confirme" in r["tPar"] and "Hecho (modo real): parada de emergencia hecha. La parada ya estaba pedida" in r["tOk"]
+    assert "no se puede subir por encima de 10,00 desde la web" in r["tTecho"] and r["n1"] == 2
+    assert "Posiciones abiertas: valor no válido" in r["tMal"] and r["n2"] == 2 and r["n3"] == 3
+    assert "Escribe exactamente «ACTIVO EL MODO REAL»" in r["tFr"] and r["n4"] == 3 and r["frase"] == ""
+    assert "La aprobación automática solo vale en la demo de OKX" in r["tAuto"] and r["n5"] == 4
+    assert "El bot no lo ha hecho (modo real): Solo desde la propia web del bot (cabecera Origin)" in r["tOrig"]
+    assert "¡SIN STOP EN OKX!" in r["tSin"] and "Cuenta real" in r["tSin"]
+    assert 'data-tabgo="real"' in r["feed"] and "SIN STOP EN OKX" in r["feed"] and "BTC sin stop en OKX &lt;b&gt;" in r["feed"] and 'class="pill bad"' in r["feed"]
+    assert r["sent"] == [
+        {"type": "real", "accion": "parar", "cerrar": False}, {"type": "real", "accion": "parar", "cerrar": True},
+        {"type": "real", "accion": "limites", "limites": {"max_usdc": 5.5, "max_entradas_dia": 3}},
+        {"type": "real", "accion": "confirmar", "frase": "activo   el modo REAL"},
+        {"type": "real", "accion": "aprobacion", "mode": "manual"},
+        {"type": "decision", "story": "r-sol", "ok": True}, {"type": "decision", "story": "r-sol", "ok": False},
+        {"type": "close", "story": "r-btc"}, {"type": "real", "accion": "detener"}]
+    assert r["after"] == len(r["sent"]) and "Sin conexión con el bot" in r["tSinCon"]
+
+
+def test_cuenta_real_y_comisiones_en_la_demostracion():
+    """En la demostración el panel «Cuenta real» es un EJEMPLO rotulado: arranca en «Apagado» (lo de verdad), se puede
+    ver cómo quedaría en cada modo y sus mandos no envían nada. El perfil de comisiones de ejemplo cambia las operaciones
+    simuladas: sin X-Perps, el motor simulado no abre cortos («sin cortos») y el resto de la página sigue diciendo que el
+    modo real está apagado."""
+    r = run("""const colsOf = html => Object.fromEntries(html.split('<div class="col">').slice(1).map(c => [c.split("</h3>")[0].split("<h3>")[1], c]));
+      H.fire("click", {"data-tab": "real"}); renderAll(true);
+      const off = H.el("#realHead").innerHTML, note = H.el("#realDemoNote").innerHTML, chips = H.el("#realDemoCtl").innerHTML, noteHid = H.el("#realDemoNote").hidden;
+      const modos = {};
+      for (const m of ["solo_lectura", "demo", "real"]){ H.fire("click", {"data-real-demo": m}); renderAll(true);
+        modos[m] = ["#realHead", "#realCuenta", "#realCtl", "#realLim", "#realPos", "#realTec"].map(s => H.el(s).innerHTML).join("\\n"); }
+      H.fire("click", {"data-real-acc": "parar"}); const t1 = H.el("#toast").textContent;
+      H.fire("click", {"data-real-approve": "a-eu-eth-ej"}); const t2 = H.el("#toast").textContent;
+      S.tab = "mando"; renderAll(true); const md = H.el("#mdBook").innerHTML;
+      const sel = H.el("#comSel"); sel.value = "okx_eu_sin_xperps"; H.elFire("#comSel", "change", {target: sel});
+      S.tab = "trades"; renderAll(true); const com = H.el("#comBox").innerHTML, t3 = H.el("#toast").textContent;
+      demoDecRefresh(); const sinC = S.dec.filter(x => x.motivo_codigo==="sin_cortos").length, cortos = S.dec.filter(x => x.decision==="abierta" && x.lado==="corto").length;
+      return {off, note, chips, noteHid, modos, t1, t2, md, com, t3, sinC, cortos, sockets: H.sockets.length, kb: colsOf(H.el("#kanban").innerHTML)["En posición"]};""", live=False)
+    assert r["noteHid"] is False and "EJEMPLO INVENTADO" in r["note"] and '<div class="rmode apagado"><b>Apagado</b><span class="pill warn">Ejemplo</span>' in r["off"]
+    assert 'data-real-demo="real"' in r["chips"] and "Modo real apagado: el bot opera en paper." in r["off"]
+    assert '<div class="rmode solo_lectura">' in r["modos"]["solo_lectura"] and 'id="realFrase"' in r["modos"]["solo_lectura"]
+    assert '<div class="rmode demo">' in r["modos"]["demo"] and 'data-real-aprob="auto"' in r["modos"]["demo"]
+    assert '<div class="rmode real">' in r["modos"]["real"] and "BTC-USDC" in r["modos"]["real"] and 'class="externa"' in r["modos"]["real"]
+    assert "Ejemplo: en la demostración no se envía nada al bot." in r["t1"] and "Ejemplo: en la demostración" in r["t2"] and r["sockets"] == 0
+    assert "Modo real apagado: el bot opera en paper" in r["md"]   # fuera del panel, lo de verdad
+    assert "<b>OKX EU sin cuenta X-Perps</b>" in r["com"] and "Ejemplo" in r["com"] and "operaciones simuladas" in r["t3"]
+    assert r["sinC"] > 0 and r["cortos"] == 0
+    for h in (r["off"], *r["modos"].values(), r["md"], r["com"], r["kb"]):
+        _sin_null(h)
+
+
+def test_backtest_dice_con_que_comisiones_esta_calculado():
+    """Cada backtest resumido dice con qué comisiones está calculado (resumen_backtest.costes) y que sin cuenta X-Perps
+    las cifras serían peores; sin ese dato (un resumen de antes), el modelo de siempre: 0,10 % por lado y 2 pb."""
+    costes = {"perfil": "okx_eu_con_xperps", "comision_pct": 0.1, "deslizamiento_bps": 2.0, "coste_rt_pct": 0.24,
+              "texto": "Calculado con 0,10 % de comisión por lado (también en los perpetuos) y 2 pb de deslizamiento por lado: "
+                       "el perfil «OKX EU con cuenta X-Perps» (tomador del contado) <b>",
+              "aviso": "Sin cuenta X-Perps el contado cuesta 0,35 % por lado (tomador) y no hay cortos: con ese perfil estas cifras "
+                       "serían peores", "perfil_en_uso": "okx_eu_con_xperps"}
+    imp, seis = {**IMP_BT, "costes": costes}, {**SEIS_BT, "costes": costes}
+    r = run("const now = Date.now();" + FIAB + SEIS2 + f"""S.btImp = {{impulso: {json.dumps(imp)}, lab: null, seis: {json.dumps(seis)}, seis2: {json.dumps(SEIS2_BT)}}};
+      S.openings = opn(SEIS2_P); S.tab = "bt"; S.btSig = null; renderAll(true);
+      return {{s2: H.el("#btSeis2Top").innerHTML, s1: H.el("#btSeisAlt").innerHTML, e2: H.el("#btLive").innerHTML}};""", live=False)
+    for h in (r["s1"], r["e2"]):
+        assert ("<b>Comisiones del backtest:</b> Calculado con 0,10 % de comisión por lado (también en los perpetuos) y 2 pb de "
+                "deslizamiento por lado: el perfil «OKX EU con cuenta X-Perps» (tomador del contado) &lt;b&gt;. Sin cuenta X-Perps el "
+                "contado cuesta 0,35 % por lado (tomador) y no hay cortos: con ese perfil estas cifras serían peores.") in h
+    assert ("<b>Comisiones del backtest:</b> 0,10 % por lado y 2 pb de deslizamiento, que no es menos que lo de OKX EU con cuenta "
+            "X-Perps. Sin cuenta X-Perps no hay cortos y el contado cuesta 0,35 % a mercado: estas cifras serían peores.") in r["s2"]
+    _sin_null(r["s1"], r["s2"], r["e2"])

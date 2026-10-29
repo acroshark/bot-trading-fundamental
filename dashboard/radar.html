@@ -13,7 +13,7 @@
   --bg:#edf0f4; --surface:#ffffff; --surface-2:#f5f7fa; --ink:#0f1824; --ink-2:#435063; --muted:#677386;
   --line:#d9dfe7; --line-2:#c3ccd8; --accent:#2445b3; --accent-wash:#e5ebfa;
   --good:#0f7655; --good-wash:#e1f2ea; --bad:#bf3128; --bad-wash:#fbe8e6; --warn:#9a5d00; --warn-wash:#faefd9;
-  --a-hunter:#2a78d6; --a-verifier:#eb6834; --a-impact:#1baf7a; --a-flow:#eda100; --a-strat:#e87ba4; --a-risk:#008300; --a-human:#0f1824; --a-exec:#6250d6; --a-local:#1f8ea3;
+  --a-hunter:#2a78d6; --a-verifier:#eb6834; --a-impact:#1baf7a; --a-flow:#eda100; --a-strat:#e87ba4; --a-risk:#008300; --a-human:#0f1824; --a-exec:#6250d6; --a-local:#1f8ea3; --a-real:#a3126b; --real:#a3126b;
   --heat-lo:#eef4fd; --heat-hi:#0d366b; --heat-ink-hi:#ffffff;
   --shadow:0 1px 2px rgba(15,24,36,.06),0 4px 14px rgba(15,24,36,.05);
   --f-display:"Barlow Condensed","Arial Narrow","Roboto Condensed",sans-serif;
@@ -24,7 +24,7 @@
   --bg:#0b1119; --surface:#111925; --surface-2:#16202e; --ink:#e4eaf2; --ink-2:#b0bccc; --muted:#8290a4;
   --line:#212e40; --line-2:#2c3c52; --accent:#8fa9ff; --accent-wash:#1a2547;
   --good:#3cc28f; --good-wash:#0f281e; --bad:#ff7d72; --bad-wash:#33171a; --warn:#f1b34a; --warn-wash:#2d230f;
-  --a-hunter:#3987e5; --a-verifier:#d95926; --a-impact:#199e70; --a-flow:#c98500; --a-strat:#d55181; --a-risk:#008300; --a-human:#e4eaf2; --a-exec:#9085e9; --a-local:#4fb3c8;
+  --a-hunter:#3987e5; --a-verifier:#d95926; --a-impact:#199e70; --a-flow:#c98500; --a-strat:#d55181; --a-risk:#008300; --a-human:#e4eaf2; --a-exec:#9085e9; --a-local:#4fb3c8; --a-real:#ff6fb5; --real:#c2187f;
   --heat-lo:#142033; --heat-hi:#9ec5f4; --heat-ink-hi:#0b1119;
   --shadow:0 1px 2px rgba(0,0,0,.3);
   color-scheme:dark }}
@@ -32,7 +32,7 @@
   --bg:#0b1119; --surface:#111925; --surface-2:#16202e; --ink:#e4eaf2; --ink-2:#b0bccc; --muted:#8290a4;
   --line:#212e40; --line-2:#2c3c52; --accent:#8fa9ff; --accent-wash:#1a2547;
   --good:#3cc28f; --good-wash:#0f281e; --bad:#ff7d72; --bad-wash:#33171a; --warn:#f1b34a; --warn-wash:#2d230f;
-  --a-hunter:#3987e5; --a-verifier:#d95926; --a-impact:#199e70; --a-flow:#c98500; --a-strat:#d55181; --a-risk:#008300; --a-human:#e4eaf2; --a-exec:#9085e9; --a-local:#4fb3c8;
+  --a-hunter:#3987e5; --a-verifier:#d95926; --a-impact:#199e70; --a-flow:#c98500; --a-strat:#d55181; --a-risk:#008300; --a-human:#e4eaf2; --a-exec:#9085e9; --a-local:#4fb3c8; --a-real:#ff6fb5; --real:#c2187f;
   --heat-lo:#142033; --heat-hi:#9ec5f4; --heat-ink-hi:#0b1119;
   --shadow:0 1px 2px rgba(0,0,0,.3);
   color-scheme:dark }
@@ -390,6 +390,35 @@ tbody tr[data-bt]{cursor:pointer}
 .three{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;align-items:start}
 .kpis.kpis8{grid-template-columns:repeat(4,minmax(0,1fr))} .kpis.kpis8 .kpi:nth-child(4n){border-right:0} .kpis.kpis8 .kpi:nth-child(-n+4){border-bottom:1px solid var(--line)}
 .kpis.kpis6{grid-template-columns:repeat(6,minmax(0,1fr))}
+.kpis.kpis10{grid-template-columns:repeat(5,minmax(0,1fr))} .kpis.kpis10 .kpi:nth-child(5n){border-right:0} .kpis.kpis10 .kpi:nth-child(-n+5){border-bottom:1px solid var(--line)}
+@media (max-width:1100px){ .kpis.kpis10{grid-template-columns:repeat(2,minmax(0,1fr))} .kpis.kpis10 .kpi{border-right:0;border-bottom:1px solid var(--line)} }
+/* Comisiones del paper: perfil en uso, tasas por lado y su selector */
+.com-now{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 12px}
+.com-now b{font-family:var(--f-display);font-size:22px;font-weight:700;letter-spacing:.02em}
+.com-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;margin:10px 0}
+.com-grid div{border:1px solid var(--line);border-radius:6px;padding:7px 10px;background:var(--surface-2);display:grid;gap:2px;min-width:0}
+.com-grid small{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.com-grid b{font-family:var(--f-mono);font-weight:500;font-size:13px}
+.com-grid span{font-size:11.5px;color:var(--ink-2)}
+.com-warn{border:1px solid var(--warn);background:var(--warn-wash);color:var(--ink);border-radius:6px;padding:8px 10px;font-size:12.5px;margin-top:8px}
+.com-warn b{color:var(--warn)}
+/* Cuenta real (OKX EU): banda SIN STOP, modo en grande, cuenta, límites, posiciones, mandos y estado técnico */
+.rband{border:2px solid var(--bad);background:var(--bad-wash);color:var(--bad);font-weight:700;border-radius:8px;padding:10px 14px;letter-spacing:.01em}
+.rmode{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px}
+.rmode b{font-family:var(--f-display);font-size:34px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;line-height:1}
+.rmode.apagado b{color:var(--muted)} .rmode.solo_lectura b{color:var(--warn)} .rmode.demo b{color:var(--accent)}
+.rmode.real b{color:#fff;background:var(--real);padding:3px 10px;border-radius:5px}
+.roff{font-size:16px;font-weight:600;margin:10px 0 2px}
+.rlist{margin:6px 0 0;padding-left:18px;font-size:12.5px;display:grid;gap:2px}
+.rbad{border:1px solid var(--bad);background:var(--bad-wash);color:var(--bad);border-radius:6px;padding:7px 10px;font-size:12.5px;font-weight:600;margin-top:8px}
+.rwarn{border:1px solid var(--warn);background:var(--warn-wash);color:var(--warn);border-radius:6px;padding:7px 10px;font-size:12.5px;margin-top:8px}
+.rlim input{width:92px;border:1px solid var(--line-2);border-radius:5px;background:var(--surface);padding:3px 6px;font-family:var(--f-mono);font-size:12px}
+.rctl{display:grid;gap:12px}
+.rctl .btns .btn.stop{background:var(--bad);border-color:var(--bad);color:var(--surface)}
+.rfrase{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.rfrase input{flex:1 1 240px;min-width:0;border:1px solid var(--line-2);border-radius:6px;background:var(--surface);padding:6px 9px;font-family:var(--f-mono);font-size:13px}
+tr.sinstop td{background:var(--bad-wash)} tr.externa td{color:var(--bad)}
+.tabs button .badge.bad{background:var(--bad-wash);color:var(--bad)}
 .mktgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(205px,1fr));gap:10px}
 .mtile{border:1px solid var(--line);border-radius:8px;padding:10px 11px;display:grid;gap:4px;min-width:0;background:var(--surface)}
 .mtile .t1{display:flex;align-items:baseline;gap:8px}
@@ -692,6 +721,7 @@ details.dec-more p{margin:3px 0 0;font-size:11.5px;color:var(--muted);font-famil
     <button type="button" role="tab" data-tab="pred" aria-selected="false">Predicciones</button>
     <button type="button" role="tab" data-tab="trades" aria-selected="false">Estrategias y cartera<span class="badge" id="pendBadge" hidden>0</span></button>
     <button type="button" role="tab" data-tab="results" aria-selected="false">Resultados</button>
+    <button type="button" role="tab" data-tab="real" aria-selected="false">Cuenta real<span class="badge bad" id="realBadge" hidden>!</span></button>
     <button type="button" role="tab" data-tab="bt" aria-selected="false">Backtest</button>
     <button type="button" role="tab" data-tab="market" aria-selected="false">Mercado y aperturas</button>
     <button type="button" role="tab" data-tab="evo" aria-selected="false">Evolución<span class="badge" id="evoBadge" hidden>0</span></button>
@@ -793,7 +823,7 @@ details.dec-more p{margin:3px 0 0;font-size:11.5px;color:var(--muted);font-famil
   <!-- RESULTADOS -->
   <section class="view" id="v-results" hidden>
     <div class="callout info" id="resNote" hidden></div>
-    <div class="panel"><div class="kpis kpis8" id="resKpis"></div><p class="note strat-now" id="resStrat" hidden></p></div>
+    <div class="panel"><div class="kpis kpis10" id="resKpis"></div><p class="note strat-now" id="resStrat" hidden></p><p class="note strat-now" id="resCom"></p></div>
     <div class="two">
       <div class="panel"><div class="panel-h"><h2>Curva de capital</h2><p id="resEqNote">Operaciones cerradas, en USDC.</p></div><div class="panel-b"><div id="resEquity"></div></div></div>
       <div class="panel"><div class="panel-h"><h2>Resultado por día</h2><p>En % del capital. La línea discontinua marca tu objetivo del 5 % diario.</p></div><div class="panel-b"><div id="resDaily"></div></div></div>
@@ -812,6 +842,20 @@ details.dec-more p{margin:3px 0 0;font-size:11.5px;color:var(--muted);font-famil
       <div class="panel-h"><h2>Todas las operaciones</h2><p>Pulsa una fila para ver la noticia y las decisiones que llevaron a ella. Con salida parcial, la salida es el precio medio y el R se reparte entre la parte y el resto.</p></div>
       <div class="tbl-wrap"><table><thead><tr><th>Cierre</th><th>Estrategia</th><th>Ventana</th><th>Activo</th><th>Lado</th><th class="r">Entrada</th><th class="r">Salida</th><th>Motivo</th><th class="r">Resultado</th><th class="r">%</th><th class="r">R</th><th class="r" title="Comisiones menos el funding cobrado (o más el pagado) de los perpetuos">Costes</th><th class="r">Duración</th><th>Noticia</th></tr></thead><tbody id="resRows"></tbody></table></div>
     </div>
+  </section>
+
+  <!-- CUENTA REAL (OKX EU): preparada y APAGADA hasta que el usuario ponga sus claves y la active él (docs/06) -->
+  <section class="view" id="v-real" hidden>
+    <div class="rband" id="realBand" role="alert" hidden></div>
+    <div class="callout warn" id="realDemoNote" hidden></div>
+    <div class="panel"><div class="panel-h"><h2>Cuenta real · OKX EU</h2><p>Importes en USDC de verdad de tu cuenta de OKX: nunca se mezclan con los euros ficticios de la cartera paper. La web nunca ve ni enseña tus claves.</p><div class="right" id="realDemoCtl"></div></div><div class="panel-b" id="realHead"></div></div>
+    <div class="two">
+      <div class="panel"><div class="panel-h"><h2>Cuenta</h2><p>Saldo y comisiones, leídos en solo lectura con tus claves.</p></div><div class="panel-b" id="realCuenta"></div></div>
+      <div class="panel"><div class="panel-h"><h2>Mandos</h2><p>Parar es siempre posible; activar, solo escribiendo la frase.</p></div><div class="panel-b rctl" id="realCtl"></div></div>
+    </div>
+    <div class="panel"><div class="panel-h"><h2>Límites duros</h2><p>Desde aquí puedes bajarlos, o devolverlos como mucho hasta el techo que fija tu PC.</p></div><div class="panel-b rlim" id="realLim"></div></div>
+    <div class="panel"><div class="panel-h"><h2>Posiciones y órdenes en OKX</h2><p>Las del bot, las de fuera del bot (en rojo: no las toca) y las apartadas de otra cuenta o de la demo.</p></div><div class="panel-b" id="realPos"></div></div>
+    <div class="panel"><div class="panel-h"><h2>Estado técnico</h2></div><div class="panel-b" id="realTec"></div></div>
   </section>
 
   <!-- BACKTEST -->
@@ -837,8 +881,10 @@ details.dec-more p{margin:3px 0 0;font-size:11.5px;color:var(--muted);font-famil
 
   <!-- ESTRATEGIAS -->
   <section class="view" id="v-trades" hidden>
-    <div class="callout info" id="tradesNote" hidden><b>Paper trading: dinero ficticio.</b><span>Las operaciones usan precios reales de OKX EU, pero no se envía ninguna orden al exchange. La cuenta real llega en la fase 3.</span></div>
+    <div class="callout info" id="tradesNote" hidden><b>Paper trading: dinero ficticio.</b><span id="tradesNoteTxt">Las operaciones usan precios reales de OKX EU, pero no se envía ninguna orden al exchange. Modo real apagado: el bot opera en paper (pestaña «Cuenta real»).</span></div>
     <div class="panel"><div class="kpis" id="kpis"></div><p class="note strat-now" id="tradesStrat" hidden></p></div>
+    <div class="panel" id="comPanel"><div class="panel-h"><h2>Comisiones del paper</h2><p id="comSub">Lo que cobra OKX EU en cada operación paper: entra en cada resultado, en la regla del 3 % neto y en Resultados.</p>
+      <div class="right"><select class="sel" id="comSel" aria-label="Perfil de comisiones del paper" title="Perfil de comisiones del paper (dinero ficticio)"></select></div></div><div class="panel-b" id="comBox"></div></div>
     <div class="kanban" id="kanban"></div>
     <div class="two">
       <div class="panel">
@@ -851,8 +897,8 @@ details.dec-more p{margin:3px 0 0;font-size:11.5px;color:var(--muted);font-famil
       </div>
     </div>
     <div class="panel">
-      <div class="panel-h"><h2>Operaciones cerradas</h2><p>Resultado en USDT y en R (múltiplos del riesgo asumido).</p></div>
-      <div class="tbl-wrap"><table><thead><tr><th>Cierre</th><th>Activo</th><th>Lado</th><th>Motivo</th><th class="r">Entrada</th><th class="r">Salida</th><th class="r">Resultado</th><th class="r">R</th><th>Noticia</th></tr></thead><tbody id="closedRows"></tbody></table></div>
+      <div class="panel-h"><h2>Operaciones cerradas</h2><p>Resultado neto en USDC y en R (múltiplos del riesgo asumido), ya con comisiones y funding; los costes, aparte.</p></div>
+      <div class="tbl-wrap"><table><thead><tr><th>Cierre</th><th>Activo</th><th>Lado</th><th>Motivo</th><th class="r">Entrada</th><th class="r">Salida</th><th class="r">Resultado</th><th class="r">R</th><th class="r" title="Comisiones de entrada y salidas menos el funding cobrado (o más el pagado), en USDC y en R">Costes</th><th>Noticia</th></tr></thead><tbody id="closedRows"></tbody></table></div>
     </div>
   </section>
 
@@ -965,7 +1011,9 @@ const AGENTS = [
   {id:"strat",    name:"Estratega",          role:"Diseña la entrada para la ventana de apertura.",               model:"Opus 5.5", ai:true, idle:"En espera"},
   {id:"risk",     name:"Riesgo",             role:"Aplica límites fijos y puede vetar cualquier orden.",          model:"Código", idle:"Vigilando límites"},
   {id:"human",    name:"Tú",                 role:"Revisas el ticket y apruebas o rechazas.",                     model:"Humano", idle:"Sin pendientes"},
-  {id:"exec",     name:"Ejecutor",           role:"Simula y gestiona las órdenes paper (dinero ficticio); no envía nada al exchange.", model:"Código", idle:"Sin posiciones"}
+  {id:"exec",     name:"Ejecutor",           role:"Simula y gestiona las órdenes paper (dinero ficticio); no envía nada al exchange.", model:"Código", idle:"Sin posiciones"},
+  // Modo real con OKX EU (bot/okx_real.py): preparado y apagado. No va en la rejilla de «En directo» (grid:false), sí en Mando.
+  {id:"real",     name:"Cuenta real",        role:"Modo real con OKX EU: apagado hasta que pongas tus claves y lo actives tú; mientras, opera el paper.", model:"Código", idle:"Apagado", grid:false}
 ];
 const AG = Object.fromEntries(AGENTS.map(a => [a.id, a]));
 const KINDS = {
@@ -995,7 +1043,8 @@ const KINDS = {
   manage:    {label:"Gestión",      agent:"exec",     tone:"info"},
   closed:    {label:"Cerrada · paper", agent:"exec",  tone:"good"},
   reflejo:   {label:"Reflejo en la cripto", agent:"flow", tone:"info"},   // noticia macro o geopolítica: ¿la cripto la confirma? (patch.reflejo)
-  entrada_noticia:{label:"Entrada por noticia", agent:"strat", tone:"info"}   // noticia de un grupo fiable: espera confirmación del precio (patch.entrada_noticia)
+  entrada_noticia:{label:"Entrada por noticia", agent:"strat", tone:"info"},   // noticia de un grupo fiable: espera confirmación del precio (patch.entrada_noticia)
+  real_aviso:{label:"Aviso del modo real", agent:"real", tone:"warn"}   // modo real (docs/06): cambios de modo, parada, reconciliación, SIN STOP (patch.aviso)
 };
 // Entrada por noticia fiable (bot/entrada_noticias.py, evento «entrada_noticia»): estado de cada moneda.
 const ENT = {esperando:["warn","Esperando confirmación"], confirmada:["good","Confirmada → operación"], caducada:["muted","Caducada"], vetada:["bad","Vetada"]};
@@ -1293,8 +1342,13 @@ const S = {
   fiables:null, fiabF:"todos",   // último cálculo de «noticias_fiables» (bot/fiables.py) y filtro de su tabla
   // Por qué entra o no: filas de «decisiones_apertura» (GET /api/decisiones y mensajes «decision_apertura»), la más reciente primero
   dec:[], decRev:0, decDemo:false, decApi:null,
-  // Gráfica de cada posición: precios en vivo cada 2 s por moneda (en directo) y velas del bot por moneda, tamaño y desde
-  ticks:{}, velas:{}
+  // Gráfica de cada posición: precios en vivo cada 2 s por moneda (en directo) y velas de OKX EU (o del bot) por moneda, tamaño y desde
+  ticks:{}, velas:{},
+  // Comisiones del paper: mensaje suelto «comisiones» (la cartera trae las suyas), orden pendiente y perfil de la demostración
+  comis:null, comPend:null, demoCom:null,
+  // Cuenta real (OKX EU): último «cuenta_real» o GET /api/real, estado de esa ruta, orden pendiente, lo que se escribe en el
+  // panel (frase y límites, para no perderlo al redibujar) y el modo de ejemplo de la demostración
+  real:null, realApi:null, realPend:null, realForm:{frase:"", lim:{}}, realDemo:"apagado"
 };
 for (const c of COINS){ S.prices[c]=INFO[c].price; S.p0[c]=INFO[c].price; S.hist[c]=[]; }
 S.prices.USDT = 1;
@@ -1330,6 +1384,8 @@ function ingest(msg){
   if (msg.type==="orden_web") onOrden(msg);
   if (msg.type==="noticias_fiables") onFiables(msg);
   if (msg.type==="decision_apertura") onDecision(msg);
+  if (msg.type==="cuenta_real") onReal(msg);   // modo real (docs/06): lo del panel «Cuenta real»; nunca lleva claves
+  if (msg.type==="comisiones" && (strOk(msg.perfil) || strOk(msg.id))) { S.comis = msg; S.dirty = true; }   // perfil suelto (la cartera manda)
   if (msg.type==="portfolio") { applyPortfolio(msg); S.dirty=true; }
   if (msg.type==="market") {
     Object.assign(S.prices, msg.prices||{}); for (const c in (msg.flow||{})) S.flow[c]=msg.flow[c];
@@ -1369,6 +1425,7 @@ async function loadApi(which){   // datos que no van por el WebSocket: backtest 
     if (!which || which==="res"){ const r = await fetch("/api/resultados"); if (r.ok) S.results = await r.json(); }
     S.dirty = true;
   } catch(e){ /* el bot puede estar reiniciándose; se reintenta en la próxima ronda */ }
+  if (!which || which==="real") await loadReal();   // cuenta real: también va en el estado inicial del WebSocket («cuenta_real»)
   if (!which || which==="fiables") try {   // noticias fiables: también van en el estado inicial del WebSocket; un bot sin la ruta da 404
     const r = await fetch("/api/noticias_fiables"); if (r && r.ok){ const j = await r.json(); if (isObj(j) && !Array.isArray(j)) onFiables({...j, type:"noticias_fiables"}); }
   } catch(e){ /* sin cálculo todavía o bot sin esta ruta: se espera al mensaje del WebSocket */ }
@@ -1461,6 +1518,7 @@ function resetLive(msg){
     trend:null, criptoAp:null, orderflow:null, predictions:null, srcSummary:null, portfolio:null, results:null,
     evo:null, apr:null, fv:null, fvList:null, fvCand:null, evoHist:null, evoInf:null, evoNews:null, evoMedio:null, evoSel:null,
     evoDemo:false, evoOrdTs:undefined, evoPend:null, fvPend:null, aprPend:null, evoRev:S.evoRev+1, fiables:null,
+    comis:null, comPend:null, real:null, realApi:null, realPend:null,
     velas:{}, sel:null, pickSel:true, dirty:true});
   // Las decisiones guardadas siguen valiendo tras un reinicio del bot (están en su base); las de ejemplo, no.
   if (S.decDemo) Object.assign(S, {dec:[], decDemo:false, decApi:null});
@@ -1477,6 +1535,10 @@ function onEvent(e){
   e.agent = e.agent || k.agent; if (!S.ag[e.agent]) e.agent = k.agent;   // un agente que la web no conoce no debe romper nada
   if (e.kind==="reflejo" && !e.tone) e.tone = reflejoInfo(e.patch && e.patch.reflejo)[0];
   if (e.kind==="entrada_noticia"){ const x = entInfo(e); if (!e.tone) e.tone = x.tone; if (!e.text && x.motivo) e.text = x.motivo; }
+  if (e.kind==="real_aviso"){   // aviso del modo real: SIN STOP en rojo y con aviso fuerte; no es una historia del cable
+    const av = realAviso(e); if (!e.tone) e.tone = av.sinStop===true ? "bad" : av.sinStop===false ? "good" : "warn";
+    if (av.sinStop===true && S.live) toast(`¡SIN STOP EN OKX! ${e.title || ""} Mira la pestaña «Cuenta real»: si no se resuelve, pon el stop o cierra tú en la web de OKX.`, 12000);
+    e.story = null; }
   S.events.push(e); if (S.events.length>1200) S.events.splice(0, S.events.length-1200);
   S.counts[e.kind]++;
   if (e.kind==="humanok" && e.patch && e.patch.human && e.patch.human.mode==="auto") S.counts.humanauto++;
@@ -1785,7 +1847,9 @@ function riskStage(id){
     {ok:S.positions.length<S.limits.max_positions, t:`Posiciones abiertas ${S.positions.length} de ${S.limits.max_positions} como máximo`},
     {ok:expo+S.equity*0.2 <= S.equity*1.0, t:`Exposición total ${nf(expo/S.equity*100,0)} % ≤ 100 % del capital (todas correlacionan > 0,8 con BTC)`},
     {ok:spread<=5, t:`Diferencial de ${c}: ${nf(spread,1)} pb ≤ 5 pb`},
-    {ok:!macroSoon, t:"Sin dato macro de alto impacto en los próximos 10 min"}
+    {ok:!macroSoon, t:"Sin dato macro de alto impacto en los próximos 10 min"},
+    // los cortos van en X-Perps: sin esa cuenta (perfil de comisiones «sin X-Perps») no hay cortos (código sin_cortos)
+    ...(t.side==="short" ? [{ok:comPerfil().cortos, t:comPerfil().cortos ? "Corto en X-Perps: hay cuenta X-Perps (perfil de comisiones)" : "Sin cuenta X-Perps no hay cortos (perfil de comisiones «OKX EU sin cuenta X-Perps»)"}] : [])
   ];
   const bad = checks.find(x=>!x.ok);
   if (bad){
@@ -1835,8 +1899,11 @@ function sendOrder(id){
     const slip = rnd(0.3,3.8), dir = t.side==="long"?1:-1, px = S.prices[c]*(1+dir*slip/10000);
     // Horquilla pura (entrada por noticia fiable): sin objetivo parcial ni break-even, objetivo a tp2R y tope de 24 h.
     const br = !!t.bracket, rr = br && isNum(t.tp2R) ? t.tp2R : 3;
+    // largos al contado y cortos en X-Perps; la comisión de entrada (a mercado: tomador) con el perfil de comisiones
+    const inst = t.side==="short" ? "perp" : "spot", fEnt = t.qty*px*comPct(inst, "tomador")/100;
     const pos = {id, coin:c, side:t.side, qty:t.qty, entry:px, sl:px*(1-dir*t.stopPct/100), tp1:br ? null : px*(1+dir*t.stopPct/100*1.5), tp2:px*(1+dir*t.stopPct/100*rr),
-      notional:t.qty*px, riskUsd:t.riskUsd, opened:S.vnow, be:false, headline:st.headline,
+      notional:t.qty*px, riskUsd:t.riskUsd, opened:S.vnow, be:false, headline:st.headline, instrument:inst, funding:0,
+      costes:{entrada:fEnt, salidas:0, funding:0, total:fEnt, total_R:t.riskUsd ? fEnt/t.riskUsd : null},
       bracket:br, maxAge:br ? (t.maxAgeMs || 24*3600e3) : 60*60000, tags:t.tags || null, strategy:t.mode};
     S.positions.push(pos);
     emit({kind:"filled", story:id, title:`${t.side==="long"?"Comprado":"Vendido"} ${c} a ${pricef(px)}`, coins:[c],
@@ -1857,13 +1924,19 @@ function managePositions(){
 }
 function closePos(p, exit, why){
   S.positions.splice(S.positions.indexOf(p),1);
-  const dir = p.side==="long"?1:-1, fees = p.notional*0.0008*2;
+  // Comisiones con el perfil en uso: entrada a mercado (tomador, ya pagada) y salida al objetivo con orden límite (creador) o
+  // a mercado (tomador y deslizamiento: stop, tiempo, a mano), como el paper del bot.
+  const dir = p.side==="long"?1:-1, inst = p.instrument || "spot", limit = /^Objetivo/.test(why);
+  if (!limit) exit *= 1 - dir*comSlip(p.coin)/1e4;
+  const fEnt = isObj(p.costes) && isNum(p.costes.entrada) ? p.costes.entrada : p.notional*comPct(inst, "tomador")/100;
+  const fSal = p.qty*exit*comPct(inst, limit ? "creador" : "tomador")/100, fees = fEnt + fSal;
   const pnl = (exit-p.entry)*p.qty*dir - fees, R = pnl/p.riskUsd;
   S.equity += pnl; if (pnl<0) S.dayLoss += -pnl/eqBase()*100;
-  const rec = {...p, exit, why, pnl, R, closedAt:S.vnow};
+  const rec = {...p, exit, why, pnl, R, closedAt:S.vnow, fees, commissions:fees, funding:0,
+    costes:{entrada:fEnt, salidas:fSal, funding:0, total:fees, total_R:p.riskUsd ? fees/p.riskUsd : null}};
   S.closed.unshift(rec);
   emit({kind:"closed", story:p.id, tone:pnl>=0?"good":"bad", title:`${p.coin} cerrada: ${pnl>=0?"+":""}${nf(pnl,2)} ${QUOTE}`, coins:[p.coin],
-    text:`${why} · ${R>=0?"+":""}${nf(R,2)} R · comisiones ${nf(fees,2)} ${QUOTE}`, patch:{result:rec}});
+    text:`${why} · ${R>=0?"+":""}${nf(R,2)} R · comisiones ${cU(fees)} ${QUOTE} (entrada ${cU(fEnt)} + salida ${cU(fSal)}, ${comPerfil().corto})`, patch:{result:rec}});
 }
 function checkScheduled(){
   for (const s of [...S.scheduled]) if (S.vnow >= s.at){ S.scheduled.splice(S.scheduled.indexOf(s),1); sendOrder(s.id); }
@@ -1918,7 +1991,8 @@ function equityNow(){
 }
 const eqBase = () => (S.live && S.portfolio && S.portfolio.start_equity) || DEMO_EQUITY;   // capital inicial de la cuenta paper
 // Resultado latente de una posición: en directo, el que calcula el bot (con la comisión de entrada).
-function posPnl(p){ return S.live && p.upnl!=null ? p.upnl : ((S.prices[p.coin]||p.entry)-p.entry)*p.qty*(p.side==="long"?1:-1); }
+// En la demostración, con la comisión de entrada pagada, como el bot.
+function posPnl(p){ return S.live && p.upnl!=null ? p.upnl : ((S.prices[p.coin]||p.entry)-p.entry)*p.qty*(p.side==="long"?1:-1) - (!S.live && isObj(p.costes) && isNum(p.costes.entrada) ? p.costes.entrada : 0); }
 const posR = p => p.riskUsd ? posPnl(p)/p.riskUsd : 0;
 
 // ---------- Render ----------
@@ -1926,7 +2000,15 @@ function agChip(id){ const a=AG[id]; return `<span class="ag${id==="human"?" hum
 function pill(tone, label){ return `<span class="pill ${tone}">${ICON[tone]} ${esc(label)}</span>`; }
 function coinTags(cs){ return (cs||[]).map(c=>`<span class="coin">${c}</span>`).join(""); }
 // Etiqueta de un evento en el cable: la del tipo o, en un «reflejo», lo que dice la cripto de la noticia.
-function evLabel(e){ return e.kind==="reflejo" ? reflejoInfo(e.patch && e.patch.reflejo)[1] : e.kind==="entrada_noticia" ? "Noticia fiable · " + entInfo(e).label : KINDS[e.kind].label; }
+// Los eventos del modo real llevan patch.real = {modo, demo} (docs/06): la etiqueta dice dónde pasó (nunca se confunden con el paper).
+function evLabel(e){
+  if (e.kind==="real_aviso"){ const s = realAviso(e).sinStop; return s===true ? "SIN STOP EN OKX" : s===false ? "Stop repuesto en OKX" : KINDS.real_aviso.label; }
+  const base = e.kind==="reflejo" ? reflejoInfo(e.patch && e.patch.reflejo)[1] : e.kind==="entrada_noticia" ? "Noticia fiable · " + entInfo(e).label : KINDS[e.kind].label;
+  const rl = isObj(e.patch) && isObj(e.patch.real) ? e.patch.real : null;
+  return rl ? `${base} · ${rl.demo ? "demo de OKX" : rl.modo==="real" ? "dinero real" : "solo lectura"}` : base;
+}
+// patch.aviso de un «real_aviso»: sin_stop true (posición SIN STOP en OKX), false (ya lo vuelve a tener) o null.
+const realAviso = e => { const a = isObj(e) && isObj(e.patch) && isObj(e.patch.aviso) ? e.patch.aviso : {}; return {a, sinStop: typeof a.sin_stop==="boolean" ? a.sin_stop : null}; };
 function reflejoPill(r){ const [tone, label] = reflejoInfo(r); return `<span class="pill ${tone} rfl">${ICON[tone]} ${esc(label)}</span>`; }
 
 function renderHeader(){
@@ -1942,6 +2024,9 @@ function renderHeader(){
   const pb = $("#pendBadge"); pb.hidden = !S.pending.length; pb.textContent = S.pending.length;
   const np = !S.evoDemo && isObj(S.evo) && Array.isArray(S.evo.propuestas) ? S.evo.propuestas.length : 0;   // propuestas de la evolución
   const eb = $("#evoBadge"); eb.hidden = !np; eb.textContent = np;
+  // Cuenta real: aviso en la pestaña con una posición SIN STOP en OKX, una parada activa o el modo real activo
+  const V = S.live ? realView() : null, rb = $("#realBadge"), ss = realSinStop(V), rt = ss.length ? "SIN STOP" : isObj(V) && isObj(V.parada) ? "parada" : realModo(V)==="real" ? "activo" : "";
+  rb.hidden = !rt; rb.textContent = rt;
 }
 function renderFunnel(){
   const c = S.counts, top = Math.max(1, STAGES[0].n(c));
@@ -1968,6 +2053,7 @@ function sourceList(){
 function fmtLat(x){ return x==null ? "–" : x<1000 ? Math.round(x)+" ms" : x<60000 ? nf(x/1000,1)+" s" : dur(x); }
 function agentState(id){
   const a = S.ag[id];
+  if (id==="real") return realAgentState(a);
   if (a.off) return {cls:"off", txt: id==="local" ? "Apagada" : "Aún no activo", now:a.note||""};
   if (id==="exec" && S.execStop) return {cls:"stop", txt:"Detenido por ti", now: S.live ? "Sin operaciones paper nuevas hasta que reanudes" : "No enviará órdenes hasta que reanudes"};
   if (id==="human"){ return S.pending.length ? {cls:"wait", txt:`${S.pending.length} pendiente${S.pending.length>1?"s":""}`, now:`Revisa: ${S.stories.get(S.pending[0].id)?.strat ? (()=>{const t=S.stories.get(S.pending[0].id).strat;return `${t.side==="long"?"compra":"venta"} de ${t.coin} (${t.mode})`;})() : ""}`}
@@ -1981,7 +2067,7 @@ function agentState(id){
   return a.busy ? {cls:"busy", txt:`Procesando${a.busy>1?` (${a.busy})`:""}`, now:a.now} : {cls:"", txt:AG[id].idle, now:a.now ? "Último: "+a.now.replace(/^(Verificando|Evaluando impacto de|Diseñando entrada para) /,"") : "Sin trabajo aún"};
 }
 function renderAgents(){
-  $("#agents").innerHTML = AGENTS.map(a => {
+  $("#agents").innerHTML = AGENTS.filter(a => a.grid!==false).map(a => {
     const x = S.ag[a.id], s = agentState(a.id);
     const lab = a.id==="hunter" ? ["Captadas","Pasan","Ruido"] : a.id==="local" ? ["Triadas","Pasan","Archivadas"] : a.id==="human" ? ["Revisadas","Aprobadas","Rechazadas"] : a.id==="exec" ? ["Eventos","Ejecutadas","Bloqueadas"] : ["Procesadas","Aprobadas","Descartadas"];
     const vals = a.id==="hunter" ? [S.counts.captured+S.counts.filtered, S.counts.captured, S.counts.filtered] : a.id==="local" ? [S.counts.triaged+S.counts.lowprio, S.counts.triaged, S.counts.lowprio] : a.id==="human" ? [S.counts.humanok-S.counts.humanauto+S.counts.humanko, S.counts.humanok-S.counts.humanauto, S.counts.humanko] : a.id==="exec" ? [x.n, S.counts.filled, S.counts.blocked] : [x.n, x.ok, x.ko];
@@ -2013,13 +2099,15 @@ function feedMatches(e){
   if (f.q){ const q=f.q.toLowerCase(); if (!(e.title+" "+(e.text||"")+" "+(e.coins||[]).join(" ")).toLowerCase().includes(q)) return false; }
   return true;
 }
+// A dónde lleva el clic en una fila del cable: su expediente o, en un aviso del modo real, la pestaña «Cuenta real».
+const evLink = e => e.kind==="real_aviso" ? 'data-tabgo="real"' : `data-story="${esc(e.story||"")}"`;
 function renderFeed(){
   const out = []; for (let i=S.events.length-1; i>=0 && out.length<180; i--){ const e=S.events[i]; if (feedMatches(e)) out.push(e); }
   if (!out.length){ $("#feed").innerHTML = `<li class="empty">Nada coincide con el filtro todavía.</li>`; return; }
   $("#feed").innerHTML = out.map(e => {
     const k = KINDS[e.kind], tone = e.tone||k.tone, st = e.story && S.stories.get(e.story);
     const l = st && st.t0 ? e.ts - st.t0 : 0;
-    return `<li class="ev${k.drop?" dim":""}" data-story="${e.story||""}" aria-current="${!!e.story && e.story===S.sel}">
+    return `<li class="ev${k.drop?" dim":""}" ${evLink(e)} aria-current="${!!e.story && e.story===S.sel}">
       <time>${hms(e.ts)}</time>${agChip(e.agent)}${pill(tone, evLabel(e))}
       <div class="ev-body"><b>${esc(e.title)}</b>${e.kind==="captured" && e.patch && e.patch.fresh===false ? `<span class="ctx" title="Publicada hace más de 15 min: sirve de contexto para las aperturas, no para entrar ya">contexto</span>` : ""}<span class="ev-sub">${esc(e.text||"")}${l>0?` · <span class="mono">${lat(l)}</span>`:""}${e.llm?` · <span class="mono">${esc(e.llm.model)} ${usd(e.llm.cost,4)}</span>`:""}</span></div>
       <span class="coins">${coinTags(e.coins)}</span></li>`;
@@ -2243,8 +2331,8 @@ function posPartTxt(p){
 const posNotional = p => { const x = posParts(p); return (isNum(p.notional) ? p.notional : 0) * (x && x.done ? 1 - x.frac : 1); };
 function posMeta(p){
   if (!p) return "";
-  const u = posPnl(p), pt = posPartTxt(p);
-  return `${u>=0?"+":""}${nf(u,2)} ${QUOTE} · ${pt ? "R total " : ""}${nf(posR(p),2)} R${pt ? `<br>${esc(cap(pt))}` : ""}`;
+  const u = posPnl(p), pt = posPartTxt(p), ct = posCostTxt(p);
+  return `${u>=0?"+":""}${nf(u,2)} ${QUOTE} · ${pt ? "R total " : ""}${nf(posR(p),2)} R${pt ? `<br>${esc(cap(pt))}` : ""}${ct ? `<br><span class="note">${esc(ct)}</span>` : ""}`;
 }
 // Posición o cerrada del paper sin expediente en la web (abierta antes de conectar o tras un reinicio)
 const paperStory = r => ({id: fiabStory(r) || r.id || r.story || "", headline: r.headline, events: [],
@@ -2283,6 +2371,8 @@ function renderTrades(){
     ["Caída máxima", `${nf(mdd,2)} %`, "desde el máximo de la sesión"]
   ].map(([l,v,s])=>`<div class="kpi"><small>${l}</small><b>${v}</b><span>${s}</span></div>`).join("");
   { const sn = stratNow(), el = $("#tradesStrat"); el.hidden = !sn; el.innerHTML = sn + (sn && !S.live ? `<br><span class="note">${esc(DEMO_TABLERO)}</span>` : ""); }
+  safe(renderCom);   // comisiones del paper: perfil en uso y su selector
+  putH($("#tradesNoteTxt"), `Las operaciones usan precios reales de OKX EU, pero no se envía ninguna orden al exchange. ${esc(realShort())}${realModo(realOut())==="apagado" ? "" : " (el paper sigue aparte)"} · pestaña «Cuenta real».`);
   const all = [...S.stories.values()].filter(x=>x.strat && !x.strat.none), now = S.vnow;
   // Aperturas del motor (mensaje «openings»; en la demostración, el motor simulado): programadas y midiendo
   const O = motorO(), MW = motorWins(O, now);
@@ -2315,7 +2405,7 @@ function renderTrades(){
     ["Diferencial máximo", "5 pb en la entrada", 0, false],
     ["Pausa macro", "Sin entradas 10 min antes de un dato de EE.UU.", 0, false]
   ].map(([k,v,w,hot])=>`<li><span>${k}</span><b class="mono">${v}</b>${w?`<span class="meter"><span class="${hot?"hot":""}" style="width:${w}%"></span></span>`:""}</li>`).join("");
-  $("#closedRows").innerHTML = S.closed.slice(0,40).map(r=>`<tr data-story="${esc(fiabStory(r) || r.id)}" style="cursor:pointer"><td class="mono">${hms(r.closedAt)}</td><td><b>${r.coin}</b>${isFiableTrade(r) ? " " + FIAB_PILL : ""}</td><td><span class="side ${r.side}">${r.side==="long"?"COMPRA":"VENTA"}</span></td><td>${esc(r.why)}</td><td class="r mono">${pricef(r.entry)}</td><td class="r mono">${tradeExitHtml(r)}</td><td class="r mono ${r.pnl>=0?"pos":"neg"}">${r.pnl>=0?"+":""}${nf(r.pnl,2)}</td><td class="r mono">${tradeRHtml(r, true)}</td><td>${esc(short(r.headline,60))}</td></tr>`).join("") || `<tr><td colspan="9" class="note">Aún no hay operaciones cerradas.</td></tr>`;
+  $("#closedRows").innerHTML = S.closed.slice(0,40).map(r=>`<tr data-story="${esc(fiabStory(r) || r.id)}" style="cursor:pointer"><td class="mono">${hms(r.closedAt)}</td><td><b>${r.coin}</b>${isFiableTrade(r) ? " " + FIAB_PILL : ""}</td><td><span class="side ${r.side}">${r.side==="long"?"COMPRA":"VENTA"}</span></td><td>${esc(r.why)}</td><td class="r mono">${pricef(r.entry)}</td><td class="r mono">${tradeExitHtml(r)}</td><td class="r mono ${r.pnl>=0?"pos":"neg"}">${r.pnl>=0?"+":""}${nf(r.pnl,2)}</td><td class="r mono">${tradeRHtml(r, true)}</td>${(c => `<td class="r mono"${c.ttl ? ` title="${esc(c.ttl)}"` : ""}>${c.html}</td>`)(costCell(r))}<td>${esc(short(r.headline,60))}</td></tr>`).join("") || `<tr><td colspan="10" class="note">Aún no hay operaciones cerradas.</td></tr>`;
   renderEquity();
 }
 function renderEquity(){
@@ -2350,13 +2440,175 @@ function spark(arr, up){
   const col = up?"var(--good)":"var(--bad)";
   return `<svg viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true"><path d="M${pts.join(" L")} L100,40 L0,40 Z" fill="${col}" fill-opacity=".1"/><path d="M${pts.join(" L")}" fill="none" stroke="${col}" stroke-width="1.6" vector-effect="non-scaling-stroke"/></svg>`;
 }
+// ---------- Comisiones del paper (perfil de OKX EU: bot/comisiones.py) ----------
+// Perfiles de la ayuda oficial de OKX EU (docs/06, apartado 4), en % por lado. La entrada, el stop y los cierres a mercado
+// pagan la de tomador; el objetivo y la parcial (órdenes límite), la de creador; más el deslizamiento de siempre (2 pb y
+// medio diferencial en cada orden a mercado). El perfil en uso lo dice la cartera (portfolio.comisiones, comisiones.vista);
+// con la comisión real de la cuenta leída en solo lectura manda esa («cuenta»). Sin cuenta X-Perps no hay cortos.
+const COM_PERFILES = {
+  okx_eu_con_xperps:{nombre:"OKX EU con cuenta X-Perps", corto:"OKX EU con X-Perps", spot:{creador:0.08, tomador:0.10}, perp:{creador:0.02, tomador:0.05}, cortos:true},
+  okx_eu_sin_xperps:{nombre:"OKX EU sin cuenta X-Perps", corto:"OKX EU sin X-Perps", spot:{creador:0.20, tomador:0.35}, perp:null, cortos:false},
+  cuenta:{nombre:"Comisión real de tu cuenta de OKX EU", corto:"la de tu cuenta de OKX", spot:null, perp:null, cortos:null}};
+const COM_DEF = "okx_eu_con_xperps", COM_SIN = "okx_eu_sin_xperps", COM_SLIP_PB = 2;
+const DEMO_NADA = "Ejemplo: en la demostración no se envía nada al bot.";
+const comLado = x => { if (!isObj(x)) return null; const t = numOf(x.tomador, x.taker); return t!=null && t >= 0 ? {creador:numOf(x.creador, x.maker) ?? t, tomador:t} : null; };
+// Lo que dice el bot (o la demostración) de las comisiones del paper, tal cual.
+function comRaw(){
+  if (!S.live) return {perfil:S.demoCom || COM_DEF, demo:true};
+  const pf = S.portfolio;
+  if (pf && isObj(pf.comisiones)) return pf.comisiones;
+  const id = pf ? strOk(pf.comisiones_perfil) || strOk(pf.perfil_comisiones) : null;
+  return id ? {perfil:id} : isObj(S.comis) ? S.comis : null;
+}
+// Perfil en uso. Sin dato del bot (uno de antes del 29-10-2026) es el modelo de siempre: 0,10 % por lado (viejo).
+function comPerfil(){
+  const raw = comRaw();
+  if (!isObj(raw)) return {id:null, nombre:"0,10 % por lado (el bot aún no dice su perfil)", corto:"0,10 % por lado", spot:{creador:0.10, tomador:0.10},
+    perp:{creador:0.10, tomador:0.10}, cortos:true, slip:COM_SLIP_PB, elegido:null, cuenta:false, viejo:true, demo:false, perfiles:[],
+    esperando:!S.portfolio};   // aún sin cartera del bot: no se sabe todavía
+  const id = strOk(raw.perfil) || strOk(raw.id) || COM_DEF, K = COM_PERFILES[id] || {};
+  const spot = comLado(raw.spot) || K.spot || {creador:0.10, tomador:0.10}, perp = raw.perp===null ? null : comLado(raw.perp) || K.perp || null;
+  const cortos = (typeof raw.cortos==="boolean" ? raw.cortos : K.cortos!==false) && !!perp;
+  const perfiles = (Array.isArray(raw.perfiles) ? raw.perfiles : []).map(x => isObj(x) ? strOk(x.id) || strOk(x.perfil) : strOk(x)).filter(Boolean);
+  const el = strOk(raw.elegido);
+  return {id, nombre:strOk(raw.nombre) || K.nombre || id, corto:K.corto || strOk(raw.nombre) || id, spot, perp, cortos,
+    slip:numOf(raw.deslizamiento_bps, raw.desliz_pb) ?? COM_SLIP_PB, elegido:el && el!=="cuenta" ? el : id!=="cuenta" ? id : null, cuenta:id==="cuenta",
+    viejo:false, demo:!!raw.demo, perfiles, porQue:strOk(raw.por_que), avisoConfig:strOk(raw.aviso_config)};
+}
+const comNombre = id => (COM_PERFILES[id] || {}).nombre || String(id || "");
+// Relación neta EN DINERO de una horquilla (por defecto la de «6 diarias»: stop 1,5 %, objetivo 3R) con unas tasas: lo
+// que deja el objetivo (tomador al entrar, creador al salir con orden límite, deslizamiento al entrar) frente a lo que
+// cuesta el stop (tomador y deslizamiento en los dos lados). Tu regla (≥ 2:1) se comprueba en R de precio, antes de costes.
+function netRatio(sp, slipPb, stop = 1.5, r = 3){
+  if (!isObj(sp) || !isNum(sp.tomador) || !isNum(sp.creador)) return null;
+  const sl = slipPb/100, win = r*stop - sp.tomador - sp.creador - sl, loss = stop + 2*sp.tomador + 2*sl;
+  return loss > 0 ? win/loss : null;
+}
+const feePct = v => isNum(v) ? `${nf(v, Math.round(v*1000) % 10 ? 3 : 2)} %` : "–";   // 0,10 % · 0,075 %
+// Comisiones en USDC: con 3 decimales por debajo de 1 (en la cartera de prueba son céntimos y las partes deben sumar).
+const cU = v => nf(v, Math.abs(v) < 1 ? 3 : 2);
+// % por lado: «tomador» (a mercado) o «creador» (límite). Una posición usa las tasas con que se abrió (p.costes.tomador y
+// creador, o p.comision); si no, las del perfil en uso. Un perpetuo sin X-Perps paga como el contado (las más altas).
+function comPct(inst, tipo, p){
+  const C = comPerfil(), L = (p && (comLado(p.costes) || comLado(p.comision))) || (inst==="perp" && C.perp ? C.perp : C.spot);
+  return tipo==="creador" ? L.creador : L.tomador;
+}
+// Deslizamiento previsto de una orden a mercado (pb): 2 pb más medio diferencial (sin dato, 1 pb), como el paper.
+const comSlip = coin => comPerfil().slip + (isObj(S.spread) && isNum(S.spread[coin]) && S.spread[coin] >= 0 ? S.spread[coin]/2 : 1);
+// Coste en USDC de cerrar qty a precio v: tomador y deslizamiento a mercado (stop, tiempo, a mano) o creador con orden límite.
+function exitCost(qty, v, coin, inst, limit, p){
+  if (!(qty > 0) || !(v > 0)) return null;
+  return qty*v*(comPct(inst, limit ? "creador" : "tomador", p)/100 + (limit ? 0 : comSlip(coin)/1e4));
+}
+// Costes de una operación del paper: comisión de entrada, de las salidas, funding y total (USDC y R). El bot los manda en
+// «costes» (29-10-2026); antes, en commissions / fees / funding (contrato 3.2). Total = comisiones − funding (el cobrado
+// resta, el pagado suma), como «fees». Una abierta sin costes del bot lleva la de entrada estimada con el perfil (est).
+function costOf(t, open){
+  if (!isObj(t)) return null;
+  const C = isObj(t.costes) ? t.costes : {}, n = (...k) => numOf(...k.map(x => C[x]));
+  let ent = numOf(n("entrada", "entrada_usdc", "comision_entrada"), t.comision_entrada), est = C.estimado===true;   // estimado: cerrada antes de los perfiles
+  const sal = numOf(n("salidas", "salidas_usdc", "salida", "comision_salidas"), t.comision_salidas, t.comision_salida);
+  const fund = numOf(n("funding", "funding_usdc"), t.funding);
+  let com = numOf(n("comisiones", "comisiones_usdc"), t.commissions, isNum(t.comisiones) ? t.comisiones : null);
+  if (open && com==null && ent==null && sal==null && isNum(t.notional) && t.notional > 0){
+    ent = t.notional*comPct(t.instrument==="perp" ? "perp" : "spot", "tomador", t)/100; est = true; }
+  if (com==null && (ent!=null || sal!=null)) com = (ent || 0) + (sal || 0);
+  const total = numOf(n("total", "total_usdc"), open ? null : t.fees) ?? (com!=null ? com - (fund || 0) : null);
+  if (total==null) return null;
+  const risk = numOf(t.riskUsd), R = numOf(n("total_R", "R", "total_r")) ?? (risk ? total/risk : null);
+  return {ent, sal, fund, com, total, R, est, perfil:strOk(C.perfil), ahora:n("salir_ahora"), ahoraR:n("salir_ahora_R")};
+}
+// Lo que costaría cerrar ahora a mercado lo que queda de una posición: tomador y deslizamiento, como al stop (la misma
+// base). El bot manda «salir_ahora» sin el deslizamiento: se le suma; sin cantidad o sin precio, null.
+function nowCost(p, qty, px){
+  const inst = p && p.instrument==="perp" ? "perp" : "spot", c = exitCost(qty, px, p && p.coin, inst, false, p);
+  if (c!=null) return c;
+  const b = isObj(p) && isObj(p.costes) ? numOf(p.costes.salir_ahora) : null;
+  return b!=null && qty > 0 && px > 0 ? b + qty*px*comSlip(p.coin)/1e4 : b;
+}
+// «Costes 0,025 USDC (0,05 R) pagados · salir ahora ≈ 0,033 · al stop ≈ 0,032» (tarjeta de la cartera y expediente): lo
+// pagado y lo que costaría cerrar ahora o en el stop, a mercado (tomador y deslizamiento, las dos con la misma base).
+function posCostTxt(p){
+  const c = costOf(p, true); if (!c) return "";
+  const qty = numOf(p.qty), px = numOf(S.live ? S.prices[p.coin] : null, p.price, S.prices[p.coin]);
+  const ahora = c.ahora!=null || (qty > 0 && px > 0) ? nowCost(p, qty, px) : null;
+  const stop = exitCost(qty, numOf(p.sl), p.coin, p.instrument==="perp" ? "perp" : "spot", false, p);
+  const out = [ahora!=null ? `salir ahora ≈ ${cU(ahora)}` : "", stop!=null ? `${ahora!=null ? "al stop" : "salir al stop"} ≈ ${cU(stop)}` : ""].filter(Boolean).join(" · ");
+  return `Costes ${c.est ? "≈ " : ""}${cU(c.total)} ${QUOTE}${isNum(c.R) ? ` (${nf(c.R,2)} R)` : ""} pagados${out ? ` · ${out}` : ""}`;
+}
+// Celda «Costes» de una operación cerrada: total y R, con el desglose en el título (sin «funding» si no lo hubo).
+function costCell(t){
+  const c = costOf(t, false); if (!c) return {ttl:"", html:"–"};
+  const fu = isNum(t.funding) && t.funding ? t.funding : isNum(c.fund) && c.fund ? c.fund : 0;
+  const ttl = [c.com!=null ? `Comisiones ${cU(c.com)} ${QUOTE}${c.ent!=null ? ` (entrada ${cU(c.ent)}${c.sal!=null ? ` · salidas ${cU(c.sal)}` : ""})` : ""}` : "",
+    fu ? `funding ${fu>0?"cobrado":"pagado"} ${nf(Math.abs(fu),2)} ${QUOTE}` : ""].filter(Boolean).join(" y ");
+  const how = c.est ? ", estimadas: cerrada antes de las comisiones por perfil" : c.perfil ? `, perfil «${comNombre(c.perfil)}»` : "";
+  return {ttl: ttl ? `${ttl} (paper${how})` : "", html:`${cU(c.total)}${isNum(c.R) ? `<br><span class="note">${nf(c.R,2)} R</span>` : ""}${fu ? `<br><span class="note">funding ${sgn(fu,2)}</span>` : ""}`};
+}
+// Casilla «6 diarias en dinero»: la relación neta (después de costes) con estas tasas y la de los dos perfiles de OKX EU.
+function nrTxt(sp, slip){
+  const r = netRatio(sp, slip), con = netRatio(COM_PERFILES[COM_DEF].spot, slip), sin = netRatio(COM_PERFILES[COM_SIN].spot, slip);
+  if (r==null) return "";
+  const both = con!=null && sin!=null ? `con X-Perps ${nf(con,1)}:1, sin X-Perps ${nf(sin,1)}:1` : "";
+  return `<div><small>«6 diarias» en dinero (stop 1,5 %, 3R)</small><b class="${r < 2 ? "neg" : ""}">${nf(r,1)}:1 neto</b><span>gana ≈ ${nf(r,1)} por cada 1 que pierde, después de costes${both ? ` (${both})` : ""}; tu regla ≥ 2:1 se mide en R de precio, antes de costes</span></div>`;
+}
+// Panel «Comisiones del paper» (Estrategias y cartera): perfil en uso, tasas, deslizamiento, coste de la regla y selector.
+function renderCom(){
+  const C = comPerfil(), can = !S.live || botCan("comisiones"), sel = $("#comSel");
+  const ids = [...new Set([COM_DEF, COM_SIN, ...C.perfiles.filter(x => x!=="cuenta" && COM_PERFILES[x]), ...(C.elegido && COM_PERFILES[C.elegido] ? [C.elegido] : [])])];
+  const sig = ids.join("|");
+  if (sel._sig!==sig){ sel._sig = sig; sel.innerHTML = ids.map(id => `<option value="${esc(id)}">${esc(comNombre(id))}</option>`).join(""); }
+  if (document.activeElement!==sel) sel.value = C.elegido || COM_DEF;
+  sel.hidden = !can || C.viejo;
+  const pct2 = feePct, sp = C.spot, pp = C.perp;
+  const rt = inst => 2*((inst==="perp" && pp ? pp : sp).tomador + C.slip/100);
+  const tag = (tone, txt) => `<span class="pill ${tone}">${esc(txt)}</span>`;
+  const pills = [C.demo ? tag("warn", "Ejemplo") : "", C.id===COM_DEF && !C.cuenta ? tag("muted", "Por defecto (con X-Perps)") : "",
+    C.cuenta ? tag("info", "Leída de tu cuenta (solo lectura)") : "", C.cortos ? tag("good", "Con cortos (X-Perps)") : tag("bad", "Sin cortos")].filter(Boolean).join(" ");
+  let h = `<div class="com-now"><small class="note">Perfil en uso</small><b>${esc(C.nombre)}</b>${pills}</div>
+    <div class="com-grid">
+      <div><small>Contado · a mercado (tomador)</small><b>${pct2(sp.tomador)}</b><span>entrada, stop y cierres a mercado</span></div>
+      <div><small>Contado · orden límite (creador)</small><b>${pct2(sp.creador)}</b><span>objetivo y salida parcial</span></div>
+      <div><small>Cortos en X-Perps · tomador / creador</small><b>${pp && C.cortos ? `${pct2(pp.tomador)} / ${pct2(pp.creador)}` : "sin cortos"}</b><span>${pp && C.cortos ? "más el funding cada 8 h" : "sin cuenta X-Perps no hay perpetuos"}</span></div>
+      <div><small>Deslizamiento</small><b>${nf(C.slip,0)} pb + ½ diferencial</b><span>en cada orden a mercado</span></div>
+      <div><small>Ida y vuelta (regla del 3 % neto)</small><b>${pct2(rt("spot"))}${pp && C.cortos ? ` · ${pct2(rt("perp"))}` : ""}</b><span>tomador al entrar y al salir + ${nf(C.slip,0)} pb por lado${pp && C.cortos ? " (contado · X-Perps)" : ""}</span></div>
+      ${nrTxt(sp, C.slip)}
+    </div>`;
+  if (C.avisoConfig) h += `<div class="com-warn"><b>Ojo con tu configuración:</b> ${esc(C.avisoConfig)}.</div>`;
+  if (C.id===COM_DEF && !C.cuenta) h += `<p class="note">Hasta el 29-10-2026 el paper cobraba 0,10 % en todo; con este perfil, el objetivo y la parcial (orden límite) pagan 0,08 % y los cortos en X-Perps 0,05 % / 0,02 %. Las operaciones de antes siguen con lo que pagaron.</p>`;
+  if (C.viejo) h += C.esperando ? `<p class="note">Esperando la cartera del bot para saber con qué perfil de comisiones opera el paper.</p>`
+    : `<p class="note">El bot en marcha aún no publica su perfil de comisiones (llega al reiniciarlo): cobra 0,10 % por lado más deslizamiento, que no es menos que lo de OKX EU con cuenta X-Perps.</p>`;
+  else if (C.cuenta) h += `<p class="note">Manda la comisión real de tu cuenta de OKX, leída en solo lectura${C.porQue ? ` (${esc(C.porQue)})` : ""}. Solo la de tu cuenta de verdad (OKX_DEMO=0), nunca la de la demo. Si deja de leerse, vuelve el perfil elegido: «${esc(comNombre(C.elegido || COM_DEF))}».</p>`;
+  else if (S.live && !botCan("comisiones")) h += `<p class="note">Este bot aún no admite cambiar el perfil desde la web (llega al reiniciarlo); se puede fijar con BOT_COMISIONES.</p>`;
+  if (C.demo) h += `<p class="note">En la demostración el perfil solo cambia las operaciones simuladas de esta página; no se envía nada al bot.</p>`;
+  h += !C.cortos ? `<div class="com-warn"><b>Sin cuenta X-Perps: el motor no abre cortos</b> (las ventas se vetan con el motivo «sin cortos») <b>y el contado cuesta 0,35 % a mercado</b> (0,20 % con orden límite). Con la cuenta X-Perps abierta en OKX: 0,10 % / 0,08 % y cortos en X-Perps a 0,05 % / 0,02 %.</div>`
+    : `<div class="com-warn"><b>Ojo: sin cuenta X-Perps no hay cortos y el contado cuesta 0,35 %</b> a mercado (0,20 % con orden límite). Este perfil supone la cuenta X-Perps abierta en OKX (test de idoneidad); si no la abres, elige «OKX EU sin cuenta X-Perps» para medir lo que pagarías de verdad.</div>`;
+  putH($("#comBox"), h);
+}
+// Cambio de perfil desde el selector: en directo lo decide el bot (y lo confirma en su cartera); en la demostración, local.
+function comChange(v){
+  const C = comPerfil(), back = () => { $("#comSel").value = C.elegido || COM_DEF; };
+  if (!COM_PERFILES[v] || v==="cuenta" || v===(C.elegido || COM_DEF)){ back(); return; }
+  if (!S.live){ S.demoCom = v; S.demoMotor = null; S.decDemoK = null; S.dirty = true;
+    toast(`Ejemplo: las operaciones simuladas pasan a «${comNombre(v)}»${v===COM_SIN ? " (sin cortos)" : ""}. No se envía nada al bot.`, 6000); return; }
+  if (!botCan("comisiones")){ toast("Este bot aún no admite cambiar el perfil de comisiones desde la web: no se ha enviado nada.", 6000); back(); return; }
+  const q = v===COM_SIN ? "¿Pasar las comisiones del paper a «OKX EU sin cuenta X-Perps»? El contado cuesta 0,35 % a mercado (0,20 % con orden límite) y NO hay cortos: el motor deja de abrir ventas y las que lleguen se vetan. Solo cambia la cartera paper (dinero ficticio); tus reglas no se tocan."
+    : `¿Pasar las comisiones del paper a «${comNombre(v)}»? Solo cambia la cartera paper (dinero ficticio); tus reglas no se tocan.`;
+  if (!confirm(q)){ back(); return; }
+  if (!sendBot({type:"comisiones", perfil:v})){ back(); return; }
+  const p = S.comPend = {perfil:v, t:Date.now()};
+  toast("Perfil de comisiones pedido al bot (paper). Pendiente de que lo confirme en su cartera.", 6000);
+  confirmLater(() => S.comPend!==p || comPerfil().elegido===v, "El bot no ha confirmado el cambio de comisiones: mira el perfil en uso o vuelve a intentarlo.");
+}
+
 // ---------- Gráfica de cada posición abierta («En posición» y expediente) ----------
 // Precio desde un poco antes de la entrada hasta ahora: velas, un PUNTO en la entrada (hora y precio), las líneas del stop,
 // del objetivo (con la salida A, la de la parcial en 3R y la del suelo del cerrojo), el precio de ahora y, debajo, la
 // ganancia o pérdida de ahora (% y R), cuánto falta hasta el stop y el objetivo (%) y lo que daría cada uno (R y USDC).
-// En directo, las velas son las que el bot ya tiene (GET /api/velas: su caché de 1 min y la vigilancia en memoria, sin
-// pedir nada a la red; se repiden cada minuto) más los precios en vivo del WebSocket. Sin la ruta (404: el bot aún no se
-// ha reiniciado con ella) o sin velas, solo los precios en vivo desde que se abrió la web. En la demostración, velas
+// En directo, las velas son las de OKX EU del par que se operaría (GET /api/velas?fuente=okx: el bot pide las velas
+// públicas de OKX, sin claves, con caché; si OKX falla, da las suyas y lo dice en «fuente»; se repiden cada minuto) más
+// los precios en vivo del WebSocket. Sin la ruta (404: el bot aún no se ha reiniciado con ella) o sin velas, solo los
+// precios en vivo desde que se abrió la web. En la demostración, velas
 // SIMULADAS (ejemplo): las de la simulación de precios o, para el motor simulado, un camino con semilla que cuadra con lo
 // que pasó (no toca el stop; si la mitad ya salió, llega a 3R a esa hora).
 const VELA_TF = {"1m":60e3, "5m":300e3, "15m":900e3};
@@ -2391,9 +2643,11 @@ function tickPush(now){
     L.push([now, px]);
     if (now - L[0][0] > TICK_KEEP + 600e3){ const i = L.findIndex(x => now - x[0] <= TICK_KEEP); L.splice(0, i < 0 ? L.length : i); } }
 }
-// Velas del bot por moneda, tamaño y desde: {rows, upto (hasta dónde llegan sus datos), st: ok|no|fallo|null, p (petición)}.
+// Velas por moneda, tamaño y desde: {rows, upto (hasta dónde llegan sus datos), st: ok|no|fallo|null, p (petición),
+// src: okx|bot|null (de dónde salen: «fuente» de la respuesta; sin ella, un bot que aún no pide las de OKX), inst (par de
+// OKX EU, BTC-USDC…) y why (por qué no son de OKX, si el bot lo dice)}.
 function velasGet(coin, tf, from){
-  const k = `${coin}|${tf}|${from}`, now = Date.now(), v = S.velas[k] || (S.velas[k] = {rows:null, upto:null, at:0, st:null, p:null});
+  const k = `${coin}|${tf}|${from}`, now = Date.now(), v = S.velas[k] || (S.velas[k] = {rows:null, upto:null, at:0, st:null, p:null, src:null, inst:null, why:null});
   v.used = now;
   if (!v.p && now - v.at >= VELAS_REFRESH) v.p = velasLoad(v, coin, tf, from).finally(() => { v.p = null; });
   return v;
@@ -2402,10 +2656,16 @@ async function velasLoad(v, coin, tf, from){
   v.at = Date.now();
   let r = null;
   try {
-    r = await fetch(`/api/velas?coin=${encodeURIComponent(coin)}&desde=${Math.floor(from)}&tf=${tf}`);
+    // Velas públicas de OKX EU del par que se operaría (sin claves); si OKX falla, el bot da las suyas y lo dice en «fuente».
+    r = await fetch(`/api/velas?coin=${encodeURIComponent(coin)}&desde=${Math.floor(from)}&tf=${tf}&fuente=okx`);
     const j = r && r.ok ? await r.json() : null, rows = isObj(j) && Array.isArray(j.velas) ? j.velas.filter(okBar).map(x => x.slice(0, 5)) : [];
-    if (rows.length){ v.rows = rows; v.upto = isNum(j.hasta_datos) ? j.hasta_datos : rows[rows.length-1][0] + VELA_TF[tf]; v.st = "ok"; }
-    else if (!v.rows) v.st = r && (r.ok || r.status===404) ? "no" : "fallo";   // 404: bot sin la ruta o sin velas de ese tramo
+    if (rows.length){ v.rows = rows; v.upto = isNum(j.hasta_datos) ? j.hasta_datos : rows[rows.length-1][0] + VELA_TF[tf]; v.st = "ok";
+      v.src = j.fuente==="okx" ? "okx" : j.fuente==="bot" ? "bot" : null; v.inst = strOk(j.instId) || strOk(j.inst_id);
+      v.why = v.src==="bot" ? strOk(j.aviso) || strOk(j.motivo) || strOk(j.error) : null; }
+    else if (!v.rows && r && r.status===404){   // 404: un bot sin la ruta, o el de ahora sin velas en ese tramo (lo dice)
+      const t = typeof r.text==="function" ? await r.text().catch(() => "") : "";
+      v.st = /^(Sin velas|Las velas no están)/.test(String(t)) ? "vacio" : "no"; v.why = v.st==="vacio" ? strOk(String(t)) : null; }
+    else if (!v.rows) v.st = r && r.ok ? "no" : "fallo";
   } catch(e){ if (!v.rows) v.st = "fallo"; /* bot reiniciándose: se reintenta en un minuto */ }
   for (const [k, x] of Object.entries(S.velas)) if (Date.now() - (x.used || 0) > VELAS_FORGET) delete S.velas[k];
   S.dirty = true;
@@ -2456,9 +2716,9 @@ function demoPathBars(P, step, from, now){
 // Velas de la gráfica desde «from» hasta ahora, con el precio de ahora al final: {rows, px, st, sl, slKind}.
 function chartBars(P, step, tf, from, now){
   if (isNum(P.act) || P.path) return demoPathBars(P, step, from, now);
-  let rows = [], st = "sim";
+  let rows = [], st = "sim", src = null;
   if (S.live){
-    const v = velasGet(P.coin, tf, from); let upto = from; st = v.st;
+    const v = velasGet(P.coin, tf, from); let upto = from; st = v.st; src = v;
     if (v.rows){ rows = v.rows.filter(r => r[0] >= from).map(r => r.slice()); if (rows.length) upto = v.upto; }
     const tk = S.ticks[P.coin] || []; let i = 0, j = tk.length;   // el primer precio en vivo desde «upto» (búsqueda binaria)
     while (i < j){ const m = (i + j) >> 1; if (tk[m][0] < upto) i = m + 1; else j = m; }
@@ -2466,7 +2726,7 @@ function chartBars(P, step, tf, from, now){
   } else rows = pxLogBars(P.coin, step, from, now);
   const px = isNum(S.prices[P.coin]) && S.prices[P.coin] > 0 ? S.prices[P.coin] : numOf(P.price);
   if (isNum(px)) barAdd(rows, now, px, step);
-  return {rows, px, st, sl:P.sl, slKind:P.slKind};
+  return {rows, px, st, sl:P.sl, slKind:P.slKind, src:src && src.src, inst:src && src.inst, why:src && src.why};
 }
 // Lo que dibuja la gráfica de una posición del paper (contrato 2.5; en la demostración, las de la simulación).
 function chartPlan(p){
@@ -2480,7 +2740,7 @@ function chartPlan(p){
     floorPx:numOf(p.floor) > 0 ? p.floor : floorR > 0 ? e + d*floorR*r : null, floorR, trailR:numOf(p.lock_trail_r),
     locked:p.locked===true || !!(x && x.locked), slKind:strOk(p.sl_kind), riskUsd:numOf(p.riskUsd), price:numOf(p.price),
     rNow:p.riskUsd ? posR(p) : null, usdNow:posPnl(p), holdUntil:okT(p.hold_until) && p.hold_until > 0 ? p.hold_until : null,
-    holdLabel:strOk(p.hold_label)};
+    holdLabel:strOk(p.hold_label), qty:numOf(p.qty), inst:p.instrument==="perp" ? "perp" : "spot", cost:costOf(p, true), pos:p};
 }
 // Demostración: la de una posición del motor simulado (filas de ejemplo de «Por qué entra o no»: abierta, plan y parcial).
 function demoChartPlan(a, pl, pa){
@@ -2490,7 +2750,22 @@ function demoChartPlan(a, pl, pa){
   const tp1R = v(pl.primer_objetivo_R, 3), lockR = v(pl.cerrojo_R, tp1R), floorR = v(pl.suelo_R, 2);
   return {key:String(a.trade_id || a.coin), coin:a.coin, d, t0, entry:e, sl0, sl:sl0, r, tp:null, tp1, frac:v(pl.fraccion, 0.5), done:!!pa, tp1R,
     lockPx:e + d*lockR*r, lockR, floorPx:e + d*floorR*r, floorR, trailR:v(pl.sigue_R, 2), locked:!!pa, slKind:null,
-    riskUsd:DEMO_EQUITY*0.005, act:pa && okT(pa.ts) ? pa.ts : null, path:true, holdUntil:null};
+    riskUsd:DEMO_EQUITY*0.005, act:pa && okT(pa.ts) ? pa.ts : null, path:true, holdUntil:null, inst:d > 0 ? "spot" : "perp"};
+}
+// Costes de la gráfica: lo pagado (la comisión de entrada y lo demás que diga el bot) y lo que costaría salir al stop (a
+// mercado: tomador y deslizamiento) y al objetivo o la parcial (orden límite: creador). Sin cantidad (el motor simulado),
+// la del riesgo: riskUsd / distancia al stop.
+function chartCosts(P, sl, px){
+  const q0 = isNum(P.qty) && P.qty > 0 ? P.qty : isNum(P.riskUsd) && P.r ? P.riskUsd/P.r*(P.done && isNum(P.frac) ? 1 - P.frac : 1) : null;
+  if (!(q0 > 0)) return null;
+  const p = P.pos || null, qEnt = isNum(P.riskUsd) && P.r ? P.riskUsd/P.r : null;
+  const c = P.cost || (qEnt ? {ent:qEnt*P.entry*comPct(P.inst, "tomador")/100, total:null, est:true} : {});
+  const paid = isNum(c.total) ? c.total : c.ent, R = isNum(c.R) ? c.R : isNum(paid) && P.riskUsd ? paid/P.riskUsd : null;
+  const stop = exitCost(q0, sl, P.coin, P.inst, false, p);
+  const tgt = isNum(P.tp) ? exitCost(q0, P.tp, P.coin, P.inst, true, p) : isNum(P.tp1) && !P.done && isNum(P.frac) ? exitCost(q0*P.frac, P.tp1, P.coin, P.inst, true, p) : null;
+  const ahora = isNum(c.ahora) || (isNum(px) && px > 0) ? nowCost(p || {coin:P.coin, instrument:P.inst}, q0, px) : null;
+  return {paid, R, est:!!c.est, ent:c.ent, sal:c.sal, fund:c.fund, stop, tgt, part:!isNum(P.tp) && isNum(P.tp1) && !P.done, ahora,
+    tk:comPct(P.inst, "tomador", p), mk:comPct(P.inst, "creador", p)};
 }
 // Tamaño de vela que se pinta: el menor de DISP_MIN, múltiplo de las que hay, con el que caben como mucho maxBars.
 function dispStep(step, span, maxBars){
@@ -2568,6 +2843,13 @@ function chartNums(P, px, sl, slKind, big){
     rows.push([`A la parcial ${nR(P.tp1R)}R`, `<b>${mv(P.tp1)}</b>`, `sale ${fracTxt(P.frac)}: ${part!=null ? `<span class="pos">${rT(part)}</span>${usd(part)}` : "–"}${big && worst!=null ? `; el resto queda con el stop en +${nR(P.floorR)}R (al menos ${rT(worst)} en total)` : ""}`]); }
   else if (P.done) rows.push(["Cobrado", `<b class="pos">${rT(banked)}</b>`, `${fracTxt(P.frac)}${isNum(P.tp1R) ? ` en ${nR(P.tp1R)}R` : ""} · el resto corre sin objetivo`]);
   else rows.push(["Objetivo", "<b>sin objetivo</b>", "corre hasta el stop o el cierre por tiempo"]);
+  const K = chartCosts(P, sl, px);   // comisiones: lo pagado y lo que costaría salir
+  if (K){ const f2 = v => isNum(v) ? cU(v) : "–";
+    const out = [K.ahora!=null ? `salir ahora ≈ ${f2(K.ahora)}` : "", K.stop!=null ? `${K.ahora!=null ? "al stop" : "salir al stop"} ≈ ${f2(K.stop)}` : "",
+      K.tgt!=null ? `${K.part ? "a la parcial" : "al objetivo"} ≈ ${f2(K.tgt)}` : ""].filter(Boolean).join(" · ");
+    const det = big ? [K.ent!=null ? `entrada ${K.est ? "≈ " : ""}${f2(K.ent)}` : "", K.sal ? `salidas ${f2(K.sal)}` : "", K.fund ? `funding ${sgn(K.fund, 2)}` : ""].filter(Boolean).join(" · ") : "";
+    rows.push(["Costes", `<b>${K.est ? "≈ " : ""}${f2(K.paid)}</b>${isNum(K.R) ? ` <b>${nf(K.R, 2)} R</b>` : ""}`,
+      `pagados${det ? ` (${det})` : ""}${out ? ` · ${out} ${QUOTE}` : ""}${big ? ` · a mercado (ahora y al stop) tomador ${feePct(K.tk)} y deslizamiento; con orden límite (${K.part ? "parcial" : "objetivo"}) creador ${feePct(K.mk)}` : ""}`]); }
   if (big) return `<div class="pnums">${rows.map(([k, v, s]) => `<div><small>${esc(k)}</small><span class="pv">${v}</span><span class="ps">${s}</span></div>`).join("")}</div>`;
   return `<ul class="plist">${rows.map(([k, v, s]) => `<li><small>${esc(k)}</small>${v}<span>${s}</span></li>`).join("")}</ul>`;
 }
@@ -2579,14 +2861,20 @@ function posChartHtml(P, big, story){
   if (!isNum(px) || px <= 0) return `<div class="pchart${big ? " big" : ""}"${attr}><p class="pnote">Sin precio de ${esc(P.coin)} todavía: la gráfica sale en cuanto llegue.</p></div>`;
   const {W, R} = CHART[big ? "big" : "small"], ds = dispStep(step, Math.max(now, P.t0) - from, (W - 4 - R)/3.4);
   const rows = ds > step ? regroup(B.rows, ds) : B.rows;
-  const st = B.st, note = !S.live ? `Ejemplo: velas simuladas de ${stepTxt(ds)} · hora de Madrid`
-    : st==="ok" ? `Velas de ${stepTxt(ds)} del bot y precio en vivo · hora de Madrid`
-    : st==="no" ? `El bot aún no da velas de ${esc(P.coin)} (la ruta llega al reiniciarlo): precio en vivo desde que abriste la web, velas de ${stepTxt(ds)}`
-    : st==="fallo" ? `No se pudieron leer las velas del bot (se reintenta cada minuto): precio en vivo desde que abriste la web`
-    : `Cargando las velas del bot… · precio en vivo`;
+  // De dónde salen las velas (campo «fuente» de GET /api/velas): OKX EU (el par que se operaría), las del bot porque OKX no
+  // respondió, las del bot de un bot sin la fuente de OKX (no manda «fuente»), 404 o fallo.
+  const st = B.st, inst = esc(short(B.inst || `${P.coin}-${QUOTE}`, 32)), tfx = stepTxt(ds);
+  const note = !S.live ? `Ejemplo: velas simuladas de ${tfx} (con el bot, las de OKX EU, ${esc(P.coin)}-${QUOTE}) · hora de Madrid`
+    : st==="ok" && B.src==="okx" ? `Velas de OKX EU, ${inst}, de ${tfx} y precio en vivo · hora de Madrid`
+    : st==="ok" && B.src==="bot" ? `Velas del bot de ${tfx}${B.inst ? ` (Binance, ${inst})` : ""}, no de OKX EU (${B.why ? esc(short(B.why, 90)) : "OKX EU no respondió"}); se reintenta cada minuto · precio en vivo · hora de Madrid`
+    : st==="ok" ? `Velas de ${tfx} del bot y precio en vivo · hora de Madrid (este bot aún no pide las de OKX EU: llega al reiniciarlo)`
+    : st==="vacio" ? `Ni OKX EU ni el bot tienen velas de ${esc(P.coin)} de ese tramo${B.why ? ` (${esc(short(B.why, 90))})` : ""}; se reintenta cada minuto: precio en vivo desde que abriste la web, velas de ${tfx}`
+    : st==="no" ? `El bot aún no da velas de ${esc(P.coin)} (la ruta llega al reiniciarlo): precio en vivo desde que abriste la web, velas de ${tfx}`
+    : st==="fallo" ? `No se pudieron leer las velas de OKX EU ni las del bot (se reintenta cada minuto): precio en vivo desde que abriste la web`
+    : `Cargando las velas de OKX EU, ${inst}… · precio en vivo`;
   const hold = big && isNum(P.holdUntil) ? ` · cierra como tarde el ${madDM(P.holdUntil)} a las ${madHM(P.holdUntil)}${P.holdLabel ? ` (${esc(P.holdLabel)})` : ""}` : "";
   return `<div class="pchart${big ? " big" : ""}"${attr}>${chartSvg(P, rows, ds, px, sl, B.slKind || P.slKind, from, now, big)}${chartNums(P, px, sl, B.slKind || P.slKind, big)}
-    <p class="pnote">${note}${hold}${big ? ". R total sobre el riesgo inicial y USDC sin comisiones ni deslizamiento (el paper los descuenta al cerrar)." : ""}</p></div>`;
+    <p class="pnote">${note}${hold}${big ? `. R total sobre el riesgo inicial. «Ahora» ya descuenta lo pagado (comisión de entrada, parciales y funding); «al stop» y «al objetivo», sin comisiones ni deslizamiento: lo que costaría salir va en «Costes» (perfil ${esc(comPerfil().corto)}).` : ""}</p></div>`;
 }
 const OPEN_STATE = {esperando:"Esperando", midiendo_rango:"Midiendo el rango", armada:"Armada", en_posicion:"En posición", rearmada:"Rearmada", terminada:"Terminada",
   sin_senal:"Sin señal", esperando_apertura:"Esperando la apertura", midiendo_impulso:"Midiendo el impulso", esperando_entrada:"Esperando la entrada"};
@@ -3582,8 +3870,9 @@ function demoMotor(now){
         const lv = {apertura:z.p0, impulso_pct:cur, maximo:Math.max(z.p0, px), minimo:Math.min(z.p0, px), hora_entrada:te, entrada:null, stop:null, objetivo:null};
         if (now < te){ const why = `Midiendo el impulso: ${pct(cur,2)} en ${mins} de ${N} min`;
           coins[c] = {signal:0, strength:0, why, last_why:why, state:"midiendo_impulso", step:null, entries:0, results:[], range:null, rvol:null, instrument:null, levels:lv, tags:null, plan:null}; continue; }
-        const d = Math.sign(z.imp), inst = d > 0 ? "spot" : "perp";
-        const why = d ? `Impulso de ${pct(z.imp,2)} en ${N} min (${d > 0 ? "compra al contado" : "venta en perpetuo"}): entro a +${em} min (${madHM(te)} Madrid)` : `Impulso de 0,00 % en ${N} min: sin dirección no se entra`;
+        const d = Math.sign(z.imp) * (z.imp < 0 && !comPerfil().cortos ? 0 : 1), inst = d > 0 ? "spot" : "perp";   // sin X-Perps no hay cortos
+        const why = d ? `Impulso de ${pct(z.imp,2)} en ${N} min (${d > 0 ? "compra al contado" : "venta en perpetuo"}): entro a +${em} min (${madHM(te)} Madrid)`
+          : z.imp < 0 ? `Impulso de ${pct(z.imp,2)} en ${N} min, pero sin cuenta X-Perps no hay cortos: no se entra` : `Impulso de 0,00 % en ${N} min: sin dirección no se entra`;
         coins[c] = {signal:d, strength:0, why, last_why:why, state:d ? "esperando_entrada" : "terminada", step:d ? "hora" : null, entries:0, results:[], range:null, rvol:null,
           instrument:d ? inst : null, levels:lv, tags:d ? {lado:d > 0 ? "largo" : "corto", instrumento:inst, impulso_pct:z.imp, medida_min:N} : null, plan:null}; }
       const cs = Object.values(coins), st = now < t ? "esperando_apertura" : cs.some(x => x.state==="midiendo_impulso") ? "midiendo_impulso" : cs.some(x => x.state==="esperando_entrada") ? "esperando_entrada" : "terminada";
@@ -3619,6 +3908,7 @@ const DEC_MOT = {
   moneda_ocupada:["moneda ocupada", "Ya hay una posición paper abierta en esta moneda: una posición por moneda."],
   max_posiciones:["máximo de posiciones", "Ya está abierto el máximo de posiciones a la vez."],
   reglas:["tus reglas", "No cumple tus reglas: beneficio/riesgo ≥ 2:1, stop ≥ 1,5 % y objetivo ≥ 3 % neto de costes."],
+  sin_cortos:["sin cortos (sin X-Perps)", "Con las comisiones de OKX EU sin cuenta X-Perps no hay cortos ni perpetuos: el motor no abre ventas."],
   aprobacion:["sin aprobación", "No se aprobó a tiempo o la rechazaste."],
   bot_parado:["bot parado", "La apertura pasó con el bot parado: no se pudo medir ni entrar."],
   objetivo:["objetivo", "Llegó al objetivo."],
@@ -3862,6 +4152,7 @@ function demoDecisiones(now){
       const lim = {entradas:dd.n, max_entradas:6, riesgo_pct:dd.risk, max_riesgo_pct:3, posiciones:open.length, exposicion_pct:Math.round(open.length*100*NOM)};
       const ent = {fase:"entrada", ts:te + 2000, impulso_pct:imp, lado}, busy = open.find(p => p.coin===c), vv = rnd();
       if (veta && vv < 0.05){ row(c, {...ent, decision:"no_entra", motivo_codigo:"veto_noticia", motivo:`Noticia fiable ${imp > 0 ? "bajista" : "alcista"} en contra (regulatorio): se veta la entrada.`, datos:{limites:lim}}); continue; }
+      if (imp < 0 && !comPerfil().cortos){ row(c, {...ent, decision:"no_entra", motivo_codigo:"sin_cortos", motivo:"Sin cuenta X-Perps no hay cortos: con las comisiones de OKX EU sin X-Perps, el motor no abre ventas.", datos:{limites:lim}}); continue; }
       if (busy){ row(c, {...ent, decision:"no_entra", motivo_codigo:"moneda_ocupada", motivo:`Ya hay una posición paper abierta en ${c} (${WIN_NAME[busy.win]} del ${madDM(busy.t)}): una posición por moneda.`, datos:{limites:lim}}); continue; }
       if (dd.n >= 6){ row(c, {...ent, decision:"no_entra", motivo_codigo:"tope_dia", motivo:"Tope de 6 entradas del día (día de Madrid) alcanzado.", datos:{limites:lim}}); continue; }
       const k = imp > 0 ? 1 : -1, sl = px*(1 - k*SL/100), tp1 = px*(1 + k*SL*DEMO_P.tp1_r/100);
@@ -3905,7 +4196,7 @@ function demoDecNoticias(){
 }
 function demoDecRefresh(){
   if (S.live) return;
-  const k = Math.floor(S.vnow/60000) + "|" + S.events.length;
+  const k = Math.floor(S.vnow/60000) + "|" + S.events.length + "|" + comPerfil().id;   // el perfil de comisiones decide si hay cortos
   if (S.decDemoK===k) return;
   S.decDemoK = k;
   S.dec = [...demoDecisiones(S.vnow), ...demoDecNoticias()].map(decNorm).filter(Boolean).sort(decOrd).slice(0, DEC_MAX);
@@ -4023,6 +4314,14 @@ function onOrden(m){
     S.aprPend = null;
     toast(ok ? `${p.txt} (solo cambia cuánto cuentan sus noticias; solo paper).` : `No se pudo cambiar el peso de «${p.id}»: ${why}.`, 7000);
     if (S.tab==="evo") loadEvo("apr");
+  } else if (m.area==="real"){ const p = S.realPend;   // mandos del modo real: confirmar, parar, límites, detener, aprobación
+    if (p && reciente(p)){ S.realPend = null;
+      toast(ok ? `Hecho (modo real): ${REAL_ACC_TXT[m.accion] || "orden atendida"}.${typeof m.why==="string" && m.why ? ` ${m.why}` : ""}` : `El bot no lo ha hecho (modo real): ${why}.`, 9000); }
+    loadReal();
+  } else if (m.area==="comisiones"){ const p = S.comPend;   // perfil de comisiones del paper
+    if (p && reciente(p)){ S.comPend = null;
+      toast(ok ? `Hecho: las comisiones del paper pasan a «${comNombre(m.id || p.perfil)}»${typeof m.why==="string" && m.why ? ` (${m.why})` : ""}.` : `No se pudo cambiar el perfil de comisiones: ${why}.`, 8000); }
+    S.dirty = true;
   }
   evoBump();
 }
@@ -4177,7 +4476,8 @@ function untip(){ tipEl.hidden = true; }
 let lastFeedSig = "";
 // Botones de acción (aprobar, rechazar, cancelar, cerrar). Mientras se pulsan no se redibuja nada, para que el clic
 // llegue entero al mismo botón (los paneles se rehacen cada medio segundo), y el foco del teclado se recoloca tras redibujar.
-const ACT_ATTRS = ["data-approve","data-reject","data-cancel","data-close","data-evo-aplicar","data-evo-descartar","data-evo-revertir","data-fv-acc","data-apr-auto"], ACT_SEL = ACT_ATTRS.map(a=>`[${a}]`).join(",");
+const ACT_ATTRS = ["data-approve","data-reject","data-cancel","data-close","data-evo-aplicar","data-evo-descartar","data-evo-revertir","data-fv-acc","data-apr-auto",
+  "data-real-acc","data-real-aprob","data-real-approve","data-real-reject","data-real-close"], ACT_SEL = ACT_ATTRS.map(a=>`[${a}]`).join(",");
 let holdUntil = 0;
 function render(force){
   if (performance.now() < holdUntil) return;
@@ -4208,6 +4508,7 @@ function renderAll(force){
   if (S.tab==="ai") safe(renderAI);
   if (S.tab==="pred") safe(renderPred);
   if (S.tab==="results") safe(renderResults);
+  if (S.tab==="real") safe(renderReal);
   if (S.tab==="evo") safe(() => renderEvo(force));
   // La firma incluye los tres backtests: llegan por separado y cualquiera puede llegar después del primer pintado.
   const btSig = [S.backtest ? S.backtest.generated + JSON.stringify(S.btFilter) + S.btSel : "x", (S.btOpen||{}).generated,
@@ -4255,7 +4556,7 @@ function renderMando(){
   if (sig !== mdFeedSig){ mdFeedSig = sig; const out = [];
     for (let i=S.events.length-1; i>=0 && out.length<160; i--){ const e = S.events[i]; if (!showNoise && e.kind==="filtered") continue; out.push(e); }
     $("#mdFeed").innerHTML = out.map(e => { const k = KINDS[e.kind], tone = e.tone || k.tone;
-      return `<li class="ev${k.drop?" dim":""}" data-story="${e.story||""}" aria-current="${!!e.story && e.story===S.sel}"><time>${hms(e.ts)}</time>${agChip(e.agent)}${pill(tone, evLabel(e))}
+      return `<li class="ev${k.drop?" dim":""}" ${evLink(e)} aria-current="${!!e.story && e.story===S.sel}"><time>${hms(e.ts)}</time>${agChip(e.agent)}${pill(tone, evLabel(e))}
         <div class="ev-body"><b>${esc(e.title)}</b><span class="ev-sub">${esc(short(e.text||"", 160))}</span></div></li>`; }).join("") || `<li class="empty">Todavía no hay eventos.</li>`; }
   renderTrace($("#mdTrace"));
   // decisión, cartera y resultado de hoy
@@ -4272,7 +4573,9 @@ function renderMando(){
     + kv([["Capital paper", `${nf(pf ? pf.equity : R.equity,2)} ${QUOTE}`],
           ["Hoy", pf ? `<span class="${(pf.day_pnl||0)>=0?"pos":"neg"}">${pct(pf.day_pnl_pct||0,2)}</span> · con lo abierto` : td ? `<span class="${td.pnl>=0?"pos":"neg"}">${pct(td.pnl_pct,2)}</span> · ${td.n} ops.` : "–"],
           ["Operaciones", nf((R.trades||[]).length,0)],
-          ["Pérdida del día", `${nf(S.dayLoss||0,2)} % de ${nf(S.limits.max_daily_loss_pct,0)} %`]]);
+          ["Pérdida del día", `${nf(S.dayLoss||0,2)} % de ${nf(S.limits.max_daily_loss_pct,0)} %`],
+          ["Comisiones", (C => `${esc(C.corto)}${C.cortos ? "" : ' · <span class="neg">sin cortos</span>'}`)(comPerfil())],
+          ["Cuenta real", `<span data-tabgo="real" style="cursor:pointer">${esc(realShort())}</span>`]]);
   safe(renderMdFiab);   // noticias fiables y entradas por noticia
   safe(renderMdDec);    // por qué entra o no en la última apertura
   const preds = ((S.predictions && S.predictions.items) || []).filter(p => p.kind!=="bolsa").sort((a,b) => a.when_utc-b.when_utc).slice(0,8);   // solo cripto
@@ -4281,8 +4584,272 @@ function renderMando(){
     || `<li><span class="led"></span><span class="nm">Sin predicciones</span><span class="tx">${S.live ? "llegan cada 5 min" : ""}</span><b></b></li>`;
 }
 
+// ---------- Cuenta real (OKX EU): panel del modo real (docs/06, «Contrato de cableado», apartado 5) ----------
+// Lee el mensaje de estado «cuenta_real» y GET /api/real (RealBroker.vista_real): modo, por qué no abre, cuenta, límites con
+// su techo, posiciones (SIN STOP en rojo), externas, apartadas, pendientes y cerradas, y el estado técnico. Nunca llega
+// nada de okx.env (solo si el archivo existe) y la web no enseña ni pide ninguna clave. Los mandos van por el WebSocket
+// ({type:"real", accion}) y el bot exige que salgan de esta misma web (cabecera Origin); la parada siempre se admite.
+const REAL_MODO = {apagado:["muted","Apagado"], solo_lectura:["warn","Solo lectura"], demo:["info","Demo de OKX"], real:["bad","Dinero real"]};
+const REAL_OFF = "Modo real apagado: el bot opera en paper";
+const ACCT_LV = {"1":"contado", "2":"futuros", "3":"margen multidivisa", "4":"margen de cartera"};
+// Límites duros: nombre, unidad y decimales (bot/okx_real.techos: 10 USDC, 3 %, 4 y 6 como mucho)
+const LIM_NAME = {max_usdc:["Importe máximo por operación", "USDC", 2], perdida_dia_pct:["Pérdida máxima del día", "% del saldo al empezar el día", 1],
+  max_posiciones:["Posiciones abiertas", "a la vez", 0], max_entradas_dia:["Entradas al día", "día de Madrid", 0]};
+const REAL_ACC_TXT = {confirmar:"confirmación aceptada", parar:"parada de emergencia hecha", limites:"límites guardados", detener:"modo real detenido",
+  reanudar:"modo real reanudado", aprobacion:"aprobación cambiada", decision:"decisión atendida", close:"cierre pedido en OKX", cancel:"orden cancelada"};
+const realModo = V => isObj(V) && REAL_MODO[V.modo] ? V.modo : "apagado";
+// Lo que enseña el panel: en directo, lo último del bot (null si aún no ha llegado nada); en la demostración, un EJEMPLO.
+function realView(){ return S.live ? (isObj(S.real) ? S.real : null) : demoReal(S.realDemo); }
+const realSinStop = V => isObj(V) && Array.isArray(V.sin_stop) ? V.sin_stop.filter(x => typeof x==="string" && x) : [];
+// Una línea para la cartera, Mando y el agente «real».
+// Fuera del panel (cartera, Mando, agente) la demostración dice lo de verdad: apagado (los otros modos solo se ven en el panel).
+const realOut = () => S.live ? realView() : demoReal("apagado");
+function realShort(V = realOut()){
+  const m = realModo(V);
+  if (isObj(V) && strOk(V.resumen)) return short(V.resumen, 160);   // RealBroker.resumen: modo y a quién van los tickets (BOT_BROKER)
+  return m==="apagado" ? REAL_OFF : m==="solo_lectura" ? "Modo real en solo lectura: lee tu cuenta de OKX, pero no abre nada"
+    : m==="demo" ? "Modo real en la demo de OKX: órdenes con dinero ficticio en OKX" : "Modo real ACTIVO: opera con tu dinero en OKX EU";
+}
+function onReal(m){ if (!isObj(m) || Array.isArray(m)) return; S.real = m; S.realApi = "ok"; S.dirty = true; }
+async function loadReal(){   // GET /api/real: un bot sin el modo real enganchado da 404 (aún no se ha reiniciado)
+  if (!S.live) return;
+  try { const r = await fetch("/api/real"), j = r && r.ok ? await r.json() : null;
+    if (isObj(j) && !Array.isArray(j)) onReal(j); else S.realApi = r && r.status===404 ? "sin_ruta" : "fallo";
+  } catch(e){ S.realApi = "fallo"; }
+  S.dirty = true;
+}
+function realAgentState(a){
+  const V = realOut(), m = realModo(V), ss = realSinStop(V), now = strOk(a.now) || (V && strOk(V.por_que)) || "";
+  if (ss.length) return {cls:"stop", txt:`¡SIN STOP EN OKX: ${ss.join(", ")}!`, now};
+  if (!V) return {cls:"off", txt:"Apagado: opera el paper", now:S.realApi==="sin_ruta" ? "El bot en marcha aún no tiene el modo real enganchado" : "Esperando el estado del bot"};
+  if (isObj(V.parada)) return {cls:"stop", txt:"Parada de emergencia activa", now};
+  return m==="apagado" ? {cls:"off", txt:"Apagado: opera el paper", now} : m==="solo_lectura" ? {cls:"wait", txt:"Solo lectura (ninguna orden)", now}
+    : m==="demo" ? {cls:"busy", txt:"Demo de OKX (dinero ficticio)", now} : {cls:"busy", txt:"Dinero real en OKX EU", now};
+}
+const rU = (v, d=2) => isNum(v) ? `${nf(v, d)} ${QUOTE}` : "–";
+const rHace = t => okT(t) ? `${madDM(t)} ${madHM(t)} (hace ${dur(S.vnow - t)})` : "–";
+function realHeadHtml(V, m){
+  if (!V) return `<div class="rmode apagado"><b>Apagado</b><span class="pill muted">solo paper</span></div><p class="roff">${REAL_OFF}.</p>
+    <p class="note">${S.realApi==="sin_ruta" ? "El bot en marcha aún no tiene el modo real enganchado (GET /api/real no existe: llega al reiniciarlo). Sin él no hay ni una petición privada a OKX."
+      : S.realApi==="fallo" ? "No se pudo leer el estado del modo real (se reintenta). Mientras tanto, todo es paper." : "Esperando el estado del modo real del bot."}</p>`;
+  const [, label] = REAL_MODO[m], P = isObj(V.parada) ? V.parada : null, A = isObj(V.archivos) ? V.archivos : {};
+  const motivos = (Array.isArray(V.motivos) ? V.motivos : []).filter(x => typeof x==="string" && x), avisos = (Array.isArray(V.avisos) ? V.avisos : []).filter(x => typeof x==="string" && x);
+  const tag = (tone, txt) => `<span class="pill ${tone}">${esc(txt)}</span>`;
+  let h = `<div class="rmode ${m}"><b>${esc(label)}</b>${S.live ? "" : tag("warn", "Ejemplo")}${V.demo===true && m!=="demo" ? tag("info", "claves de demo") : ""}${V.listo===true ? tag("good", "Cuenta leída") : m!=="apagado" ? tag("warn", "Cuenta aún sin leer") : ""}${V.puede_abrir===true ? tag(m==="real" ? "bad" : "info", "Puede abrir operaciones") : tag("muted", "No abre nada")}</div>
+    <p class="roff">${strOk(V.resumen) ? esc(V.resumen.replace(/\.$/, "")) + "." : m==="apagado" ? REAL_OFF + "." : m==="solo_lectura" ? "Solo lectura: el bot lee tu cuenta de OKX, pero no abre nada. El paper sigue igual."
+      : m==="demo" ? "Demo de OKX: órdenes con dinero ficticio en OKX (cabecera x-simulated-trading)." : "Modo real ACTIVO: el bot opera con tu dinero en OKX EU, con los límites de abajo."}</p>
+    ${V.broker==="paper" && m!=="apagado" ? `<p class="note">Los tickets van al paper (BOT_BROKER=paper): aunque el modo real esté listo, no sale ninguna orden a OKX hasta que lo cambies tú en tu PC.</p>` : V.broker==="real" ? `<p class="note"><b>Los tickets van al modo real</b> (BOT_BROKER=real).</p>` : ""}`;
+  if (strOk(V.por_que)) h += `<p class="note"><b>Por qué no abre:</b> ${esc(V.por_que)}</p>`;
+  if (motivos.length) h += `<ul class="rlist">${motivos.map(x => `<li>${esc(x)}</li>`).join("")}</ul>`;
+  if (strOk(V.bloqueo)) h += `<div class="rbad">Bloqueado: ${esc(V.bloqueo)}</div>`;
+  if (avisos.length) h += `<div class="rwarn">${avisos.map(x => `<div>${esc(x)}</div>`).join("")}</div>`;
+  if (P) h += `<div class="rbad">Parada de emergencia activa${strOk(P.motivo) ? `: ${esc(P.motivo)}` : ""}${strOk(P.fecha) ? ` (${esc(P.fecha)})` : ""} · ${P.cerrar===true ? "con cierre de las posiciones del bot" : "sin cerrar posiciones: sus stops siguen en OKX"}. Para quitarla, escribe otra vez la frase en «Mandos».</div>`;
+  if (V.parando===true) h += `<div class="rwarn">Ejecutando la parada en OKX: cancelando entradas${P && P.cerrar===true ? " y cerrando posiciones" : ""}…</div>`;
+  if (V.halted===true) h += `<div class="rwarn">Detenido por ti: no entra nada nuevo hasta que reanudes.</div>`;
+  if (A.claves!==true) h += `<p class="note" style="margin-top:8px"><b>Para activarlo, cuando tú quieras:</b> copia okx.env.ejemplo a okx.env en ${esc(strOk(A.carpeta) || "la carpeta de secretos del bot")} y pon tus claves de OKX EU, con OKX_DEMO=0. Para empezar basta una clave con solo el permiso «Lectura» (saldo y comisiones); «Operar» solo el día que decidas activar el modo real, y nunca «Retirar» (atada a la IP de tu PC). En solo lectura el bot nunca abre nada: como mucho cancela o protege con su stop órdenes que haya puesto él mismo en esa cuenta. <b>Ojo: con las claves de tu cuenta, el paper pasa a cobrar la comisión real de tu cuenta y, si no tiene X-Perps, deja de abrir cortos («sin cortos»).</b> Para operar hacen falta además arrancar el bot con BOT_MODO_REAL=1 y escribir la frase en este panel. Paso a paso en docs/06-modo-real.md.</p>`;
+  return h;
+}
+function realCuentaHtml(V, m){
+  const A = V && isObj(V.archivos) ? V.archivos : {}, Cu = V && isObj(V.cuenta) ? V.cuenta : {};
+  if (!V || A.claves!==true) return `<p class="note">Sin claves: el bot no lee nada de tu cuenta de OKX (ni una petición privada). Lo que costaría operar sale de la ayuda oficial de OKX EU: contado 0,10 % a mercado y 0,08 % con orden límite con cuenta X-Perps; sin ella, 0,35 % y 0,20 % y sin cortos (pestaña «Estrategias y cartera», «Comisiones del paper»). Con tus claves (las de tu cuenta, no las de la demo), el paper pasa a cobrar la comisión real de tu cuenta; sin X-Perps, deja de abrir cortos.</p>`;
+  const mon = isObj(Cu.monedas) ? Object.entries(Cu.monedas).filter(([c, q]) => /^[A-Z0-9]{2,10}$/.test(c) && isNum(q) && q > 0).map(([c, q]) => `${c} ${nf(q, q >= 1 ? 4 : 8)}`) : [];
+  const com = isObj(V.comisiones) ? V.comisiones : {}, cre = isObj(V.comisiones_creador) ? V.comisiones_creador : {}, co = isObj(V.cortos) ? V.cortos : {};
+  const fee = k => isNum(com[k]) ? `${feePct(com[k])} tomador${isNum(cre[k]) ? ` · ${feePct(cre[k])} creador` : ""}` : "aún sin leer";
+  const perm = strOk(Cu.permisos), lv = Cu.acctLv!=null && Cu.acctLv!=="" ? String(Cu.acctLv) : null;
+  return kv([["Saldo total", rU(Cu.equity)], ["USDC disponible", rU(Cu.usdc_disponible)],
+      ["Hoy", isNum(Cu.day_pnl) ? `<span class="${Cu.day_pnl>=0?"pos":"neg"}">${sgn(Cu.day_pnl,2)} ${QUOTE}</span>${isNum(Cu.day_pnl_pct) ? ` (${pct(Cu.day_pnl_pct,2)})` : ""}` : "–"],
+      ["Monedas", mon.length ? esc(mon.join(" · ")) : "ninguna"], ["Comisión contado", fee("spot")], ["Comisión X-Perps", fee("perp")],
+      ["Cortos", co.ok===true ? '<span class="pos">sí, en X-Perps</span>' : '<span class="neg">no</span>'],
+      ["Modo de posición", esc(strOk(Cu.posMode) || "–")], ["Modo de cuenta", lv ? esc(`${lv}${ACCT_LV[lv] ? ` (${ACCT_LV[lv]})` : ""}`) : "–"],
+      ["IP atada", Cu.ip_atada===true ? "sí" : Cu.ip_atada===false ? '<span class="neg">no</span>' : "–"],
+      ["Permisos", perm ? `<span class="${/withdraw/i.test(perm) ? "neg" : ""}">${esc(short(perm, 60))}</span>` : "–"]])
+    + (strOk(co.por_que) ? `<p class="note" style="margin-top:8px">${esc(co.por_que)}</p>` : "")
+    + `<p class="note" style="margin-top:6px">Saldo leído ${okT(Cu.saldo_at) ? rHace(Cu.saldo_at) : "–"} · USDC de verdad${S.live ? "" : " (ejemplo)"}: no son los euros ficticios de la cartera paper.</p>`;
+}
+function realLimHtml(V){
+  const L = V && isObj(V.limites) ? V.limites : null, T = V && isObj(V.techos) ? V.techos : {}, F = S.realForm.lim;
+  if (!L) return `<p class="note">${S.live ? "Sin datos de los límites del modo real todavía." : "–"}</p>`;
+  const rows = Object.entries(LIM_NAME).map(([k, [name, unit, d]]) => { const v = numOf(L[k]), t = numOf(T[k]);
+    return `<tr><td>${esc(name)}</td><td class="r mono">${v!=null ? nf(v, d) : "–"}</td><td class="r mono">${t!=null ? nf(t, d) : "–"}</td><td class="note">${esc(unit)}</td>
+      <td><input type="number" data-real-lim="${k}" min="0"${t!=null ? ` max="${t}"` : ""} step="${d===2 ? "0.01" : d===1 ? "0.1" : "1"}" value="${esc(F[k] ?? "")}" aria-label="Bajar: ${esc(name)}"></td></tr>`; }).join("");
+  const eh = numOf(V.entradas_hoy), me = numOf(L.max_entradas_dia);
+  return `<div class="tbl-wrap"><table><thead><tr><th>Límite</th><th class="r">Ahora</th><th class="r">Techo</th><th></th><th>Bajar a</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="btns" style="margin-top:8px"><button type="button" class="btn" data-real-acc="limites">Guardar límites</button><span class="note" style="align-self:center">Entradas hoy: ${eh!=null ? nf(eh,0) : "–"} de ${me!=null ? nf(me,0) : "–"} · riesgo por operación 0,5 % con la comisión real · tus reglas valen siempre, también aquí.</span></div>`;
+}
+function realCtlHtml(V, m){
+  if (!V) return `<p class="note">Sin el modo real enganchado en el bot no hay nada que mandar: todo es paper.</p>`;
+  const P = isObj(V.parada) ? V.parada : null, A = isObj(V.archivos) ? V.archivos : {}, ap = strOk(V.aprobacion) || "veto";
+  if (A.claves!==true && !P) return `<p class="note">Sin claves no hay nada que parar ni activar: el modo real no hace ninguna petición a OKX. La parada de emergencia aparece aquí en cuanto haya claves (o crea el archivo PARAR_REAL en la carpeta de secretos).</p>`;
+  let h = `<div><div class="btns">${!P ? `<button type="button" class="btn stop" data-real-acc="parar">Parada de emergencia</button>` : ""}${!P || P.cerrar!==true ? `<button type="button" class="btn no" data-real-acc="parar_cerrar">Parada y cerrar posiciones</button>` : `<span class="note">Parada con cierre ya pedida.</span>`}</div>
+    <p class="note" style="margin-top:6px">La parada no deja entrar nada más y cancela lo pendiente; los stops siguen en OKX. Con cierre, además cierra a mercado lo del bot. También vale crear el archivo PARAR_REAL (con CERRAR dentro, para cerrar) en la carpeta de secretos.</p></div>`;
+  if (A.claves===true){
+    const modos = [["veto", "Veto de 30 s"], ["manual", "Apruebo cada orden"], ...(V.demo===true ? [["auto", "Automático (solo demo)"]] : [])];
+    h += `<div class="btns"><button type="button" class="btn" data-real-acc="${V.halted===true ? "reanudar" : "detener"}">${V.halted===true ? "Reanudar" : "Detener"}</button><span class="note" style="align-self:center">${V.halted===true ? "Detenido por ti: no entra nada nuevo." : "Detener: no entra nada nuevo; lo abierto se sigue gestionando."}</span></div>
+      <div><small class="note">Aprobación de cada orden${V.demo===true ? "" : " (con dinero real no hay automática)"}</small><div class="seg" role="group" aria-label="Aprobación del modo real" style="margin-top:4px">${modos.map(([k, l]) => `<button type="button" data-real-aprob="${k}" aria-pressed="${ap===k}">${esc(l)}</button>`).join("")}</div></div>`;
+    const frase = strOk(V.frase_confirmacion) || "ACTIVO EL MODO REAL";
+    h += m!=="real" || P ? `<div><small class="note">${P ? "Quitar la parada" : "Activar el modo real"}: escribe exactamente «${esc(frase)}»${V.demo===true ? " (con claves de demo solo quita la parada)" : " (hacen falta claves reales, OKX_DEMO=0 y el bot arrancado con BOT_MODO_REAL=1)"}</small>
+      <div class="rfrase" style="margin-top:4px"><input type="text" id="realFrase" autocomplete="off" spellcheck="false" value="${esc(S.realForm.frase)}" aria-label="Frase de confirmación del modo real"><button type="button" class="btn${V.demo===true ? "" : " no"}" data-real-acc="confirmar">Confirmar</button></div>
+      ${strOk(A.confirmado) ? `<p class="note">Ya confirmado para estas claves el ${esc(A.confirmado)}.</p>` : ""}</div>`
+      : `<p class="note">Modo real activo y confirmado${strOk(A.confirmado) ? ` el ${esc(A.confirmado)}` : ""} para estas claves.</p>`;
+  }
+  return h;
+}
+function realPosHtml(V){
+  if (!V) return `<p class="note">Ninguna: sin el modo real, el bot no tiene nada en OKX.</p>`;
+  const now = S.vnow, pos = objs(V.posiciones), ext = objs(V.externas), apa = objs(V.apartadas), pen = objs(V.pendientes), cer = objs(V.cerradas).slice(0, 20);
+  const side = s => s==="short" ? '<span class="side short">VENTA</span>' : '<span class="side long">COMPRA</span>';
+  const px = v => isNum(v) ? pricef(v) : "–", cn = c => esc(short(String(c || "–"), 12));
+  let h = "";
+  if (pos.length) h += `<div class="tbl-wrap"><table><thead><tr><th>Moneda</th><th>Lado</th><th>Instrumento</th><th class="r">Entrada</th><th class="r">Stop en OKX</th><th class="r">Objetivo</th><th>Cerrojo</th><th>Partes en OKX</th><th class="r">Resultado</th><th>Abierta</th><th></th></tr></thead><tbody>${pos.map(p => {
+      if (p.estado && p.estado!=="abierta") return `<tr class="sinstop"><td><b>${cn(p.coin)}</b></td><td>${side(p.side)}</td><td colspan="9">Enviando a OKX o en duda: cuenta en los límites y el bot comprueba cada 2 s cómo quedó${p.sin_stop===true ? " · SIN STOP confirmado todavía" : ""}.</td></tr>`;
+      const nn = v => isNum(v) ? v : typeof v==="string" && v.trim() && isFinite(+v) ? +v : null;   // OKX da cantidades y precios como texto
+      const partes = objs(p.partes).map(x => `${esc(String(x.n ?? "–"))}: ${esc(String(x.estado || "–"))} ${esc(short(String(x.sz ?? ""), 20))}${nn(x.sl)!=null ? ` · stop ${px(nn(x.sl))}` : ""}${nn(x.tp)!=null ? ` · obj. ${px(nn(x.tp))}` : ""}`).join("<br>") || "–";
+      const tgt = numOf(p.tp1, p.tp2), lock = numOf(p.floor) ? `suelo ${px(numOf(p.floor))}${p.locked===true ? " (activado)" : ""}` : "–";
+      return `<tr class="${p.sin_stop===true ? "sinstop" : ""}"><td><b>${cn(p.coin)}</b>${p.sin_stop===true ? ` <span class="pill bad">SIN STOP${okT(p.sin_stop_desde) ? ` desde ${madHM(p.sin_stop_desde)}` : ""}</span>` : ""}</td><td>${side(p.side)}</td><td class="mono">${esc(short(String(p.instId || p.instrument || "–"), 32))}</td>
+        <td class="r mono">${px(p.entry)}</td><td class="r mono">${px(p.sl)}</td><td class="r mono">${px(tgt)}</td><td>${lock}</td><td class="mono">${partes}</td>
+        <td class="r mono ${(p.upnl||0)>=0?"pos":"neg"}">${isNum(p.upnl) ? `${sgn(p.upnl,2)} ${QUOTE}` : "–"}${isNum(p.R) ? `<br>${rT(p.R)}` : ""}</td><td class="mono">${okT(p.opened) ? `${madDM(p.opened)} ${madHM(p.opened)}` : "–"}</td>
+        <td><button type="button" class="btn no" data-real-close="${esc(String(p.story || ""))}">Cerrar</button></td></tr>`; }).join("")}</tbody></table></div>`;
+  if (pen.length) h += `<p class="note" style="margin:10px 0 4px"><b>Esperan tu aprobación</b> (con dinero real si el modo es real)</p>${pen.map(x => { const left = isNum(x.deadline) ? Math.max(0, x.deadline - now) : null;
+      return `<div class="wpend" style="border-color:var(--warn);background:var(--warn-wash)"><span>${side(x.side)} <b>${cn(x.coin)}</b> · ${x.mode==="manual" ? `caduca en ${left!=null ? dur(left) : "–"}` : `sale sola en ${left!=null ? dur(left) : "–"} si no la vetas`}</span>
+        <div class="btns"><button type="button" class="btn ok" data-real-approve="${esc(String(x.story || ""))}">Aprobar</button><button type="button" class="btn no" data-real-reject="${esc(String(x.story || ""))}">Vetar</button></div></div>`; }).join("")}`;
+  if (ext.length) h += `<p class="note neg" style="margin:10px 0 4px"><b>En OKX fuera del bot</b>: el bot no las toca, pero cuentan en tus límites.</p><div class="tbl-wrap"><table><tbody>${ext.map(x => `<tr class="externa"><td><b>${cn(x.coin)}</b></td><td class="mono">${esc(short(String(x.instId || "–"), 32))}</td><td class="r mono">${esc(short(String(x.pos ?? "–"), 20))}</td><td class="r mono">${px(numOf(x.avgPx))}</td></tr>`).join("")}</tbody></table></div>`;
+  if (apa.length) h += `<p class="note" style="margin:10px 0 4px"><b>Apartadas</b>: abiertas con otra cuenta o en otro entorno; el bot no las toca ni las cuenta.</p><div class="tbl-wrap"><table><tbody>${apa.map(x => `<tr><td><b>${cn(x.coin)}</b></td><td>${side(x.side)}</td><td>${esc(String(x.entorno || "–"))}</td><td>${esc(String(x.modo || "–"))}</td><td class="mono">${esc(short(String(x.instId || "–"), 32))}</td><td class="r mono">${esc(short(String(x.sz ?? "–"), 20))}</td></tr>`).join("")}</tbody></table></div>`;
+  if (cer.length) h += `<p class="note" style="margin:10px 0 4px"><b>Cerradas</b> (las 20 últimas)</p><div class="tbl-wrap"><table><thead><tr><th>Cierre</th><th>Moneda</th><th>Lado</th><th>Motivo</th><th class="r">Resultado</th><th class="r">R</th></tr></thead><tbody>${cer.map(t => `<tr><td class="mono">${okT(t.closed) ? `${madDM(t.closed)} ${madHM(t.closed)}` : "–"}</td><td><b>${cn(t.coin)}</b></td><td>${side(t.side)}</td><td>${esc(short(String(t.reason || t.why || "–"), 80))}</td><td class="r mono ${(t.pnl||0)>=0?"pos":"neg"}">${isNum(t.pnl) ? `${sgn(t.pnl,2)} ${QUOTE}` : "–"}</td><td class="r mono">${isNum(t.R) ? rT(t.R) : "–"}</td></tr>`).join("")}</tbody></table></div>`;
+  return h || `<p class="note">Ninguna posición ni orden del bot en OKX${S.live ? "" : " (ejemplo)"}.</p>`;
+}
+function realTecHtml(V){
+  if (!V) return `<p class="note">${S.realApi==="sin_ruta" ? "GET /api/real: 404 (el bot en marcha no tiene el modo real enganchado)." : "Sin datos del modo real."}</p>`;
+  const A = isObj(V.archivos) ? V.archivos : {}, Rc = isObj(V.reconciliacion) ? V.reconciliacion : null, E = isObj(V.ultimo_error) ? V.ultimo_error : null;
+  const cambios = Rc && Array.isArray(Rc.cambios) ? Rc.cambios.filter(x => typeof x==="string" && x) : [];
+  return kv([["Cuenta comprobada", V.listo===true ? "sí" : "no"], ["Reconciliación", Rc && okT(Rc.at) ? rHace(Rc.at) : "–"],
+      ["Peticiones a OKX", isNum(V.peticiones) ? nf(V.peticiones,0) : "0"], ["okx.env", A.claves===true ? "existe" : A.claves===false ? "no existe" : "–"],
+      ["PARAR_REAL", A.parar===true ? '<span class="neg">existe</span>' : A.parar===false ? "no existe" : "–"], ["Agente", esc(strOk(S.ag.real && S.ag.real.now) || "–")]])
+    + (strOk(A.carpeta) ? `<p class="note" style="margin-top:8px">Carpeta de secretos: <span class="mono">${esc(A.carpeta)}</span> (fuera del repositorio y de OneDrive). La web solo sabe si okx.env existe, nunca lo que lleva.</p>` : "")
+    + (cambios.length ? `<p class="note" style="margin-top:6px"><b>Última reconciliación:</b> ${esc(cambios.join("; "))}</p>` : "")
+    + (E ? `<div class="rwarn">Último error${strOk(E.donde) ? ` (${esc(E.donde)})` : ""}${okT(E.at) ? `, ${rHace(E.at)}` : ""}: ${esc(short(String(E.texto || "sin texto"), 300))}</div>` : "");
+}
+function renderReal(){
+  const V = realView(), m = realModo(V), ss = realSinStop(V), demo = !S.live;
+  const band = $("#realBand"); band.hidden = !ss.length;
+  putH(band, ss.length ? `¡SIN STOP EN OKX: ${esc(ss.join(", "))}! El bot reintenta poner el stop o cerrar cada 5 a 60 s. Si no se resuelve, pon el stop o cierra tú en la web de OKX.` : "");
+  const dn = $("#realDemoNote"); dn.hidden = !demo;
+  putH(dn, demo ? `<b>EJEMPLO INVENTADO: así se verá este panel con el bot en marcha.</b><span>Tu modo real está apagado y tu cuenta de OKX no tiene fondos: con el bot y sin okx.env, este panel dice «Apagado». Elige arriba un modo para ver cómo se vería en cada uno; en la demostración no se envía nada al bot.</span>` : "");
+  putH($("#realDemoCtl"), demo ? Object.entries(REAL_MODO).map(([k, [, l]]) => `<button type="button" class="chip" data-real-demo="${k}" aria-pressed="${S.realDemo===k}">${esc(l)}</button>`).join("") : "");
+  putH($("#realHead"), realHeadHtml(V, m));
+  putH($("#realCuenta"), realCuentaHtml(V, m));
+  // Las cajas con campos no se redibujan mientras escribes en ellas (lo escrito, además, se guarda en S.realForm).
+  const fa = document.activeElement, typing = el => !!(fa && fa.tagName==="INPUT" && el && typeof el.contains==="function" && el.contains(fa));
+  if (!typing($("#realCtl"))) putH($("#realCtl"), realCtlHtml(V, m));
+  if (!typing($("#realLim"))) putH($("#realLim"), realLimHtml(V));
+  putH($("#realPos"), realPosHtml(V));
+  putH($("#realTec"), realTecHtml(V));
+}
+// Mandos del panel. En la demostración no se envía nada; en directo, cada uno con su confirmación y su aviso.
+function realSend(m, msg){
+  if (!S.live){ toast(DEMO_NADA, 5000); return false; }
+  if (!sendBot(m)) return false;
+  const p = S.realPend = {accion:m.accion || m.type, t:Date.now()};
+  toast(msg, 6000);
+  confirmLater(() => S.realPend!==p, "El bot no ha contestado a la orden del modo real: mira el panel «Cuenta real» o vuelve a intentarlo.");
+  return true;
+}
+function realAccion(acc){
+  if (!S.live){ toast(DEMO_NADA, 5000); return; }
+  const V = realView();
+  if (acc==="parar" || acc==="parar_cerrar"){ const cerrar = acc==="parar_cerrar";
+    if (!confirm(cerrar ? "¿Parada de emergencia Y CERRAR a mercado las posiciones del bot en OKX? No entra nada más, se cancela lo pendiente y se cierra lo del bot (con tu dinero, si el modo es real). Para volver tendrás que escribir otra vez la frase."
+      : "¿Parada de emergencia del modo real? No entra nada más y se cancela lo pendiente; las posiciones NO se cierran (sus stops siguen en OKX). Para volver tendrás que escribir otra vez la frase.")) return;
+    realSend({type:"real", accion:"parar", cerrar}, cerrar ? "Parada con cierre pedida al bot. Pendiente de que la confirme." : "Parada de emergencia pedida al bot. Pendiente de que la confirme."); return; }
+  if (acc==="detener" || acc==="reanudar"){ realSend({type:"real", accion:acc}, acc==="detener" ? "Detención del modo real pedida al bot." : "Reanudación del modo real pedida al bot."); return; }
+  if (acc==="limites"){ realLimites(V); return; }
+  if (acc==="confirmar") realConfirmar(V);
+}
+function realLimites(V){
+  const T = V && isObj(V.techos) ? V.techos : {}, out = {}, bad = [];
+  for (const [k, raw] of Object.entries(S.realForm.lim)){
+    const s = String(raw ?? "").trim(); if (!s || !LIM_NAME[k]) continue;
+    const [name, , d] = LIM_NAME[k], x = Number(s.replace(",", ".")), t = numOf(T[k]);
+    if (!isFinite(x) || x <= 0 || (d===0 && (x < 1 || !Number.isInteger(x)))){ bad.push(`${name}: valor no válido`); continue; }
+    if (t!=null && x > t + 1e-9){ bad.push(`${name}: no se puede subir por encima de ${nf(t, d)} desde la web`); continue; }
+    out[k] = x; }
+  if (bad.length){ toast(bad.join(" · "), 7000); return; }
+  if (!Object.keys(out).length){ toast("Escribe primero el límite nuevo (desde aquí solo se puede bajar).", 5000); return; }
+  if (realSend({type:"real", accion:"limites", limites:out}, "Límites nuevos enviados al bot. Pendiente de que los confirme.")) S.realForm.lim = {};
+}
+function realConfirmar(V){
+  const frase = strOk(V && V.frase_confirmacion) || "ACTIVO EL MODO REAL", txt = String(S.realForm.frase || "").trim(), norm = s => s.split(/\s+/).join(" ").toUpperCase();
+  if (norm(txt)!==norm(frase)){ toast(`Escribe exactamente «${frase}» para confirmar.`, 6000); return; }
+  const usdc = V && isObj(V.limites) && isNum(V.limites.max_usdc) ? nf(V.limites.max_usdc, 2) : "10,00";
+  if (!confirm(V && V.demo===true ? "¿Confirmar en la demo de OKX? Con claves de demo solo quita la parada: el dinero es ficticio."
+    : `¿Activar el MODO REAL? Con tus claves reales, OKX_DEMO=0 y el bot arrancado con BOT_MODO_REAL=1, el bot operará con TU DINERO en OKX EU (como mucho ${usdc} USDC por operación). Los backtests no muestran ventaja: puedes perder dinero. Puedes pararlo cuando quieras con la parada de emergencia.`)) return;
+  if (realSend({type:"real", accion:"confirmar", frase:txt}, "Confirmación enviada al bot. Pendiente de que la acepte.")) S.realForm.frase = "";
+}
+function realAprob(mode){
+  if (!S.live){ toast(DEMO_NADA, 5000); return; }
+  const V = realView(); if (!["veto", "manual", "auto"].includes(mode) || (V && V.aprobacion===mode)) return;
+  if (mode==="auto" && !(V && V.demo===true)){ toast("La aprobación automática solo vale en la demo de OKX: con dinero real, veto o a mano.", 6000); return; }
+  realSend({type:"real", accion:"aprobacion", mode}, "Aprobación del modo real enviada al bot.");
+}
+function realDecide(story, ok){
+  if (!S.live){ toast(DEMO_NADA, 5000); return; }
+  if (!story) return;
+  const V = realView(), real = realModo(V)==="real";
+  if (ok && !confirm(real ? "¿Aprobar esta orden? Sale a OKX con TU DINERO." : "¿Aprobar esta orden del modo real (demo de OKX)?")) return;
+  realSend({type:"decision", story, ok}, ok ? "Aprobación enviada al bot (modo real). Pendiente de que la confirme." : "Veto enviado al bot (modo real). Pendiente de que lo confirme.");
+}
+function realClose(story){
+  if (!S.live){ toast(DEMO_NADA, 5000); return; }
+  if (!story || !confirm(`¿Cerrar a mercado esta posición del bot en OKX?${realModo(realView())==="real" ? " Es dinero real." : ""}`)) return;
+  realSend({type:"close", story}, "Cierre enviado al bot (modo real). Pendiente de que lo confirme en el panel.");
+}
+function realClick(t){   // true si el clic era del panel «Cuenta real»
+  const dm = t.closest("[data-real-demo]"); if (dm){ if (!S.live && REAL_MODO[dm.dataset.realDemo]){ S.realDemo = dm.dataset.realDemo; S.dirty = true; } return true; }
+  const ac = t.closest("[data-real-acc]"); if (ac){ realAccion(ac.dataset.realAcc); return true; }
+  const ap = t.closest("[data-real-aprob]"); if (ap){ realAprob(ap.dataset.realAprob); return true; }
+  const ok = t.closest("[data-real-approve]"); if (ok){ realDecide(ok.dataset.realApprove, true); return true; }
+  const no = t.closest("[data-real-reject]"); if (no){ realDecide(no.dataset.realReject, false); return true; }
+  const cl = t.closest("[data-real-close]"); if (cl){ realClose(cl.dataset.realClose); return true; }
+  return false;
+}
+// Demostración: EJEMPLO inventado del panel en cada modo, con la forma de RealBroker.vista_real. «apagado» es lo de hoy.
+function demoReal(modo){
+  const now = S.vnow, carpeta = "M:\\BotFundamental-datos\\secretos", lim = {max_usdc:10, perdida_dia_pct:3, max_posiciones:4, max_entradas_dia:6};
+  const base = {modo, motivos:[], demo:modo==="demo", opera:modo==="demo" || modo==="real", listo:false, puede_abrir:false, por_que:null, bloqueo:null, avisos:[],
+    broker:modo==="demo" || modo==="real" ? "real" : "paper",
+    resumen:{apagado:REAL_OFF, solo_lectura:"Modo real en solo lectura: el bot opera en paper (solo lee tu cuenta de OKX)", demo:"Operando en demo de OKX", real:"Operando en dinero real"}[modo] || REAL_OFF,
+    parada:null, parando:false, halted:false, halt_until:null, aprobacion:"veto", archivos:{carpeta, claves:false, confirmado:null, parar:false},
+    frase_confirmacion:"ACTIVO EL MODO REAL", cuenta:{}, comisiones:{spot:null, perp:null}, cortos:{ok:false, por_que:"Aún no se ha leído la cuenta"},
+    limites:lim, techos:{...lim}, entradas_hoy:0, posiciones:[], sin_stop:[], apartadas:[], externas:[], pendientes:[], cerradas:[],
+    reconciliacion:null, ultimo_error:null, peticiones:0};
+  if (!REAL_MODO[modo] || modo==="apagado"){ const why = `Apagado: no hay archivo de claves (${carpeta}\\okx.env)`;
+    return {...base, modo:"apagado", motivos:[why], por_que:`Modo real no activo: ${why}`}; }
+  const leida = {...base, listo:true, archivos:{carpeta, claves:true, confirmado:null, parar:false}, peticiones:46,
+    cuenta:{equity:0, usdc_disponible:0, monedas:{BTC:0, ETH:0, SOL:0, XRP:0}, acctLv:"2", posMode:"net_mode", ip_atada:true, permisos:"read_only,trade",
+      saldo_at:now - 40e3, day_pnl:0, day_pnl_pct:0, inicio:null},
+    comisiones:{spot:0.35, perp:null}, comisiones_creador:{spot:0.20}, reconciliacion:{at:now - 150e3, cambios:[], externas:[], ordenes_ajenas:0, algos_huerfanas:0},
+    cortos:{ok:false, por_que:"Sin cortos: tu cuenta no tiene X-Perps disponibles (test de idoneidad y cuenta de X-Perps en OKX)"}};
+  if (modo==="solo_lectura") return {...leida, motivos:["Solo lectura (ninguna orden)", "Falta arrancar el bot con BOT_MODO_REAL=1", "Falta tu confirmación escrita en la web para estas claves (panel «Cuenta real»)"],
+    por_que:"Modo real no activo: Solo lectura (ninguna orden); falta arrancar el bot con BOT_MODO_REAL=1 y tu confirmación escrita", avisos:["Ejemplo: tu cuenta de trading tiene 0 USDC; el bot no abrirá nada hasta que pases dinero a la cuenta de trading (lo haces tú en OKX)."]};
+  // demo y real: cuenta con saldo de ejemplo, una posición de BTC con su stop en OKX, una de ETH esperando el veto y una cerrada
+  const pb = isNum(S.prices.BTC) ? S.prices.BTC : INFO.BTC.price, e = Math.round(pb*0.996*10)/10, sl = Math.round(e*0.98*10)/10, tp = Math.round(e*1.06*10)/10;
+  const q = 0.00009, fee = q*e*0.001, u = (pb - e)*q - fee, risk = q*(e - sl), dl = Math.ceil(now/30e3)*30e3;
+  const real = modo==="real";
+  return {...leida, opera:true, listo:true, puede_abrir:true, por_que:null, entradas_hoy:1, aprobacion:"veto",
+    motivos:[real ? "Modo real ACTIVO: opera con tu dinero en OKX EU" : "Demo de OKX: órdenes con dinero ficticio (cabecera x-simulated-trading)"],
+    archivos:{carpeta, claves:true, confirmado:real ? "29-10-2026 10:15" : null, parar:false},
+    cuenta:{equity:52.4, usdc_disponible:44.3, monedas:{BTC:q, ETH:0, SOL:0, XRP:0}, acctLv:"2", posMode:"net_mode", ip_atada:true, permisos:"read_only,trade",
+      saldo_at:now - 20e3, day_pnl:-0.06, day_pnl_pct:-0.11, inicio:50},
+    comisiones:{spot:0.10, perp:0.05}, comisiones_creador:{spot:0.08, perp:0.02}, cortos:{ok:true, por_que:"Cortos en X-Perps: BTC, ETH, SOL, XRP"},
+    posiciones:[{story:"a-eu-btc-ej", coin:"BTC", side:"long", qty:q, entry:e, sl, sl_initial:sl, opened:now - 95*60e3, riskUsd:risk, notional:q*e, price:pb, upnl:u, R:risk ? u/risk : 0,
+      tp1:tp, tp1_frac:0.5, tp1_done:false, floor:Math.round(e*1.04*10)/10, locked:false, instId:"BTC-USDC", instrument:"spot", real:true, estado:"abierta", sin_stop:false,
+      partes:[{n:1, sz:"0.000045", sl, tp, estado:"viva", algoId:"ej1"}, {n:2, sz:"0.000045", sl, tp:null, estado:"viva", algoId:"ej2"}]}],
+    pendientes:[{story:"a-eu-eth-ej", coin:"ETH", side:"short", deadline:dl, mode:"veto"}],
+    externas:real ? [{coin:"SOL", instId:"SOL-USD_UM_XPERP-310404", pos:"-2", avgPx:Math.round((S.prices.SOL || INFO.SOL.price)*100)/100}] : [],
+    cerradas:[{story:"a-as-xrp-ej", coin:"XRP", side:"long", closed:now - 26*3600e3, reason:"Stop de pérdida", pnl:-0.11, R:-1.1}]};
+}
+
 // ---------- Dos pantallas: enlaces por vista, segunda ventana y sincronización ----------
-const TAB_HASH = {directo:"live", mundo:"world", mando:"mando", predicciones:"pred", cartera:"trades", resultados:"results", backtest:"bt", mercado:"market", evolucion:"evo", ia:"ai"};
+const TAB_HASH = {directo:"live", mundo:"world", mando:"mando", predicciones:"pred", cartera:"trades", resultados:"results", "cuenta-real":"real", backtest:"bt", mercado:"market", evolucion:"evo", ia:"ai"};
 const HASH_OF = Object.fromEntries(Object.entries(TAB_HASH).map(([k,v]) => [v,k]));
 let toastTimer = 0;
 function toast(msg, ms=3200){
@@ -4404,7 +4971,8 @@ function computeResults(closed){
   const trades = closed.map(r => { const st = S.stories.get(r.id) || {}, t = st.strat || {}, win = r.window || t.win || "–";
     return {id:r.id, story:r.id, strategy:r.strategy || t.mode || "–", window:win, market:windowMarket(win), coin:r.coin, side:r.side, qty:r.qty,
       entry:r.entry, exit:r.exit, opened:r.opened, closed:r.closedAt || r.closed, reason:r.why || r.reason, pnl:r.pnl,
-      pnl_pct:r.pnl_pct!=null ? r.pnl_pct : r.pnl/start*100, R:r.R, fees:r.fees!=null ? r.fees : (r.notional||0)*0.0016,
+      pnl_pct:r.pnl_pct!=null ? r.pnl_pct : r.pnl/start*100, R:r.R, fees:r.fees!=null ? r.fees : (r.notional||0)*2*comPct(r.instrument, "tomador")/100,
+      commissions:r.commissions, funding:r.funding, costes:r.costes, riskUsd:r.riskUsd, instrument:r.instrument, notional:r.notional,
       headline:r.headline || st.headline, news_score: st.triage ? {importancia:st.triage.importancia, credibilidad:st.triage.credibilidad} : null,
       tags:r.tags || t.tags || null}; });
   const agg = key => { const m = new Map(); for (const t of trades){ const k = t[key] || "–", x = m.get(k) || {k, n:0, w:0, pnl:0, R:0}; x.n++; if (t.pnl>0) x.w++; x.pnl += t.pnl; x.R += t.R||0; m.set(k, x); }
@@ -4414,6 +4982,20 @@ function computeResults(closed){
   const days = new Map(); for (const t of trades){ const d = madDay(t.closed), x = days.get(d) || {date:d, pnl:0, n:0}; x.pnl += t.pnl; x.n++; days.set(d, x); }
   return {start_equity:start, equity:eq, trades:sorted.reverse(), by_strategy:agg("strategy"), by_window:agg("window"), by_coin:agg("coin"),
     equity_curve:curve, daily:[...days.values()].sort((a,b) => a.date<b.date?-1:1).map(d => ({...d, pnl_pct:d.pnl/start*100}))};
+}
+// Comisiones y funding de todas las operaciones, bruto (antes de costes) y neto: los de /api/resultados (comisiones_total,
+// funding_total, bruto, neto) o, de un bot que aún no los manda, sumados de cada operación. Bruto = neto + comisiones − funding.
+function resCostes(R, tr){
+  let com = 0, fund = 0, net = 0, est = 0, abiertas = 0;
+  for (const t of tr){ const c = costOf(t, false);
+    if (c){ com += c.com!=null ? c.com : c.total + (c.fund || 0); fund += c.fund || 0; est += c.est ? 1 : 0; }
+    net += isNum(t.pnl) ? t.pnl : 0; }
+  com = numOf(R.comisiones_total) ?? com; fund = numOf(R.funding_total) ?? fund;
+  est = numOf(R.costes_estimados) ?? est;
+  // Lo ya pagado en comisiones por las abiertas (la de entrada y las parciales): está descontado del capital, no aquí.
+  for (const p of (S.positions || []).filter(isObj)){ const c = costOf(p, true); if (c && isNum(c.com)) abiertas += c.com; }
+  const neto = numOf(R.neto) ?? net;
+  return {com, fund, neto, bruto:numOf(R.bruto) ?? neto + com - fund, est, abiertas};
 }
 // Etiqueta de la noticia de una operación paper: la del motor de aperturas (tags.noticia) o, sin ella, la del nombre de
 // estrategia que pone el motor (impulso-noticia-a-favor…). Las de otros agentes van como «sin etiqueta».
@@ -4458,6 +5040,7 @@ function renderResults(){
   const total = R.equity - R.start_equity, gp = wins.reduce((a,t)=>a+t.pnl,0), gl = -tr.filter(t=>t.pnl<0).reduce((a,t)=>a+t.pnl,0);
   const goal = (R.daily||[]).filter(d => d.pnl_pct>=5).length;
   const cu = S.live ? ((S.results && S.results.cuenta) || (S.portfolio && S.portfolio.cuenta)) : null;   // cartera de prueba con nombre
+  const K = resCostes(R, tr);   // comisiones y funding pagados, bruto y neto
   kpiRow($("#resKpis"), [
     ["Capital", nf(R.equity,2), cu && cu.eur_usdc ? `${QUOTE} ≈ ${nf(R.equity/cu.eur_usdc,2)} € · ${esc(cu.nombre || "cartera de prueba")} (ficticia)` : `${QUOTE} · ${S.live ? "paper" : "simulación"}`],
     ["Resultado total", `<span class="${total>=0?"pos":"neg"}">${total>=0?"+":""}${nf(total,2)}</span>`, `${pct(total/R.start_equity*100,2)} sobre ${nf(R.start_equity,0)}`],
@@ -4466,7 +5049,12 @@ function renderResults(){
     ["Acierto", tr.length ? pctp(wins.length/tr.length*100) : "–", `${wins.length} ganadoras`],
     ["R medio", tr.length ? nf(tr.reduce((a,t)=>a+(t.R||0),0)/tr.length,2) : "–", "por operación"],
     ["Factor de beneficio", gl>0 ? nf(gp/gl,2) : tr.length ? "sin pérdidas" : "–", "ganancias ÷ pérdidas"],
-    ["Días ≥ 5 %", `${goal} de ${(R.daily||[]).length}`, "tu objetivo diario"]]);
+    ["Días ≥ 5 %", `${goal} de ${(R.daily||[]).length}`, "tu objetivo diario"],
+    ["Comisiones pagadas", cU(K.com), `${QUOTE} de comisión en ${nf(tr.length,0)} ${tr.length===1 ? "operación cerrada" : "operaciones cerradas"}${K.est ? ` (${nf(K.est,0)} ${K.est===1 ? "estimada" : "estimadas"}: de antes del 29-10)` : ""}${K.abiertas > 0 ? ` · +${cU(K.abiertas)} ya pagados en las abiertas` : ""} · funding ${K.fund ? `${K.fund>0?"cobrado":"pagado"} ${nf(Math.abs(K.fund),2)}` : "0,00"}`],
+    ["Bruto → neto", `<span class="${K.bruto>=0?"pos":"neg"}">${sgn(K.bruto,2)}</span> → <span class="${K.neto>=0?"pos":"neg"}">${sgn(K.neto,2)}</span>`,
+      `${QUOTE}: antes y después de comisiones y funding${K.bruto > 0 && K.com - K.fund > 0 ? ` · los costes se llevan el ${nf(Math.min(999, (K.com - K.fund)/K.bruto*100),0)} % del bruto` : ""}`]]);
+  { const C = comPerfil(), P = isObj(R.comisiones) ? R.comisiones : null, pid = P ? strOk(P.perfil) || strOk(P.id) : strOk(R.comisiones_perfil);
+    putH($("#resCom"), `<b>Comisiones:</b> cada resultado ya lleva las suyas (entrada, salidas y funding de los perpetuos). Perfil en uso: ${esc(C.nombre)}${C.cortos ? "" : " (sin cortos)"}${pid && pid!==C.id ? ` · estos resultados dicen «${esc(comNombre(pid))}»` : ""}.${C.viejo ? " Este bot aún no publica su perfil: cobra 0,10 % por lado." : ""}${S.live ? "" : " Ejemplo: operaciones simuladas."}`); }
   const sn = stratNow(), nFi = tr.filter(isFiableTrade).length, rs = $("#resStrat");
   rs.hidden = !sn; rs.innerHTML = sn ? sn + (nFi ? ` <span class="note">· ${nFi} ${nFi===1 ? "operación" : "operaciones"} por noticia fiable</span>` : "") : "";
   safe(renderResOpen);
@@ -4481,7 +5069,7 @@ function renderResults(){
     <td class="r mono">${pctp(x.w/x.n*100)}</td><td class="r mono">${nf(x.R/x.n,2)}</td><td class="r mono ${x.pnl>=0?"pos":"neg"}">${x.pnl>=0?"+":""}${nf(x.pnl,2)}</td></tr>`).join("") || none(6);
   $("#resRows").innerHTML = tr.slice(0,250).map(t => `<tr data-story="${esc(fiabStory(t) || t.story || "")}" style="cursor:pointer"><td class="mono">${dm(t.closed)} ${hm(t.closed)}</td><td>${esc(t.strategy)}${isFiableTrade(t) ? " " + FIAB_PILL : ""}</td><td>${esc(t.window)}</td><td><b>${t.coin}</b></td>
     <td><span class="side ${t.side}">${t.side==="long"?"COMPRA":"VENTA"}</span>${INST_TXT[t.instrument] ? ` <span class="note">${INST_TXT[t.instrument]}</span>` : ""}</td><td class="r mono">${pricef(t.entry)}</td><td class="r mono">${tradeExitHtml(t)}</td><td>${esc(t.reason||"")}</td>
-    <td class="r mono ${t.pnl>=0?"pos":"neg"}">${t.pnl>=0?"+":""}${nf(t.pnl,2)}</td><td class="r mono">${pct(t.pnl_pct||0,2)}</td><td class="r mono">${tradeRHtml(t)}</td><td class="r mono"${isNum(t.funding) && t.funding ? ` title="Comisiones ${isNum(t.commissions) ? nf(t.commissions,2) : "–"} ${QUOTE} y funding ${t.funding>0?"cobrado":"pagado"} ${nf(Math.abs(t.funding),2)} ${QUOTE} (paper)"` : ""}>${nf(t.fees||0,2)}${isNum(t.funding) && t.funding ? `<br><span class="note">funding ${sgn(t.funding,2)}</span>` : ""}</td>
+    <td class="r mono ${t.pnl>=0?"pos":"neg"}">${t.pnl>=0?"+":""}${nf(t.pnl,2)}</td><td class="r mono">${pct(t.pnl_pct||0,2)}</td><td class="r mono">${tradeRHtml(t)}</td>${(c => `<td class="r mono"${c.ttl ? ` title="${esc(c.ttl)}"` : ""}>${c.html}</td>`)(costCell(t))}
     <td class="r mono">${t.opened ? dur(t.closed-t.opened) : "–"}</td><td${isFiableTrade(t) ? ' title="Pulsa la fila para abrir la noticia que la disparó"' : ""}>${esc(short(t.headline||"",60))}${isFiableTrade(t) && isObj(t.tags) && grupoTxt(t.tags.grupo) ? `<br><span class="note">grupo fiable ${esc(grupoTxt(t.tags.grupo))}</span>` : ""}</td></tr>`).join("") || none(14);
 }
 
@@ -4573,6 +5161,17 @@ function btStats(I){
   return {F, N, X, Lg, Ct, perDay, pctDay, perWd, pctWd, cf, cd, tot, dd, pierde: isNum(F.mean_R) && F.mean_R < 0};
 }
 const btSR = x => isNum(x) ? (x>0?"+":"") + nf(x, 2) + " R" : "–", btSh = x => isNum(x) ? nf(x*100, 0) + " %" : "–";
+// Con qué comisiones está calculado un backtest resumido (resumen_backtest: «comisiones», con su perfil, o
+// «comisiones_perfil»); sin el dato, el modelo de siempre de los backtests: 0,10 % por lado y 2 pb (config.FEE_PCT).
+function btCostTxt(I){
+  const C = isObj(I) && isObj(I.costes) ? I.costes : isObj(I) && isObj(I.comisiones) ? I.comisiones : null;   // resumen_backtest.costes
+  const id = C ? strOk(C.perfil) || strOk(C.id) : isObj(I) ? strOk(I.comisiones_perfil) : null, txt = C ? strOk(C.texto) : null, fee = C ? numOf(C.comision_pct) : null;
+  const what = txt || (id ? `perfil «${comNombre(id)}»` : fee!=null ? `${feePct(fee)} por lado y deslizamiento`
+    : "0,10 % por lado y 2 pb de deslizamiento, que no es menos que lo de OKX EU con cuenta X-Perps");
+  const aviso = C && strOk(C.aviso) ? C.aviso : id===COM_SIN ? "" : "Sin cuenta X-Perps no hay cortos y el contado cuesta 0,35 % a mercado: estas cifras serían peores";
+  const dot = s => esc(String(s).replace(/\.$/, "")) + ".";
+  return `<p class="note"><b>Comisiones del backtest:</b> ${dot(what)}${aviso ? " " + dot(aviso) : ""}</p>`;
+}
 // «: fuera de muestra, 424 de las 567 ganadoras (75 %) ganaron menos de 2R (285 menos de 1R)», de las cuentas por
 // operación del resumen (resumen_backtest.per_trade, con la curva completa); sin ellas, "".
 const btTimeWins = F => isObj(F) && isNum(F.ganadoras_n) && F.ganadoras_n > 0 && isNum(F.ganadoras_bajo_2R) && F.ganadoras_bajo_2R > 0
@@ -4597,7 +5196,7 @@ function renderBtSeis(box, I, mode){
       <li><span class="ok">✓</span><span>La única prueba que vale es lo que pase desde el 28-10-2026 en tu cartera paper (pestaña Resultados).</span></li>
     </ul>
     ${ps ? `<p class="note"><b>Parámetros del backtest:</b> ${esc(ps)}</p>` : ""}
-    <p class="note">Generado ${I.generated ? `el ${dmy(I.generated)} a las ${hm(tsOf(I.generated))} UTC` : "–"} · ${esc(I.nota || "")}</p>`;
+    <p class="note">Generado ${I.generated ? `el ${dmy(I.generated)} a las ${hm(tsOf(I.generated))} UTC` : "–"} · ${esc(I.nota || "")}</p>${btCostTxt(I)}`;
   kpiRow($("#btSeisKpis"), [
     ["Fuera de muestra", `<span class="${pierde?"neg":"pos"}">${sR(F.mean_R)}</span>`, `por operación · ${nf(F.n,0)} op. desde el ${dmy(F.desde)}${isNum(F.paper_R_funding) ? ` · con funding ${sR(F.paper_R_funding)}` : ""}`],
     ["Por jornada", pctWd!=null ? `<span class="${pctWd>=0?"pos":"neg"}">${pct(pctWd,2)}</span>` : "–", perWd!=null ? `de la cuenta de lunes a viernes · ${nf(perWd,1)} operaciones con ${nf(RISK,1)} % de riesgo${pctDay!=null ? ` · por día natural ${pct(pctDay,2)}` : ""}` : ""],
@@ -4636,7 +5235,7 @@ function renderBtSeis2(box, I, on){
       <li><span class="ok">✓</span><span>La única prueba que vale es lo que pase en tu cartera paper desde que la activaste (pestaña Resultados): ahí se ve cada operación a medias y su R total.</span></li>
     </ul>
     ${ps ? `<p class="note"><b>Parámetros del backtest:</b> ${esc(ps)}</p>` : ""}
-    <p class="note">Generado ${I.generated ? `el ${dmy(I.generated)} a las ${hm(tsOf(I.generated))} UTC` : "–"} · ${esc(I.nota || "")}</p>`;
+    <p class="note">Generado ${I.generated ? `el ${dmy(I.generated)} a las ${hm(tsOf(I.generated))} UTC` : "–"} · ${esc(I.nota || "")}</p>${btCostTxt(I)}`;
   kpiRow($("#btSeis2Kpis"), [
     ["Fuera de muestra", `<span class="${pierde?"neg":"pos"}">${sR(F.mean_R)}</span>`, `por operación · ${nf(F.n,0)} op. desde el ${dmy(F.desde)}${isNum(F.paper_R_funding) ? ` · con funding ${sR(F.paper_R_funding)}` : ""}${best!=null ? ` · mejor ${sR(best)}` : ""}`],
     ["Por jornada", pctWd!=null ? `<span class="${pctWd>=0?"pos":"neg"}">${pct(pctWd,2)}</span>` : "–", perWd!=null ? `de la cuenta de lunes a viernes · ${nf(perWd,1)} operaciones con ${nf(RISK,1)} % de riesgo${pctDay!=null ? ` · por día natural ${pct(pctDay,2)}` : ""}` : ""],
@@ -4677,7 +5276,7 @@ function renderBtLive(){
           ${pct(L.avance.total_pct, 1)} en ${nf(L.avance.days,0)} días, con una caída máxima del ${nf(L.avance.max_dd_pct,1)} %.</span></li>` : ""}
         <li><span class="ok">✓</span><span>La única prueba que vale es lo que pase desde el 26-10-2026: la vigilancia (pestaña Mercado y aperturas) y tu cartera paper (pestaña Resultados).</span></li>
       </ul>
-      <p class="note">Generado ${I.generated ? `el ${dmy(I.generated)} a las ${hm(tsOf(I.generated))} UTC` : "–"} · ${esc(I.nota || "")}</p>`;
+      <p class="note">Generado ${I.generated ? `el ${dmy(I.generated)} a las ${hm(tsOf(I.generated))} UTC` : "–"} · ${esc(I.nota || "")}</p>${btCostTxt(I)}`;
     kpiRow($("#btLiveKpis"), [
       ["Fuera de muestra", `<span class="${F.mean_R>=0?"pos":"neg"}">${sR(F.mean_R)}</span>`, `por operación · ${nf(F.n,0)} op. desde el ${dmy(F.desde)}`],
       ["Acumulado", sR(F.total_R), F.total_R!=null ? `≈ ${pct(F.total_R*RISK, 1)} de la cuenta con ${nf(RISK,1)} % de riesgo, sin interés compuesto` : ""],
@@ -4708,7 +5307,7 @@ function renderBtLive(){
           <td class="r mono">${nf(b.trades||0,0)}</td><td class="r mono ${b.mean_R>=0?"pos":"neg"}">${sR(b.mean_R)}</td><td class="r mono">${sh(b.win_rate)}</td></tr>`; }).join("")}
     </tbody></table></div>` : ""}
     <p class="note">Prometedora: positiva dentro y fuera de muestra y bate a su base al azar, pero no pasa todas las pruebas contra la suerte (Benjamini-Hochberg, Sharpe deflactado, vecinos). Robusta: las pasa todas.
-      Periodo ${esc((L.period||{}).from || "–")} → ${esc((L.period||{}).to || "–")} · lista congelada el ${esc(L.frozen || "–")}.</p>`;
+      Periodo ${esc((L.period||{}).from || "–")} → ${esc((L.period||{}).to || "–")} · lista congelada el ${esc(L.frozen || "–")}.</p>${btCostTxt(L)}`;
   kpiRow($("#btLabKpis"), [["Probadas", nf(sm.tested||0,0), "inventadas con tus reglas"], ["Prometedoras", nf(sm.promising||0,0), "se vigilan en paper"],
     ["Robustas", nf(sm.robust||0,0), "pasan todas las pruebas contra la suerte"],
     sm.beat_base!=null && sm.base_tested ? ["Baten a su base", `${nf(sm.beat_base,0)} de ${nf(sm.base_tested,0)}`, sm.expected_by_chance_all!=null ? `por puro azar se esperan unas ${nf(sm.expected_by_chance_all,0)}` : "dirección al azar con su cuota de largos"]
@@ -5472,11 +6071,13 @@ document.addEventListener("click", ev => {
   const rj = t.closest("[data-reject]"); if (rj){ userDecide(rj.dataset.reject, false); return render(true); }
   const cn = t.closest("[data-cancel]"); if (cn){ userCancel(cn.dataset.cancel); return render(true); }
   const cl = t.closest("[data-close]"); if (cl){ userClose(cl.dataset.close); return render(true); }
+  if (realClick(t)) return render(true);   // pestaña Cuenta real: parada, límites, aprobación, frase, órdenes y ejemplos
   if (evoClick(t)) return render(true);   // pestaña Evolución: modo, evaluar, propuestas, revertir, fuentes y filtros
   const sp = t.closest("[data-speed]"); if (sp){ S.speed = +sp.dataset.speed; document.querySelectorAll("[data-speed]").forEach(b=>b.setAttribute("aria-pressed", b===sp)); return render(true); }
   const tb = t.closest("[data-tab]"); if (tb){ S.tab = tb.dataset.tab; document.querySelectorAll("[data-tab]").forEach(b=>b.setAttribute("aria-selected", b===tb));
-    for (const v of ["live","world","mando","pred","trades","results","bt","market","evo","ai"]) $("#v-"+v).hidden = v!==S.tab; try{ localStorage.setItem("radar.tab", S.tab); }catch(e){}
+    for (const v of ["live","world","mando","pred","trades","results","real","bt","market","evo","ai"]) $("#v-"+v).hidden = v!==S.tab; try{ localStorage.setItem("radar.tab", S.tab); }catch(e){}
     if (S.tab==="evo") loadEvo();
+    if (S.tab==="real") loadApi("real");   // cuenta real: lo último del bot (también llega por el WebSocket)
     try { if (HASH_OF[S.tab] && location.hash.slice(1)!==HASH_OF[S.tab]) history.replaceState(null, "", "#"+HASH_OF[S.tab]); } catch(e){}
     if (BC) try { BC.postMessage({type:"hello", from:ME, tab:S.tab}); } catch(e){}
     if (S.tab==="results" || S.tab==="mando") loadApi("res"); if (S.tab==="bt"){ S.btSig = null; if (!S.backtest) loadApi("bt"); }
@@ -5516,6 +6117,11 @@ document.addEventListener("change", ev => {   // filtros de la línea de tiempo 
   const k = ev.target && ev.target.dataset ? ev.target.dataset.evoF : null;
   if (k==="tipo" || k==="origen"){ S.evoF[k] = String(ev.target.value || ""); loadEvo("hist"); evoBump(); render(true); } });
 document.addEventListener("input", ev => { if (ev.target.id==="q"){ S.filter.q = ev.target.value; lastFeedSig=""; renderFeed(); } });
+document.addEventListener("input", ev => {   // Cuenta real: lo que escribes en la frase y en los límites no se pierde al redibujar
+  const t = ev.target; if (!t) return;
+  if (t.id==="realFrase") S.realForm.frase = String(t.value ?? "").slice(0, 80);
+  const k = t.dataset ? t.dataset.realLim : null; if (k && LIM_NAME[k]) S.realForm.lim[k] = String(t.value ?? "").slice(0, 20); });
+$("#comSel").addEventListener("change", ev => comChange(String(ev.target.value || "")));
 $("#approvalSel").addEventListener("change", ev => {
   if (S.live){   // en directo manda el bot: si no se pudo enviar, el selector vuelve a su modo real
     if (!sendBot({type:"mode", mode:ev.target.value})){ ev.target.value = S.approval = (S.portfolio && S.portfolio.mode) || S.approval; return; }

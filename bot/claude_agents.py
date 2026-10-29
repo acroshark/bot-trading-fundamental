@@ -473,7 +473,7 @@ def make_ticket(coin: str, side: str, mode: str, risk: float, stop: float, trail
     if config.USER_RULES:   # reglas del usuario: stop ≥ 1,5 %, objetivo ≥ 2R y ≥ 3 % neto y horquilla pura
         stop = round(max(stop, config.RULE_MIN_STOP_PCT), 2)
         tp2R = round(max(tp2R if tp2R >= config.RULE_MIN_RR else config.RULE_DEFAULT_RR, config.RULE_MIN_RR), 2)
-        need = (config.RULE_MIN_NET_PCT + paper.cost_rt_pct()) / stop   # R que deja ≥ 3 % neto (el paper lo exige)
+        need = (config.RULE_MIN_NET_PCT + paper.cost_rt_pct("perp" if side == "short" else "spot")) / stop   # ≥ 3 % neto
         if tp2R < need - 1e-9:
             tp2R = math.ceil(need * 100 - 1e-6) / 100   # hacia arriba: nunca por debajo
         tp1R, trail = tp2R, None
