@@ -14,9 +14,11 @@ from aiohttp import WSCloseCode, WSMsgType, web
 
 from . import aprendizaje, comisiones, config, reaccion, reflejo, resumen_backtest
 from .backtest import filter_results
-from .bus import Bus
+from .bus import Bus, dumps_web
+from .lab_vivo_lectura import ACCIONES as LAB_ACCIONES, DIA_RE as LAB_DIA_RE, ID_RE as LAB_ID_RE, LabVivoLectura
 from .market import bias_of, funding_8h
 from .models import now_ms
+from .ranking import LIMITE_DEF as RANKING_LIMITE, LIMITE_MAX as RANKING_MAX, ORIGEN_RE, Ranking
 from .regions import MARKETS, REGIONS
 
 log = logging.getLogger("server")
@@ -70,6 +72,10 @@ class Services:
     # Velas públicas de OKX EU (bot/velas_okx.py: VelasOKX.respuesta), sin claves; si faltan o fallan, las del bot.
     velas_okx: Any = None
     real: Any = None         # RealBroker (bot/okx_real.py): modo real con OKX EU, APAGADO salvo que el usuario lo active
+    # Ranking de estrategias (bot/ranking.py) y lectura del laboratorio vivo (bot/lab_vivo_lectura.py: solo lee sus
+    # archivos, nunca importa bot.lab_vivo). Sin ellos, el servidor crea los suyos al primer GET (solo leen archivos).
+    ranking: Any = None
+    lab_vivo: Any = None
 
 
 def _hora(ms: int) -> str:
@@ -77,7 +83,8 @@ def _hora(ms: int) -> str:
 
 
 def _dumps(o) -> str:
-    return json.dumps(o, ensure_ascii=False)
+    """Las respuestas de la API y la foto inicial del WebSocket: nunca con NaN ni Infinity (bus.dumps_web)."""
+    return dumps_web(o)
 
 
 def adjusted_credibility(cred: float | None, tier: str | None, confirmations: int) -> int | None:
@@ -326,8 +333,10 @@ def velas_respuesta(get, coin: str, desde: int, hasta: int, tf: str) -> dict | N
             "recortada": a > a0, "n": len(rows), "velas": rows}
 
 
-BT_BLOCK = re.compile(r'<script type="application/json" id="(?:bt(?:Open)?Data|impulsoData|seis2?Data|ruptura3Data)">'
-                      r'.*?</script>', re.S)
+# Datos incrustados de la demostración que en directo sobran (llegan por la API): el backtest, y los ejemplos del
+# ranking (rankingData) y del laboratorio vivo (labVivoData)
+BT_BLOCK = re.compile(r'<script type="application/json" id="(?:bt(?:Open)?Data|impulsoData|seis2?Data|ruptura3Data'
+                      r'|rankingData|labVivoData)">.*?</script>', re.S)
 
 
 def make_app(bus: Bus, health, services: Services | None = None) -> web.Application:
@@ -491,6 +500,45 @@ def make_app(bus: Bus, health, services: Services | None = None) -> web.Applicat
         except Exception:
             log.exception("No pude publicar la cuenta real tras un mando")
 
+    por_defecto: dict[str, Any] = {}
+
+    def labv() -> LabVivoLectura:
+        """La lectura del laboratorio vivo (la de __main__ o, sin ella, una propia que solo lee archivos)."""
+        if sv.lab_vivo is not None:
+            return sv.lab_vivo
+        if "lab" not in por_defecto:
+            por_defecto["lab"] = LabVivoLectura(bus)
+        return por_defecto["lab"]
+
+    def rk() -> Ranking:
+        """El ranking de estrategias (el de __main__ o, sin él, uno propio con lo que haya en el bus)."""
+        if sv.ranking is not None:
+            return sv.ranking
+        if "ranking" not in por_defecto:
+            res = getattr(sv.broker, "results", None)
+            por_defecto["ranking"] = Ranking(bus, get_resultados=res if callable(res) else None, lab=labv())
+        return por_defecto["ranking"]
+
+    def lab_order(m: dict, origin: str | None, remote: str | None) -> None:
+        """{"type": "lab_vivo", "accion": "pausar|reanudar"} (docs/07, 14.3): crea o borra el archivo pausa_manual del
+        laboratorio vivo. Solo con el origen estricto de la propia web; el resultado sale en «orden_web» (area
+        lab_vivo) y el mensaje «lab_vivo» se vuelve a publicar al momento."""
+        acc = m.get("accion")
+        if acc not in LAB_ACCIONES:
+            return order_done("lab_vivo", None, None, {"ok": False, "why": "Acción del laboratorio vivo desconocida "
+                                                                           "(pausar o reanudar)"})
+        if not origen_web(origin, remote):
+            log.warning("Mando del laboratorio vivo «%s» rechazado: sin el origen de la propia web (%s desde %s)", acc,
+                        origin, remote)
+            return order_done("lab_vivo", acc, None, {"ok": False, "why": "Solo desde la propia web del bot (cabecera Origin)"})
+        lab = labv()
+        res = lab.mando(acc)
+        order_done("lab_vivo", acc, None, res)
+        try:
+            lab.publicar(forzar=True)
+        except Exception:
+            log.exception("No pude publicar el estado del laboratorio vivo tras un mando")
+
     def real_story_order(kind: str, story: str, m: dict, origin: str | None, remote: str | None) -> None:
         """decision, close y cancel de una story del modo real: van al RealBroker y solo desde la propia web."""
         if not origen_web(origin, remote):
@@ -514,7 +562,8 @@ def make_app(bus: Bus, health, services: Services | None = None) -> web.Applicat
         """Órdenes de la web: sobre el paper (aprobar o rechazar, cerrar una posición, cambiar el modo de aprobación,
         detener o reanudar la ejecución, cancelar una orden pendiente o programada y el perfil de comisiones), sobre el
         modo real (real; y decision, close y cancel de sus stories, con el origen estricto), sobre las fuentes (fuente),
-        la evolución (evolucion: aplicar, descartar o revertir propuestas, evaluar y modo) y los pesos de los medios.
+        la evolución (evolucion: aplicar, descartar o revertir propuestas, evaluar y modo), los pesos de los medios y el
+        laboratorio vivo (lab_vivo: pausar o reanudar, con el origen estricto).
         origin: la cabecera Origin con la que se abrió el WebSocket (None si no la traía); remote: la IP de la conexión."""
         try:
             m = json.loads(data)
@@ -533,6 +582,8 @@ def make_app(bus: Bus, health, services: Services | None = None) -> web.Applicat
             return commission_order(m)
         if kind == "real":
             return real_order(m, origin, remote)
+        if kind == "lab_vivo":
+            return lab_order(m, origin, remote)
         story = _story(m)
         if kind in ("decision", "close", "cancel") and real_story(story):
             return real_story_order(kind, story, m, origin, remote)
@@ -605,7 +656,7 @@ def make_app(bus: Bus, health, services: Services | None = None) -> web.Applicat
 
         sender = None
         try:
-            await ws.send_str(json.dumps(snap, ensure_ascii=False))
+            await ws.send_str(_dumps(snap))   # sin NaN: la web parsea la foto entera de una vez
             sender = asyncio.create_task(pump())
             origin, remote = request.headers.get("Origin"), request.remote
             async for msg in ws:
@@ -947,6 +998,87 @@ def make_app(bus: Bus, health, services: Services | None = None) -> web.Applicat
             res.update(pedida="okx", aviso=aviso + ": velas del bot")
         return j(res)
 
+    # ---- ranking de estrategias (docs/04, 2.20) y laboratorio vivo (docs/07, 14.1)
+
+    def q_bool(request: web.Request, name: str) -> bool | None:
+        raw = (request.query.get(name) or "").strip().lower()
+        if raw == "":
+            return None
+        if raw in ("1", "true", "si", "sí"):
+            return True
+        if raw in ("0", "false", "no"):
+            return False
+        raise web.HTTPBadRequest(text=f"{name} debe ser 1 o 0")
+
+    async def api_ranking(request: web.Request) -> web.Response:
+        """El ranking de estrategias: ?origen=a,b&cumple=1|0&min_op_dia=&limite=&fragil=1|0&todas=1. Los puestos son los
+        del ranking entero (un filtro no los cambia). 400 con un parámetro no válido (limite fuera de 1-5.000 se
+        recorta). Lleva ETag (Ranking.firma, sin las horas de cálculo): con If-None-Match igual, 304 sin cuerpo."""
+        q = request.query
+        origen = (q.get("origen") or "").strip() or None
+        if origen and not all(ORIGEN_RE.fullmatch(o) for o in origen.split(",")):
+            raise web.HTTPBadRequest(text="origen: uno o varios (separados por comas) de letras minúsculas, cifras y _")
+        min_op = None
+        if (q.get("min_op_dia") or "").strip():
+            try:
+                min_op = float(q["min_op_dia"].replace(",", "."))
+            except ValueError:
+                raise web.HTTPBadRequest(text="min_op_dia debe ser un número")
+            if not (math.isfinite(min_op) and min_op >= 0):
+                raise web.HTTPBadRequest(text="min_op_dia debe ser un número ≥ 0")
+        cumple, fragil, todas = q_bool(request, "cumple"), q_bool(request, "fragil"), q_bool(request, "todas")
+        limite = q_int(request, "limite", RANKING_LIMITE, 1, RANKING_MAX)
+        r = rk()
+        foto = r.foto_vivo()   # en el bucle: el paper y el bus no se leen desde un hilo
+
+        def consulta() -> tuple[dict, str]:
+            out = r.consulta(foto, origen, cumple, min_op, limite, fragil, bool(todas))
+            return out, Ranking.firma(out)
+
+        out, firma = await asyncio.to_thread(consulta)
+        etag = f'"{firma}"'
+        cab = {"ETag": etag, "Cache-Control": "no-cache"}
+        if etag in [x.strip() for x in (request.headers.get("If-None-Match") or "").split(",")]:
+            return web.Response(status=304, headers=cab)   # la web ya lo tiene: no vuelve a viajar
+        txt = await asyncio.to_thread(_dumps, out)   # en un hilo también: la tabla entera pesa ~2 MB
+        return web.Response(text=txt, content_type="application/json", headers=cab)
+
+    async def api_lab_vivo(_request: web.Request) -> web.Response:
+        """estado.json más mejores (hasta 20) y el diario de hoy; «apagado» sin archivo y «parado» con el latido viejo."""
+        return j(await asyncio.to_thread(labv().vista))
+
+    async def api_lab_hipotesis(request: web.Request) -> web.Response:
+        """?id=h-… → hipotesis/<id>.json (404 si no existe); sin id, {hipotesis} filtradas por estado y familia."""
+        q = request.query
+        hid = q.get("id")
+        if hid is not None:
+            if not LAB_ID_RE.fullmatch(hid):
+                raise web.HTTPBadRequest(text="id de hipótesis no válido (h-AAAAMMDD-HHMM-nombre)")
+            d = await asyncio.to_thread(labv().hipotesis_detalle, hid)
+            if d is None:
+                raise web.HTTPNotFound(text="No hay esa hipótesis en el laboratorio vivo")
+            return j(d)
+        estado, familia = q.get("estado") or None, q.get("familia") or None
+        for k, v in (("estado", estado), ("familia", familia)):
+            if v is not None and not re.fullmatch(r"[a-z0-9_]{1,60}", v):
+                raise web.HTTPBadRequest(text=f"{k} no válido")
+        return j(await asyncio.to_thread(labv().hipotesis, estado, familia, q_int(request, "limite", 100, 1, 1000)))
+
+    async def api_lab_diario(request: web.Request) -> web.Response:
+        dia = request.query.get("dia") or None
+        if dia is not None and not LAB_DIA_RE.fullmatch(dia):
+            raise web.HTTPBadRequest(text="dia con el formato AAAA-MM-DD")
+        d = await asyncio.to_thread(labv().diario, dia)
+        if d is None:
+            raise web.HTTPNotFound(text="No hay diario del laboratorio vivo de ese día")
+        return j(d)
+
+    async def api_lab_cola(_request: web.Request) -> web.Response:
+        return j(await asyncio.to_thread(labv().cola))
+
+    async def api_lab_generador(request: web.Request) -> web.Response:
+        return j(await asyncio.to_thread(labv().generador, q_int(request, "limite", 10, 1, 50)))
+
     async def api_real(_request: web.Request) -> web.Response:
         """Panel «Cuenta real» (docs/06, contrato de cableado): RealBroker.vista_real() o, sin el conector, «apagado».
         Nunca lleva claves."""
@@ -976,6 +1108,12 @@ def make_app(bus: Bus, health, services: Services | None = None) -> web.Applicat
     app.router.add_get("/api/decisiones", api_decisiones)
     app.router.add_get("/api/velas", api_velas)
     app.router.add_get("/api/real", api_real)
+    app.router.add_get("/api/ranking", api_ranking)
+    app.router.add_get("/api/lab_vivo", api_lab_vivo)
+    app.router.add_get("/api/lab_vivo/hipotesis", api_lab_hipotesis)
+    app.router.add_get("/api/lab_vivo/diario", api_lab_diario)
+    app.router.add_get("/api/lab_vivo/cola", api_lab_cola)
+    app.router.add_get("/api/lab_vivo/generador", api_lab_generador)
     app.router.add_get("/api/vigilancia", api_vigilancia)
     app.router.add_get("/api/cripto_aperturas", api_cripto_aperturas)
     app.router.add_get("/api/fuentes_vivas", api_fv)

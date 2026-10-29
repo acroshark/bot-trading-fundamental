@@ -124,6 +124,22 @@ def closes_before_open(a, b, day) -> bool;  def ordered_by_close(day) -> list[Ma
 # bot/velas_okx.py (29-10-2026) VelasOKX(session): velas(moneda, desde, hasta, tf) y respuesta(moneda, desde, hasta, tf,
 #   máximo) con las rutas PÚBLICAS de OKX EU (GET /api/v5/market/candles e history-candles, instId BTC-USDC…, sin
 #   claves ni firma), caché en memoria y ≤ 10 peticiones cada 2 s; ErrorVelas si OKX no responde
+# bot/ranking.py (29-10-2026) Ranking(bus, get_resultados=broker.results, lab=LabVivoLectura) → mensaje «ranking» (2.20)
+#   Filas comunes de BACKTEST_DIR/ranking/*.json (una por archivo; las deja scripts/ranking_importar.py o cualquier
+#   estudio nuevo), las tarjetas del laboratorio vivo (de_tarjeta, pasadas a jornadas) y lo de en vivo (paper por
+#   tags.preset y la vigilancia). normalizar(fila), entra(fila), ordenar(filas), jornadas_entre(desde, hasta), holm(ps),
+#   foto_vivo() (en el bucle), calcular(foto) y consulta(foto, origen, cumple, min_op_dia, limite, fragil, todas) (en un
+#   hilo; GET /api/ranking), Ranking.firma(respuesta) (su ETag). Solo escribe DATA_DIR/ranking_estado.json (lo visto:
+#   «nueva» y el puesto de antes). Una fila o una tarjeta rota se salta y se apunta en fuentes.<fuente>.errores
+# bot/bus.py dumps_web(o): el JSON de los mensajes del bus, de las respuestas de la API (server._dumps) y de la foto
+#   inicial del WebSocket, sin NaN ni Infinity (pasan a null; JSON.parse no los admite y, en la foto, uno solo haría
+#   perder a la web todo su estado)
+# bot/lab_vivo_lectura.py (29-10-2026) LabVivoLectura(bus): bot/lab_vivo/ va en un proceso aparte (docs/07); el servidor
+#   solo lee sus archivos (DATA_DIR/lab_vivo o BOT_LAB_VIVO_DIR, caché por mtime) y nunca importa bot.lab_vivo ni abre
+#   lab_vivo.db. vista(), hipotesis(estado, familia, limite), hipotesis_detalle(id), diario(dia), cola(), generador(limite),
+#   resumen() (mensaje «lab_vivo», 2.19), tarjetas() (para el ranking) y mando("pausar"|"reanudar") (crea o borra
+#   pausa_manual, su único mando; el servidor lo deja pasar solo con el origen estricto, 3.3). run(): cada 30 s mira
+#   estado.json y publica «lab_vivo» si cambió. Sin Services.ranking ni Services.lab_vivo, el servidor crea los suyos
 # bot/okx_real.py       RealBroker(bus, store, get_market, session, get_orderflow) (docs/06): construido siempre en
 #   __main__; sin secretos/okx.env queda APAGADO y no hace ninguna petición privada. run() en el gather. Recibe los
 #   tickets solo con BOT_BROKER=real (por defecto, paper: el motor y la entrada por noticia van al paper; la fase 2
@@ -822,6 +838,120 @@ El conector del modo real (`bot/okx_real.py`, docs/06) está enganchado pero **A
 - **Agente `real`**: `{"type": "agent", "agent": "real", "patch": {"off": bool, "now": "…"}}`, una línea de estado; empieza por «¡SIN STOP EN OKX: …!» mientras alguna posición esté sin stop.
 - **Eventos**: los mismos tipos que el paper (`riskok`/`riskko`, `humanwait`/`humanok`/`humanko`, `order`, `filled`, `manage`, `blocked`, `closed`) con `patch.real = {modo, demo}` y títulos con «(dinero real)», «(demo de OKX)» o «(solo lectura)»; código de veto nuevo «Tope diario de entradas…» → `tope_dia`. Y `real_aviso` (2.6).
 
+### 2.19 `lab_vivo` (estado del laboratorio vivo, 29-10-2026)
+
+El laboratorio vivo (`bot/lab_vivo/`, docs/07) va en un **proceso aparte** (`scripts/lab-vivo.ps1`). El bot solo lee
+sus archivos de `DATA_DIR\lab_vivo` (`bot/lab_vivo_lectura.py`): nunca importa `bot.lab_vivo` ni abre `lab_vivo.db`,
+que no está en `bot.db` (su esquema, en docs/07, apartado 12).
+
+- **Es un estado** (último estado del bus, va en la foto inicial). Cada 30 s se mira `estado.json`; se publica si cambió
+  su mtime, si el latido pasa a tener más de 3 min o si cambia la pausa manual, y al momento tras un mando (3.3):
+
+```json
+{"type": "lab_vivo", "ts": 0, "estado": "activo|pausa|en_espera|sin_datos|canario_fallido|error|arrancando|parado",
+ "motivo": "…", "latido": 0, "aviso": "…", "proxima_pausa": {}, "contadores": {}, "embudo": [], "meta": {},
+ "mejores": [], "en_avance": [], "listas": [], "canario": "ok", "recursos": {"procesos": 1, "memoria_libre_mb": 2048},
+ "pausa_manual": false, "nota": "… (solo si está parado)"}
+```
+
+- Las listas van recortadas a 5 tarjetas (docs/07, 13.3), sin `curva` ni `checks`.
+- `parado`: el latido de `estado.json` es de hace más de 3 min; el resto es lo último que hubo y `nota` dice desde qué
+  hora.
+- Sin `estado.json`: `{"type": "lab_vivo", "estado": "apagado", "nota": "El laboratorio vivo no está en marcha
+  (scripts/lab-vivo.ps1)", "pausa_manual": false}`, una sola vez.
+- Un archivo con tipos raros (listas que son objetos o números) no rompe nada: lo que no vale se queda fuera. Si el
+  laboratorio deja NaN o Infinity en sus JSON, salen como `null` (bus.dumps_web).
+- **Web:** pestaña «Laboratorio» (`#laboratorio`, docs/07 14.4). La demostración lleva datos de muestra incrustados en
+  `<script type="application/json" id="labVivoData">`, marcados como tales; en directo el servidor los quita de la página
+  (`server.BT_BLOCK`) y todo llega por las rutas de 3 y por este mensaje.
+
+### 2.20 `ranking` (ranking de estrategias, 29-10-2026)
+
+Lo pidió el usuario: todas las estrategias medidas, de más beneficio a menos, con las operaciones medias y los datos que
+importan; las que vaya sacando el agente entran solas en su puesto, lleguen o no al 1 % diario, si no pierden.
+`bot/ranking.py` junta tres fuentes, todas en solo lectura, que toleran faltar y se recargan solas por mtime:
+
+1. `BACKTEST_DIR\ranking\*.json`: **una fila común por archivo** (también vale `{"filas": [...]}`). Los que empiezan
+   por `_` no son filas (`_importado.json`, el resumen del importador). Para que entre un estudio nuevo basta con dejar
+   su archivo. `scripts/ranking_importar.py` pasa los estudios ya hechos (idempotente; nombres `<estudio>--<id>-<firma>.json`).
+2. El laboratorio vivo: las tarjetas de docs/07 13.3 (`mejores.json`, `estado.json` e `hipotesis\<id>.json`). Las
+   cifras del laboratorio son por día natural: se pasan a jornadas con su mismo periodo fuera de muestra
+   (× días naturales / jornadas, del corte al fin de la época).
+3. En vivo: las operaciones del paper agrupadas por `tags.preset` (las de la Ruptura V3 también por `tags.modelo`; sin
+   preset, `en_vivo:motor`, `en_vivo:noticia_fiable` o `en_vivo:paper_otras`) y la prueba en avance (vigilancia, 2.8: su
+   id es el del laboratorio de 2.000; E2-7d es la fila de E2).
+
+**Fila común:**
+
+```json
+{"id": "ruptura3", "nombre": "…", "familia": "…", "estudio": "ruptura3", "regla": "texto llano",
+ "origen": "laboratorio_vivo|estudio|laboratorio_2000|curso|selectiva|salidas|en_vivo", "cumple_reglas": true,
+ "perfil_costes": "backtest|laboratorio|okx_eu_con_xperps|okx_eu_sin_xperps|paper", "perfil_texto": "…",
+ "perfil_corto": "costes del backtest", "fecha": "2026-10-29", "archivo": "ruptura3_resumen.json",
+ "dentro": {"n": 159, "R": -0.033, "gana_pct": 37.1},
+ "fuera": {"n": 118, "R": 0.4285, "gana_pct": 50.8, "p": null, "q": null, "jornadas": 306, "dias": null, "R_bruto": 0.5392},
+ "op_dia": 0.386, "pct_dia": 0.0826, "R_dia": 0.1654, "op_dia_natural": 0.2738, "pct_dia_natural": null,
+ "caida_max_pct": 4.17,
+ "robustez": {"sin_5_mayores": 0.2468, "dentro_positivo": false, "mitades": [0.476, 0.3759],
+              "corregida": {"tipo": "holm|bh|dsr|bonferroni|p|sin_p", "metodo": "Holm entre las 23 configuraciones del estudio (p frente a la base emparejada)",
+                            "valor": 1.0, "pasa": false},
+              "base_p": 0.0939, "sin_mejor_mes": null, "sin_mejor_semana": null, "desliz_x2": null},
+ "en_vivo": {"fuente": "paper|vigilancia|lab_vivo", "virtual": false, "n": 1, "R": 0.5, "gana_pct": 100.0,
+             "neto_usdc": 0.4, "bruto_usdc": 0.45, "desde": 0, "hasta": 0, "abiertas": 0, "avance": {}},
+ "estado": "backtest|en_avance|en_paper|descartada_por_el_usuario", "fragil": true, "fragil_motivos": ["…"],
+ "poca_muestra": false, "probadas": 23, "nota": "…", "perfiles": {"okx_eu_con_xperps": {"n": 118, "R": 0.47,
+ "gana_pct": 50.8, "op_dia": 0.386, "pct_dia": 0.09}}, "igual_que": null,
+ "posicion": 24, "posicion_antes": 23, "nueva": false, "entra_desde": null, "en_marcha": true,
+ "archivo_ranking": "ruptura3--ruptura3-5c3a….json"}
+```
+
+- **Unidades.** R = resultado medio por operación, NETO de costes, con el perfil con que se calculó (`perfil_costes`,
+  y en corto `perfil_corto`, que la web enseña en cada fila: el orden mezcla perfiles y no hay uno común): las réplicas
+  del motor, las selectivas, el curso y las salidas, `backtest` (0,10 % por lado y 2 pb también en los perpetuos, con
+  su funding, y la gestión del paper); el laboratorio de 2.000, `laboratorio` (5-20 pb más en los stops, todo con el
+  modelo del contado y **sin funding**); el laboratorio vivo, `okx_eu_con_xperps` (más barato, con funding).
+  `op_dia` = operaciones medias por **jornada con aperturas** (de lunes a viernes salvo el 1 de enero: 306 en el fuera de
+  muestra de los estudios, `ranking.jornadas_entre`). `pct_dia` = % de la cuenta por jornada con 0,5 % de riesgo,
+  fuera de muestra (R × 0,5 × `op_dia`, sin interés compuesto); `R_dia` = R × `op_dia`. Lo que falte en un archivo se
+  calcula: `op_dia` con `fuera.n / fuera.jornadas`, `pct_dia` y `R_dia` con el R de fuera.
+- **Corrección por número de pruebas** (`robustez.corregida`): `tipo` corto para el chip de la web (`holm`, `bh` = q de
+  Benjamini-Hochberg, `dsr` = Sharpe deflactado, `bonferroni`, `p`, o `sin_p`), `metodo` (la frase larga), `valor` y
+  `pasa`. Si un archivo no trae `tipo`, se deduce del método. **Sin corrección siendo una de varias configuraciones de su
+  estudio** (`probadas > 1`; las 378 salidas, las rejillas…): `{"tipo": "sin_p", "metodo": "sin p ni corrección: una de
+  N configuraciones de su estudio", "valor": null, "pasa": false}`. E2 con 7 días lleva `sin_p` porque su salida se eligió
+  después de ver los datos. `corregida: null` solo para una configuración suelta (los presets del motor).
+- **Frágil** (`fragil_motivos`): gana fuera y pierde dentro; sin sus 5 mejores operaciones pierde; no pasa la corrección
+  (`pasa: false`); o no la tiene (`sin_p`: «sin corrección por número de pruebas: una de N configuraciones de su
+  estudio, que sube en el ranking por su resultado fuera de muestra»). El estudio puede añadir los suyos (`fragil: true`
+  y `fragil_motivos`: E2 con 7 días, «la salida de 7 días se eligió después de ver los datos: no está validada»).
+  `poca_muestra`: menos de 30 operaciones fuera. Con los estudios de hoy, todas las que entran son frágiles.
+- **Limpieza.** Todo se limpia al leerlo (números finitos, textos cortos, `en_vivo` solo con números, booleanos y
+  textos): una fila o una tarjeta rota se salta y se apunta en `fuentes.estandar.errores` («x.json: 1 fila no vale: …»)
+  o `fuentes.lab_vivo.errores`, sin tumbar el ranking ni dejar NaN en el JSON.
+- **Orden y entrada.** `pct_dia` de mayor a menor; desempate `op_dia` y `fuera.n`. Entran las que no pierden fuera de
+  muestra (`fuera.R ≥ 0` con al menos una operación); las demás llevan `posicion: null`. `en_marcha` (la del motor,
+  por `openings.params.preset` o, sin él, `DATA_DIR\estrategia_activa.json`) se enseña siempre aparte. Presets → filas:
+  `ruptura3`, `seis2`, `seis`, `impulso` → `e2_impulso_7d`.
+- **Estado.** `descartada_por_el_usuario` (E2: sus dos filas) manda; luego `en_paper` (la que opera el motor), luego
+  `en_avance` (vigilancia o laboratorio vivo en avance); si no, `backtest`.
+- **Nueva y puesto de antes.** `nueva`: entró en las últimas 24 h; `posicion_antes`: su puesto en el ranking anterior
+  distinto. Se guardan en `DATA_DIR\ranking_estado.json` (sobreviven a un reinicio; la primera vez, todo lo que hay se da
+  por visto).
+- **Mensaje del bus** (estado, va en la foto inicial; al arrancar y cada 60 s, solo si cambia):
+  `{"type": "ranking", "ts", "n_total", "n_ranking", "filas": [las 20 primeras, sin perfiles ni archivo_ranking],
+  "en_marcha", "nota", "fuentes": {estandar|lab_vivo|paper|vigilancia: {ts, filas, estado}}}`.
+- `en_marcha`: `{id, preset, nombre, desde, pausada, fuente ("motor"|"estrategia_activa.json"), posicion, n_ranking,
+  en_ranking, texto, fila}`; `texto`: «Puesto 24 de 863 en el ranking», «Fuera del ranking: pierde fuera de muestra
+  (−0,075 R por operación)» (solo con R < 0), «Fuera del ranking: no pierde (+0,120 R por operación), pero le faltan las
+  operaciones por jornada para calcular su % de la cuenta al día» (o «…pero no tiene operaciones fuera de muestra»),
+  «Fuera del ranking: sin medida fuera de muestra» o por qué no está.
+- **Web:** pestaña «Ranking» (`#ranking`) y su resumen en «Mando» (las 5 primeras, con «frágil» o «descartada por ti»,
+  y la que está en marcha; sin respuesta del ranking, la nombra por `openings` con «sin datos del ranking»). La
+  demostración lleva el ejemplo incrustado en `<script type="application/json" id="rankingData">`: las filas reales
+  (Ruptura V3, E2 con 7 días, «6 diarias», «6 diarias v2» y E1 y E2 del laboratorio) son filas normalizadas como las
+  enseña el bot y las rehace `scripts/ranking_importar.py --demo`; las que empiezan por «Ejemplo» son inventadas. En
+  directo el servidor quita el bloque de la página (`server.BT_BLOCK`).
+
 ## 3. API de solo lectura (servidor en 127.0.0.1:8765)
 
 | Ruta | Devuelve |
@@ -840,6 +970,13 @@ El conector del modo real (`bot/okx_real.py`, docs/06) está enganchado pero **A
 | `GET /api/resultados` | Operaciones paper y agregados (3.2), con las comisiones pagadas, el funding, el bruto y el neto |
 | `GET /api/real` | El panel «Cuenta real» (2.18): `RealBroker.vista_real()` (lo mismo que el mensaje `cuenta_real`), o `{"modo": "apagado", "broker": "paper", "resumen": "Modo real apagado: el bot opera en paper", …}` sin el conector. Nunca lleva un valor de las claves |
 | `GET /api/vigilancia` | Último `vigilancia` (2.8) y `operaciones`: las operaciones virtuales que cuentan, de la más reciente a la más antigua (filas de la tabla `vigilancia`, hasta 500) |
+| `GET /api/ranking?origen=a,b&cumple=1\|0&min_op_dia=&limite=300&fragil=1\|0&todas=1` | El ranking de estrategias (2.20): `{ts, n_total, n_ranking, n_filtradas, filas, en_marcha, fuentes {estandar, lab_vivo, paper, vigilancia}, nota, criterio, origenes [{id, nombre, n, n_ranking}], perfiles_costes [{id, texto, n_ranking}], filtros}`. `filas`: las que entran, en su orden (con `todas=1`, también las que no entran, detrás, con `posicion: null`); los puestos son los del ranking entero (un filtro no los cambia). `origen`: uno o varios separados por comas; `cumple`: solo las que cumplen (1) o no (0) tus reglas; `min_op_dia`: operaciones por jornada como mínimo (admite coma decimal); `fragil=0` oculta las frágiles; `limite`: entero, por defecto 300; fuera de 1-5.000 se recorta (como los demás `limite` de la API). 400 con un parámetro no válido (`origen` con otros caracteres, `min_op_dia` que no es un número ≥ 0, `cumple`/`fragil`/`todas` que no son 1 o 0, `limite` que no es un entero). Lleva `ETag` (la firma del contenido sin las horas de cálculo, `Ranking.firma`) y `Cache-Control: no-cache`: con `If-None-Match` igual contesta **304** sin cuerpo (la tabla entera pesa ~2 MB y la web la vuelve a pedir cada 2 min y con cada mensaje `ranking`). Sin el módulo, el servidor crea el suyo con lo que hay. No va en el estado inicial del WebSocket (el mensaje `ranking` sí) |
+| `GET /api/lab_vivo` | `estado.json` del laboratorio vivo más `mejores` (de `mejores.json`, hasta 20; sin él, las de `estado.json`), `diario` (el de hoy o `null`) y `pausa_manual`. Sin archivo: `{"estado": "apagado", "nota": "El laboratorio vivo no está en marcha (scripts/lab-vivo.ps1)"}`; con el latido de hace más de 3 min: `estado: "parado"`, `estado_corredor` (el que decía) y `nota`, con el resto como estaba |
+| `GET /api/lab_vivo/hipotesis?estado=&familia=&limite=100` | `{hipotesis, n, ts}` de `hipotesis.json`, filtradas (`limite` de 1 a 1.000) |
+| `GET /api/lab_vivo/hipotesis?id=h-AAAAMMDD-HHMM-…` | `hipotesis\<id>.json` (la hipótesis, su admisión y cada variante con su tarjeta, sus pruebas y sus operaciones); 400 si el `id` no cumple `^h-\d{8}-\d{4}-[a-z0-9_-]{3,60}$` (nada de rutas); 404 si no existe |
+| `GET /api/lab_vivo/diario?dia=AAAA-MM-DD` | El diario de ese día (por defecto, hoy en Madrid); 400 con otro formato; 404 si no hay |
+| `GET /api/lab_vivo/cola` | `cola.json` (sin archivo, `{"estado": "apagado", "pendientes": 0, …}`) |
+| `GET /api/lab_vivo/generador?limite=10` | `{notas, n}`: las últimas notas del agente generador (`generador\*.json`, de la más reciente a la más vieja, con `archivo`; `limite` de 1 a 50) |
 | `GET /api/aperturas` | Último `openings` (2.9) |
 | `GET /api/cripto_aperturas` | Último `cripto_aperturas` (2.14), o `{"estado": "apagado"}` sin el módulo |
 | `GET /api/aprendizaje` | Último `aprendizaje` (2.10) más `medios` (ranking de 60), `postmortems` (20), `cambios` (30 cambios de peso) y `noticias` `{mejores, peores}` (las que mejor y peor funcionaron a 4 h, 20 de cada) |
@@ -860,7 +997,7 @@ El conector del modo real (`bot/okx_real.py`, docs/06) está enganchado pero **A
 
 Sin el módulo (apagado o sin arrancar), `/api/aprendizaje`, `/api/evolucion` y `/api/fuentes_vivas` devuelven el último estado del bus o `{"estado": "apagado"}` (`"apagada"` la evolución), y sus subrutas dan 404. Un parámetro no válido da 400.
 
-Las órdenes de la web al bot (aprobar, cerrar, cambiar el modo, detener, reanudar, cancelar y el perfil de comisiones; los mandos del modo real; y sobre fuentes, pesos de medios y evolución) van por el WebSocket `/events` (ver 3.3).
+Las órdenes de la web al bot (aprobar, cerrar, cambiar el modo, detener, reanudar, cancelar y el perfil de comisiones; los mandos del modo real; sobre fuentes, pesos de medios y evolución; y pausar o reanudar el laboratorio vivo) van por el WebSocket `/events` (ver 3.3).
 
 ### 3.1 Backtest (`BACKTEST_DIR/resultados.json`)
 ```json
@@ -937,6 +1074,7 @@ Por el mismo WebSocket por el que recibe los eventos, la web envía mensajes de 
 | `{"type": "peso_medio", "medio": "dominio", "peso": 1.2, "motivo": "…"}` (`peso: null` vuelve al automático: botón «Volver al automático» del ranking de medios) | `Aprendizaje.fijar_peso` | `orden_web`; el cambio queda en `medios_peso_hist` y la evolución lo copia a `evolution_log` |
 | `{"type": "revertir_peso", "id": 12}` | `Aprendizaje.revertir`: deja el medio como estaba justo antes (en automático si lo estaba y eso lo devuelve allí; si no, fijado a mano en el peso de antes); una fila `veredicto` no se revierte | `orden_web` |
 | `{"type": "evolucion", "accion": "aplicar\|descartar\|revertir\|evaluar\|modo", "id": "p…\|v…", "motivo": "…", "modo": "proponer\|automatico"}` | `Evolucion.orden_web` (aplicar, revertir, evaluar, modo) o `Evolucion.atender` (descartar) | `evolucion.ultima_orden`; aplicar, revertir y el modo quedan en `evolution_log` por la evolución, y descartar como `propuesta_descartada` (origen `web`) |
+| `{"type": "lab_vivo", "accion": "pausar\|reanudar"}` (29-10-2026; **origen estricto**, como el modo real: `server.origen_web`) | `LabVivoLectura.mando`: `pausar` crea `DATA_DIR\lab_vivo\pausa_manual` (el corredor no empieza nada mientras exista) y `reanudar` lo borra. No hay más mandos: ni criterios, ni cupos, ni aprobar nada desde aquí | `orden_web` (`area: "lab_vivo"`, `accion`, `ok`, `why`: «Ya estaba en pausa», «No estaba en pausa», «Solo desde la propia web del bot (cabecera Origin)»…) y el mensaje `lab_vivo` (2.19) al momento |
 
 - Las de pesos también se admiten como `{"cmd": "aprendizaje_peso", "outlet": …}` y `{"cmd": "aprendizaje_revertir", "id": …}`.
 - `id` de una fuente: cadena de 1 a 300 caracteres; `medio`: de 1 a 200; `peso`: número de JSON (no booleano ni texto) o `null`; `id` de un cambio de peso: entero. Lo que no cumple se registra y se ignora.
@@ -988,3 +1126,5 @@ Origen permitido (vale para todas las órdenes, también las de fuentes, pesos y
 - Fuentes vivas (2.12; `bot/fuentes_vivas.py`):
   - `source_status(id, estado, desde, motivo, tipo, manual, origen, previo, nombre, spec, cifras)`: manda sobre el registro `bot/fuentes/*.json` (un feed sin fila está activo); `id` = id del feed o `medio:<dominio>`.
   - `source_status_log(ts, id, antes, despues, tipo, motivo, cifras, auto, por)`, `source_health(id, horas, desde)`, `fv_noticias` (cada noticia captada con feed, medio, hora, latencia, veredicto, si se trió y si la confirmaron; 120 días) y `fv_candidatos` (medios candidatos con su RSS y su estado).
+- Ranking de estrategias (2.20; archivos, no tablas): `BACKTEST_DIR\ranking\*.json` (una fila común por archivo; los escribe `scripts/ranking_importar.py`, que solo escribe ahí, y cualquier estudio nuevo; el bot solo los lee) y `DATA_DIR\ranking_estado.json` (`{formato, ts, vistas {id: ms en que entró (0 = ya estaba)}, actual {id: puesto}, anterior {id: puesto}, cambio}`: lo único que escribe `bot/ranking.py`, de forma atómica).
+- Laboratorio vivo (2.19): su base `DATA_DIR\lab_vivo\lab_vivo.db` **no** está en `bot.db` y el bot no la abre (esquema en docs/07, apartado 12). El servidor solo crea o borra `DATA_DIR\lab_vivo\pausa_manual` (3.3).

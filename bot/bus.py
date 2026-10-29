@@ -1,6 +1,7 @@
 """Bus de eventos: guarda, recuerda el último estado y reparte cada mensaje a las webs conectadas."""
 import asyncio
 import json
+import math
 
 from . import config
 from .models import now_ms
@@ -9,6 +10,29 @@ from .store import Store
 # Tipos que solo salen en el cable: no se guardan como último estado ni van en la foto inicial de una web que se conecta
 # (las decisiones de las aperturas las pide la web a GET /api/decisiones; docs/04, 2.17).
 NO_STATE = frozenset({"decision_apertura"})
+
+
+def _sin_nan(o):
+    """o con NaN e ±infinito pasados a None (en listas, tuplas y diccionarios, a cualquier profundidad)."""
+    if isinstance(o, float):
+        return o if math.isfinite(o) else None
+    if isinstance(o, dict):
+        return {k: _sin_nan(v) for k, v in o.items()}
+    if isinstance(o, (list, tuple)):
+        return [_sin_nan(v) for v in o]
+    return o
+
+
+def dumps_web(o) -> str:
+    """JSON que el navegador sí lee: sin NaN ni Infinity (JSON.parse no los admite y, en la foto inicial del
+    WebSocket, un solo NaN le haría perder a la web todo su estado). Lo normal sale tal cual, sin coste extra; solo si
+    algo trae un número no finito se limpia (pasa a null) y se vuelve a escribir."""
+    try:
+        return json.dumps(o, ensure_ascii=False, allow_nan=False)
+    except ValueError as e:
+        if "Out of range float" not in str(e):   # otro fallo (una referencia circular…): como antes, sale el error
+            raise
+        return json.dumps(_sin_nan(o), ensure_ascii=False, allow_nan=False)
 
 
 class Bus:
@@ -33,7 +57,7 @@ class Bus:
             self.state[key] = prev
         elif kind not in NO_STATE:
             self.state[kind] = msg
-        data = json.dumps(msg, ensure_ascii=False)
+        data = dumps_web(msg)
         for q in list(self.clients):
             try:
                 q.put_nowait(data)

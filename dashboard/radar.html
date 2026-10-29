@@ -663,6 +663,69 @@ details.dec-more p{margin:3px 0 0;font-size:11.5px;color:var(--muted);font-famil
 .md-dec:hover{background:var(--surface-2)}
 .md-dec .pill{margin-left:4px}
 
+/* Ranking de estrategias (bot/ranking.py): tabla ordenable, chips de robustez, la que está en marcha y su resumen en Mando */
+.rk-tbl th{padding:0}
+.rk-sb{all:unset;box-sizing:border-box;display:block;width:100%;padding:8px 10px;cursor:pointer;font:inherit;letter-spacing:inherit;text-transform:inherit;color:inherit;white-space:nowrap}
+.rk-sb:hover,th[aria-sort="ascending"] .rk-sb,th[aria-sort="descending"] .rk-sb{color:var(--ink)}
+.rk-sb:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+th.r .rk-sb{text-align:right}
+.rk-nm{all:unset;cursor:pointer;font-size:12.5px;line-height:1.35}
+.rk-nm:hover b{color:var(--accent)} .rk-nm:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.rk-sub{display:block;font-size:11px;color:var(--muted);margin-top:1px;white-space:normal}
+td.rk-rob{white-space:normal;min-width:150px;max-width:260px}
+.rkc{display:inline-block;font-size:10.5px;font-weight:600;border-radius:3px;padding:0 5px;margin:1px 3px 1px 0;white-space:nowrap}
+.rkc.good{background:var(--good-wash);color:var(--good)} .rkc.bad{background:var(--bad-wash);color:var(--bad)}
+.rkc.warn{background:var(--warn-wash);color:var(--warn)} .rkc.muted{background:var(--surface-2);color:var(--muted);border:1px solid var(--line)}
+tr.rk-live td{background:var(--good-wash)} tr.rk-live td:first-child{box-shadow:inset 3px 0 0 var(--good)}
+tr.rk-det td{white-space:normal;background:var(--surface-2)}
+.rk-det-b{display:grid;gap:8px;max-width:1100px} .rk-det-b p{margin:0}
+.rk-band{display:grid;gap:4px;border-left:3px solid var(--good);padding:2px 0 2px 12px} .rk-band.out{border-left-color:var(--bad)}
+.rk-band p{margin:0} .rk-band .pill{margin-left:4px}
+.rk-more{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px}
+.rk-src{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-wrap:wrap;gap:4px 16px;font-size:11.5px;color:var(--muted)}
+#v-ranking.demo .panel-h h2::after,#v-lab.demo .panel-h h2::after{content:"Ejemplo";margin-left:10px;font-family:var(--f-mono);font-size:10.5px;font-weight:600;letter-spacing:.06em;
+  text-transform:uppercase;vertical-align:3px;border:1px dashed var(--warn);color:var(--warn);background:var(--warn-wash);border-radius:3px;padding:1px 6px}
+#v-lab.demo .panel-h h2::after{content:"Demostración"}
+/* Laboratorio vivo (bot/lab_vivo, docs/07 14.4): estado con la pausa, meta del 1 %, embudo, mejores, avance, diario y cola */
+.lv-st{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 14px;margin-bottom:8px}
+.lv-st b.big{font-family:var(--f-display);font-size:30px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;line-height:1}
+.lv-st b.good{color:var(--good)} .lv-st b.warn{color:var(--warn)} .lv-st b.bad{color:var(--bad)} .lv-st b.info{color:var(--accent)} .lv-st b.muted{color:var(--muted)}
+.lv-cd{font-family:var(--f-mono);font-size:13px}
+.lv-virt{border:1px dashed var(--warn);background:var(--warn-wash);color:var(--ink);border-radius:6px;padding:7px 10px;font-size:12.5px;margin:10px 0 0}
+.lv-virt b{color:var(--warn)}
+.lv-mrow{display:grid;grid-template-columns:150px minmax(0,1fr) 84px;gap:10px;align-items:center;font-size:12.5px;margin-bottom:8px}
+.lv-mtr{position:relative;height:12px;border-radius:6px;background:var(--surface-2);border:1px solid var(--line);overflow:hidden}
+.lv-mtr span{position:absolute;left:0;top:0;bottom:0;background:var(--accent);border-radius:6px}
+.lv-mrow b{font-family:var(--f-mono);font-weight:500;text-align:right}
+.lv-mrow.goal .lv-mtr span{background:var(--good);opacity:.35}
+.lv-falta{font-size:13px;margin:6px 0}
+.lv-fun{display:grid;grid-template-columns:repeat(auto-fill,minmax(108px,1fr));gap:6px}
+.lv-fun div{border:1px solid var(--line);border-radius:6px;padding:7px 9px;display:grid;gap:3px;min-width:0}
+.lv-fun small{font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lv-fun b{font-family:var(--f-display);font-size:26px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
+.lv-fun i{display:block;height:4px;border-radius:2px;background:var(--surface-2);overflow:hidden} .lv-fun i span{display:block;height:100%;background:var(--accent);min-width:2px}
+.lv-fun em{font-style:normal;font-size:11px;color:var(--muted);font-family:var(--f-mono)}
+.lv-n{margin:10px 0 0;font-size:12.5px;color:var(--ink-2);display:grid;gap:4px}
+.lv-pad{padding:14px}
+tr[data-lv-sel]{cursor:pointer}
+.lv-det-h{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;margin-bottom:8px}
+.lv-chk{display:flex;flex-wrap:wrap;gap:2px;margin:8px 0}
+.lv-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:10px}
+.lv-card{all:unset;box-sizing:border-box;cursor:pointer;border:1px solid var(--line);border-radius:8px;padding:10px 11px;display:grid;gap:6px;background:var(--surface);min-width:0}
+.lv-card:hover{border-color:var(--line-2)} .lv-card:focus-visible{outline:2px solid var(--accent);outline-offset:2px} .lv-card[aria-pressed="true"]{border-color:var(--accent)}
+.lv-card .t{font-weight:600;font-size:13px;line-height:1.3}
+.lv-card .g{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px}
+.lv-card .g span{display:grid;font-size:11.5px} .lv-card .g small{font-size:10px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)} .lv-card .g b{font-family:var(--f-mono);font-weight:500}
+.lv-card svg{display:block;width:100%;height:36px}
+.lv-q{list-style:none;margin:0;padding:0;display:grid;gap:4px;font-size:12px}
+.lv-q li{display:grid;grid-template-columns:92px minmax(0,1fr) auto;gap:8px;align-items:center}
+.lv-q .mono{font-size:11px;color:var(--muted)}
+.lv-q .tx{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.lv-h{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:14px 0 6px;font-weight:600}
+.lv-h:first-child{margin-top:0}
+.lv-dl{margin:2px 0 0;padding-left:16px;display:grid;gap:2px;font-size:12px;color:var(--ink-2)}
+@media (max-width:720px){ .lv-mrow{grid-template-columns:104px minmax(0,1fr) 70px} .lv-card .g{grid-template-columns:repeat(2,minmax(0,1fr))} .lv-q li{grid-template-columns:72px minmax(0,1fr) auto} }
+
 /* Pie */
 .foot{border-top:1px solid var(--line);padding-block:14px 30px;color:var(--muted);font-size:12px}
 .foot .wrap{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center}
@@ -721,8 +784,10 @@ details.dec-more p{margin:3px 0 0;font-size:11.5px;color:var(--muted);font-famil
     <button type="button" role="tab" data-tab="pred" aria-selected="false">Predicciones</button>
     <button type="button" role="tab" data-tab="trades" aria-selected="false">Estrategias y cartera<span class="badge" id="pendBadge" hidden>0</span></button>
     <button type="button" role="tab" data-tab="results" aria-selected="false">Resultados</button>
+    <button type="button" role="tab" data-tab="ranking" aria-selected="false">Ranking<span class="badge" id="rkBadge" hidden>0</span></button>
     <button type="button" role="tab" data-tab="real" aria-selected="false">Cuenta real<span class="badge bad" id="realBadge" hidden>!</span></button>
     <button type="button" role="tab" data-tab="bt" aria-selected="false">Backtest</button>
+    <button type="button" role="tab" data-tab="lab" aria-selected="false">Laboratorio<span class="badge" id="lvBadge" hidden>0</span></button>
     <button type="button" role="tab" data-tab="market" aria-selected="false">Mercado y aperturas</button>
     <button type="button" role="tab" data-tab="evo" aria-selected="false">Evolución<span class="badge" id="evoBadge" hidden>0</span></button>
     <button type="button" role="tab" data-tab="ai" aria-selected="false">Consumo de IA</button>
@@ -808,6 +873,7 @@ details.dec-more p{margin:3px 0 0;font-size:11.5px;color:var(--muted);font-famil
       <div class="panel md-grow md-trace" id="mdTrace"></div>
       <div class="panel"><div class="panel-h"><h2>Tu decisión y cartera paper</h2></div><div class="panel-b" id="mdBook"></div></div>
       <div class="panel"><div class="panel-h"><h2>Noticias fiables</h2><p id="mdFiabSub">Las que aciertan ≥ 60 % de forma constante y las entradas que abren.</p></div><ul class="md-list" id="mdFiab"></ul></div>
+      <div class="panel"><div class="panel-h"><h2>Ranking de estrategias</h2><p id="mdRkSub">Las 5 primeras por % de la cuenta al día fuera de muestra, con costes, y la que está en marcha.</p></div><ul class="md-list" id="mdRk"></ul></div>
       <div class="panel"><div class="panel-h"><h2>Próximas predicciones</h2></div><ul class="md-list" id="mdPred"></ul></div>
     </div>
   </section>
@@ -844,6 +910,19 @@ details.dec-more p{margin:3px 0 0;font-size:11.5px;color:var(--muted);font-famil
     </div>
   </section>
 
+  <!-- RANKING: todas las estrategias medidas, de más a menos beneficio fuera de muestra con costes (bot/ranking.py, GET /api/ranking) -->
+  <section class="view" id="v-ranking" hidden>
+    <div class="callout warn" id="rkDemoNote" hidden></div>
+    <div class="callout info" id="rkNota"><b>Ordenado por beneficio fuera de muestra con costes; lo de arriba con poca muestra o frágil suele ser suerte.</b><span>Entran todas las estrategias que no pierden fuera de muestra (R ≥ 0, neto de costes), lleguen o no al 1 % diario; las que pierden se quedan fuera. Cada fila va con los costes con los que la midió su estudio, que no son los mismos para todas: las réplicas del motor, las selectivas, el curso y las salidas, 0,10 % por lado y 2 pb con el funding de los perpetuos; el laboratorio de 2.000, 5-20 pb más en los stops y sin funding; el laboratorio vivo, OKX EU con X-Perps, más barato. «% de la cuenta al día»: por jornada con aperturas, con 0,5 % de riesgo por operación. Solo paper: nada de esto opera con dinero real ni es una promesa.</span></div>
+    <div class="panel"><div class="panel-h"><h2>Estrategia en marcha</h2><p>La que opera ahora el motor en la cartera paper: se enseña siempre, esté o no en el ranking.</p></div><div class="panel-b" id="rkLive"></div></div>
+    <div class="panel">
+      <div class="panel-h"><h2>Ranking de estrategias</h2><p id="rkSub">Pulsa una estrategia para ver su regla y sus cifras; pulsa una columna para ordenar.</p></div>
+      <div class="filters" id="rkFilters"></div>
+      <div class="tbl-wrap"><table class="rk-tbl"><thead id="rkHead"></thead><tbody id="rkRows"></tbody></table></div>
+      <div class="panel-b" id="rkFoot"></div>
+    </div>
+  </section>
+
   <!-- CUENTA REAL (OKX EU): preparada y APAGADA hasta que el usuario ponga sus claves y la active él (docs/06) -->
   <section class="view" id="v-real" hidden>
     <div class="rband" id="realBand" role="alert" hidden></div>
@@ -877,6 +956,22 @@ details.dec-more p{margin:3px 0 0;font-size:11.5px;color:var(--muted);font-famil
     <div class="two">
       <div class="panel"><div class="panel-h"><h2 id="btDetTitle">Detalle</h2><p id="btDetSub">Pulsa una estrategia de la tabla.</p></div><div class="panel-b" id="btDetail"></div></div>
       <div class="panel"><div class="panel-h"><h2>Encadenamiento entre bolsas</h2><p>Puntos que suma a la probabilidad de que la bolsa de la columna suba cuando la de la fila subió. Las celdas tenues no se pueden operar: cierran a la vez o después.</p></div><div class="panel-b"><div class="heat-wrap" id="btMatrix"></div></div></div>
+    </div>
+  </section>
+
+  <!-- LABORATORIO VIVO: proceso aparte que inventa y prueba estrategias 24/7 (bot/lab_vivo, docs/07). Nada de esto opera. -->
+  <section class="view" id="v-lab" hidden>
+    <div class="callout warn" id="lvDemoNote" hidden></div>
+    <div class="panel"><div class="panel-h"><h2>Laboratorio vivo</h2><p>Un proceso aparte que inventa y prueba estrategias 24/7 con 3 años de velas y se para en cada apertura para no quitarle CPU al bot. Todo es virtual: nada opera.</p><div class="right" id="lvCtl"></div></div><div class="panel-b" id="lvHead"></div></div>
+    <div class="two">
+      <div class="panel"><div class="panel-h"><h2>Meta del 1 % diario</h2><p>Lo mejor medido, en R al día, frente a los 2 R al día que harían falta.</p></div><div class="panel-b" id="lvMeta"></div></div>
+      <div class="panel"><div class="panel-h"><h2>Embudo</h2><p>De las hipótesis recibidas a las listas para proponerte, en total y hoy.</p></div><div class="panel-b" id="lvFunnel"></div></div>
+    </div>
+    <div class="panel"><div class="panel-h"><h2>Mejores</h2><p>Por el límite inferior del IC 95 % del R fuera de muestra, no por el R a secas (que premia la suerte). Incluye las que no han pasado, con su motivo. Pulsa una para ver su curva y sus comprobaciones.</p></div><div class="tbl-wrap" id="lvBest"></div><div class="panel-b" id="lvDet" hidden></div></div>
+    <div class="panel"><div class="panel-h"><h2>En prueba en avance</h2><p>Operaciones VIRTUALES sobre los datos que van llegando. Para proponértela hacen falta al menos 40 completas en 28 días y que pase la corrección de Holm.</p></div><div class="panel-b" id="lvAvance"></div></div>
+    <div class="two">
+      <div class="panel"><div class="panel-h"><h2>Diario</h2><p>Lo que ha hecho cada día y las notas del agente generador.</p></div><div class="panel-b" id="lvDiario"></div></div>
+      <div class="panel"><div class="panel-h"><h2>Cola y qué falla más</h2><p>Lo que viene y los motivos de descarte más comunes.</p></div><div class="panel-b" id="lvCola"></div></div>
     </div>
   </section>
 
@@ -989,6 +1084,8 @@ details.dec-more p{margin:3px 0 0;font-size:11.5px;color:var(--muted);font-famil
 <script type="application/json" id="seisData">{"generated":1793193659551,"split":1755295200000,"sl_pct":1.5,"nota":"Réplica del motor: entradas de apertura.ImpulseRun (impulso de los 15 primeros min, cualquier movimiento ≠ 0; entrada a +15 min) y gestión del paper (simulate_plan: 0,10 % de comisión por lado también en perpetuos y 2 pb de deslizamiento), una posición por moneda, ≤ 6 entradas y 3 % de riesgo por día de Madrid y los controles del paper (pérdida del día 3 %, exposición 100 %: veta 964 intentos de entrada). mean_R y paper_R van sin funding; paper_R_funding, con el funding real de Binance. La historia no tiene noticias: el veto de noticias fiables no actúa. Variante elegida con el 60 % antiguo en seis_diarias.py y medida después: pierde dentro (-0,111 R) y fuera de muestra (-0,120 R); no hay ventaja. Con 0,5 % de riesgo y 5,0 operaciones por día de aperturas, fuera de muestra son unos -0,30 % de la cuenta al día (la cuenta simulada, con interés compuesto, -57 % en 306 días). Corte dentro/fuera el 16-08-2025, como impulso_7d.json.","fuera":{"n":1538,"mean_R":-0.12,"win_rate":0.3524,"salidas":{"stop":865,"tiempo":482,"objetivo":191},"horas_media":13.1,"largos":{"n":685,"mean_R":-0.2154},"cortos":{"n":853,"mean_R":-0.0434},"desde":1755476100000,"hasta":1792505400000,"curva_R":[[1755480600000,-1.145],[1755655680000,3.525],[1755871440000,12.553],[1756211760000,18.878],[1756368060000,24.977],[1756713300000,26.574],[1756858500000,18.391],[1756998720000,12.965],[1757386260000,5.144],[1757582700000,-2.521],[1757706360000,-10.983],[1758038280000,-19.619],[1758289500000,-24.184],[1758595800000,-27.877],[1758776040000,-29.494],[1758903120000,-30.291],[1759277700000,-39.715],[1759450500000,-30.928],[1759846260000,-34.723],[1760055300000,-14.784],[1760400900000,-18.38],[1760517060000,-21.817],[1760682960000,-25.565],[1761030900000,-29.536],[1761203700000,-41.612],[1761600240000,-45.721],[1761790560000,-52.296],[1761956100000,-48.219],[1762235100000,-47.191],[1762423800000,-50.63],[1762607700000,-45.23],[1762836660000,-51.92],[1763051040000,-57.486],[1763341140000,-58.243],[1763540100000,-61.923],[1763655300000,-57.327],[1763949720000,-65.922],[1764175020000,-73.643],[1764319860000,-72.502],[1764603180000,-62.876],[1764773580000,-56.987],[1764947100000,-60.629],[1765292580000,-64.172],[1765422720000,-59.698],[1765810620000,-60.215],[1765983240000,-64.519],[1766114820000,-71.981],[1766471460000,-76.533],[1766708100000,-76.714],[1767001320000,-84.534],[1767345060000,-87.477],[1767666360000,-89.898],[1767866220000,-88.946],[1768179480000,-91.997],[1768342260000,-95.45],[1768522500000,-98.986],[1768886160000,-101.761],[1769025420000,-90.823],[1769433540000,-97.739],[1769645700000,-96.134],[1769818500000,-82.73],[1770143160000,-67.707],[1770285000000,-75.161],[1770601380000,-78.595],[1770790560000,-87.194],[1770989460000,-84.939],[1771323420000,-83.735],[1771443300000,-95.194],[1771685100000,-97.011],[1771981860000,-92.413],[1772118780000,-99.873],[1772464140000,-104.993],[1772611260000,-97.402],[1772802900000,-101.425],[1773110160000,-94.007],[1773311820000,-100.735],[1773447300000,-105.905],[1773798300000,-106.117],[1773935220000,-108.361],[1774275060000,-101.55],[1774524300000,-94.767],[1774703700000,-93.342],[1774946580000,-99.467],[1775180700000,-103.894],[1775559720000,-110.426],[1775693700000,-105.63],[1775866500000,-112.169],[1776307560000,-108.593],[1776500340000,-111.967],[1776903300000,-109.0],[1777251720000,-112.371],[1777456200000,-110.409],[1777680900000,-114.862],[1778031900000,-122.593],[1778246100000,-119.793],[1778631300000,-123.058],[1778770080000,-125.391],[1779108000000,-129.638],[1779282900000,-133.676],[1779495300000,-133.747],[1779904620000,-133.294],[1780296360000,-140.846],[1780458240000,-132.538],[1780639020000,-141.125],[1780952940000,-140.551],[1781083320000,-140.458],[1781529420000,-134.253],[1781685120000,-141.359],[1781853300000,-150.339],[1782192360000,-153.635],[1782393300000,-149.509],[1782482160000,-151.15],[1782864900000,-149.417],[1782964260000,-144.626],[1783347960000,-147.654],[1783478220000,-153.429],[1783648320000,-159.585],[1783993500000,-162.52],[1784131980000,-166.347],[1784339100000,-175.764],[1784704500000,-174.86],[1784891700000,-178.1],[1785197700000,-175.563],[1785395700000,-178.527],[1785802500000,-181.816],[1785961260000,-186.422],[1786161420000,-189.874],[1786580100000,-196.403],[1786935180000,-198.547],[1787143500000,-200.887],[1787279880000,-196.315],[1787579220000,-192.89],[1787741400000,-202.25],[1787922900000,-206.09],[1788268020000,-202.832],[1788445980000,-195.972],[1788826500000,-192.188],[1789085700000,-188.795],[1789449060000,-176.754],[1789690500000,-167.411],[1789993320000,-162.842],[1790172720000,-158.857],[1790428500000,-155.212],[1790760480000,-156.151],[1790913360000,-165.687],[1791332100000,-168.64],[1791472500000,-167.499],[1791850020000,-166.384],[1791986700000,-175.073],[1792171080000,-176.835],[1792505400000,-184.596]],"paper_R":-0.12,"paper_R_funding":-0.119,"max_dd_R":235.29,"total_R":-184.596,"max_R":2.87,"min_R":-1.151,"ganadoras_n":542,"ganadoras_bajo_2R":325,"ganadoras_bajo_1R":220},"dentro":{"n":2536,"mean_R":-0.1112,"win_rate":0.3289,"salidas":{"tiempo":542,"stop":1574,"objetivo":420},"horas_media":10.9,"largos":{"n":1120,"mean_R":-0.1499},"cortos":{"n":1416,"mean_R":-0.0807},"desde":1698624900000,"hasta":1755328500000,"curva_R":[[1698646140000,-1.145],[1698902880000,-2.416],[1699344180000,-7.156],[1699542420000,-8.206],[1699988040000,-12.806],[1700240640000,-2.388],[1700676420000,-5.113],[1701164460000,-8.306],[1701394260000,-19.769],[1701841080000,-28.86],[1702260720000,-27.167],[1702532040000,-10.358],[1702946640000,-17.802],[1703226360000,-20.044],[1703673000000,-17.513],[1704240900000,-31.436],[1704419340000,-40.54],[1704876240000,-52.0],[1705330020000,-53.743],[1705680720000,-33.407],[1706084100000,-33.402],[1706491740000,-36.278],[1706750220000,-44.527],[1707207180000,-47.796],[1707515220000,-57.625],[1707901860000,-66.738],[1708392360000,-69.777],[1708694100000,-71.691],[1709119800000,-81.058],[1709522460000,-83.682],[1709777280000,-91.14],[1710235200000,-91.733],[1710469440000,-85.915],[1710867960000,-85.798],[1711100280000,-97.261],[1711547100000,-107.354],[1712025600000,-101.857],[1712262000000,-91.901],[1712730480000,-87.022],[1712942940000,-87.55],[1713356040000,-90.98],[1713823440000,-82.374],[1714040700000,-93.932],[1714467480000,-101.557],[1714733160000,-96.967],[1715179800000,-101.332],[1715645700000,-93.303],[1715948220000,-85.319],[1716352740000,-86.459],[1716826260000,-89.553],[1717089360000,-96.89],[1717632900000,-98.183],[1718070840000,-91.63],[1718381340000,-82.288],[1718767560000,-82.657],[1719237180000,-89.471],[1719493620000,-97.838],[1719928680000,-107.299],[1720148340000,-91.7],[1720584540000,-101.253],[1721003340000,-105.543],[1721268180000,-117.554],[1721744820000,-120.474],[1722039300000,-130.355],[1722454020000,-136.197],[1722817080000,-148.246],[1723079640000,-157.899],[1723544640000,-147.65],[1723749120000,-155.897],[1724246100000,-151.973],[1724681760000,-162.673],[1724976900000,-163.865],[1725411660000,-157.11],[1725849000000,-157.982],[1726201680000,-155.512],[1726684440000,-160.558],[1727055720000,-157.275],[1727446320000,-156.819],[1727876280000,-151.749],[1728341820000,-159.422],[1728630900000,-160.483],[1729077840000,-169.869],[1729514400000,-184.293],[1729820700000,-190.18],[1730333700000,-187.787],[1730738340000,-189.941],[1730947860000,-182.017],[1731379140000,-189.182],[1731634080000,-198.495],[1732061700000,-205.816],[1732270920000,-209.264],[1732712640000,-220.044],[1733124540000,-221.677],[1733363400000,-225.354],[1733790360000,-204.049],[1734048900000,-196.919],[1734431340000,-203.217],[1734661620000,-193.444],[1735172100000,-197.822],[1735604100000,-210.846],[1736131620000,-203.774],[1736411940000,-205.263],[1736928900000,-199.783],[1737145200000,-184.635],[1737572280000,-192.091],[1737940500000,-206.746],[1738328040000,-222.357],[1738717440000,-207.131],[1738973700000,-207.645],[1739457900000,-225.833],[1739899680000,-221.49],[1740159960000,-227.335],[1740579780000,-218.712],[1740983760000,-194.029],[1741225620000,-197.464],[1741616280000,-200.893],[1741911300000,-201.244],[1742431800000,-181.317],[1742792700000,-184.793],[1743148680000,-174.85],[1743578100000,-180.699],[1743987660000,-189.191],[1744270500000,-180.591],[1744682160000,-160.218],[1745021700000,-173.043],[1745453700000,-177.979],[1745914200000,-189.758],[1746193500000,-199.12],[1746668700000,-202.748],[1747036140000,-204.04],[1747316820000,-206.329],[1747770960000,-205.011],[1748242860000,-211.838],[1748485980000,-221.264],[1749001560000,-226.341],[1749469080000,-223.132],[1749773700000,-219.656],[1750251960000,-227.896],[1750709820000,-237.5],[1751069700000,-245.192],[1751469180000,-254.188],[1752020100000,-257.176],[1752471000000,-253.948],[1752738060000,-266.344],[1753147080000,-281.313],[1753437840000,-268.479],[1753920900000,-279.879],[1754352900000,-276.085],[1754615100000,-276.569],[1755044100000,-283.995],[1755328500000,-282.096]],"max_dd_R":291.36,"total_R":-282.096,"max_R":2.87,"min_R":-1.15,"ganadoras_n":834,"ganadoras_bajo_2R":401,"ganadoras_bajo_1R":252},"nombre":"6 diarias","params":{"measure_min":15,"min_move_pct":0.0,"entry":"t:15","rvol_min":null,"vol_filter":"todos","btc_filter":"ninguno","news_mode":"fiables","windows":["tokio-seul","china","europa","saopaulo","nuevayork"],"coins":["BTC","ETH","SOL","XRP"],"sl_pct":1.5,"target_r":3.0,"max_hold_h":24.0,"min_net_pct":3.0,"avg_hold_h":13.0,"long_instrument":"spot","short_instrument":"perp","risk_pct":null,"max_day_entries":6,"max_day_risk_pct":3.0,"lab":null,"estrategia":"impulso"}}</script>
 <script type="application/json" id="seis2Data">{"generated":1793230069373,"split":1755295200000,"sl_pct":2.0,"nota":"Réplica del motor con el preset SEIS2 («6 diarias v2»): las entradas de «6 diarias» (apertura.ImpulseRun, impulso de los 15 primeros min, cualquier movimiento ≠ 0; entrada a +15 min) y la salida «A» gestionada como el paper (apertura.simulate_plan: stop 2 %; la mitad sale en 3R; la otra mitad, al llegar a +3R, sube su stop a +2R y lo sigue a 2R por detrás; 24 h sin activar el cerrojo, hasta 7 días activado; 0,10 % de comisión por lado y 2 pb de deslizamiento), una posición por moneda (también a medias), ≤ 6 entradas y 3 % de riesgo por día de Madrid y los controles del paper. Coincide operación a operación con BACKTEST_DIR/controles/salidas_motor.py (F2 stop 2 %, seguimiento a 2R, 24 h / 7 días) y da sus mismas cifras. mean_R y paper_R van sin funding; paper_R_funding, con el funding real de Binance. La historia no tiene noticias: el veto de noticias fiables no actúa. Elegida por el usuario («obviamente es la A») entre las salidas medidas el 28-10-2026: pierde menos que «6 diarias» pero pierde, dentro (-0,057 R) y fuera de muestra (-0,075 R); no hay ventaja. La mitad salió en 3R en 284 operaciones dentro y 119 fuera. Con 0,5 % de riesgo y 4,8 operaciones por día de aperturas, fuera de muestra son unos -0,18 % de la cuenta al día (la cuenta simulada, con interés compuesto, -42 % en 306 días). Corte dentro/fuera el 16-08-2025, como impulso_7d.json.","fuera":{"n":1464,"mean_R":-0.075,"win_rate":0.3873,"salidas":{"stop":675,"tiempo":670,"cerrojo":57,"seguimiento":62},"horas_media":17.3,"largos":{"n":745,"mean_R":-0.1614},"cortos":{"n":719,"mean_R":0.0145},"desde":1755476100000,"hasta":1792508280000,"curva_R":[[1755481440000,-1.109],[1755656820000,-5.544],[1755846900000,-0.121],[1756103700000,6.123],[1756365300000,14.073],[1756596420000,16.039],[1756821060000,8.912],[1756998720000,6.633],[1757325120000,2.803],[1757489340000,-1.876],[1757636640000,-9.74],[1757981700000,-17.082],[1758154500000,-20.619],[1758501240000,-22.702],[1758684600000,-25.871],[1758803460000,-29.231],[1759178100000,-33.119],[1759450500000,-26.907],[1759796100000,-23.537],[1760055300000,-13.309],[1760354880000,-8.506],[1760512500000,-9.648],[1760663100000,-13.968],[1760932500000,-17.735],[1761131040000,-20.784],[1761315960000,-22.261],[1761681000000,-24.338],[1761828120000,-31.709],[1762139580000,-33.392],[1762317900000,-29.876],[1762513980000,-32.693],[1762825500000,-33.996],[1762964100000,-35.838],[1763349060000,-33.715],[1763587260000,-22.528],[1763693100000,-14.707],[1764005100000,-25.807],[1764178680000,-34.413],[1764340080000,-34.708],[1764770580000,-30.286],[1764950880000,-22.425],[1765294800000,-26.871],[1765419300000,-26.749],[1765765140000,-27.934],[1765983300000,-29.174],[1766115060000,-36.758],[1766448900000,-41.587],[1766708100000,-41.369],[1766979180000,-45.622],[1767213300000,-52.097],[1767658500000,-55.848],[1767778920000,-55.862],[1767917700000,-53.21],[1768263300000,-58.766],[1768522500000,-56.038],[1768868100000,-57.017],[1769008020000,-58.347],[1769213700000,-63.726],[1769559300000,-62.365],[1769818500000,-52.343],[1770150060000,-41.715],[1770332760000,-30.96],[1770625920000,-28.446],[1770797700000,-34.775],[1770993900000,-37.433],[1771326540000,-31.24],[1771509000000,-42.332],[1771685100000,-39.924],[1771971300000,-37.672],[1772119080000,-44.21],[1772496900000,-29.917],[1772614140000,-33.523],[1772806200000,-40.79],[1773151800000,-43.076],[1773360900000,-42.942],[1773718560000,-36.551],[1773837060000,-42.138],[1774052100000,-45.462],[1774397700000,-38.618],[1774602720000,-37.192],[1774920900000,-37.588],[1775047080000,-43.48],[1775261700000,-43.674],[1775607300000,-47.53],[1775830380000,-50.068],[1776280080000,-44.675],[1776431340000,-49.945],[1776816900000,-49.663],[1776989700000,-49.943],[1777335300000,-47.818],[1777508100000,-51.412],[1777861140000,-52.213],[1778058060000,-56.813],[1778260920000,-59.839],[1778631300000,-61.281],[1778804100000,-53.078],[1779149700000,-60.663],[1779408900000,-68.073],[1779754500000,-63.281],[1779991980000,-66.717],[1780300200000,-70.908],[1780523400000,-62.695],[1780644840000,-62.497],[1781050500000,-56.935],[1781223300000,-56.879],[1781568900000,-46.813],[1781724600000,-55.652],[1781914500000,-63.346],[1782260100000,-63.588],[1782395100000,-67.769],[1782511500000,-71.449],[1782915480000,-68.506],[1783170900000,-69.707],[1783399800000,-68.679],[1783561500000,-72.954],[1783775700000,-77.433],[1784068440000,-86.598],[1784224560000,-88.017],[1784592900000,-94.27],[1784765700000,-95.314],[1784985300000,-96.328],[1785284100000,-91.462],[1785456900000,-93.24],[1785802500000,-97.694],[1786061700000,-101.496],[1786380900000,-106.284],[1786580100000,-109.941],[1786799700000,-112.166],[1787145720000,-116.806],[1787303220000,-104.558],[1787616900000,-100.693],[1787789700000,-106.379],[1787942820000,-114.249],[1788286740000,-113.694],[1788446940000,-111.479],[1788826500000,-109.875],[1788999300000,-112.562],[1789421880000,-102.598],[1789517700000,-100.76],[1789708380000,-101.58],[1790142660000,-84.767],[1790381700000,-78.695],[1790687400000,-76.608],[1790819100000,-83.513],[1791245700000,-87.836],[1791338520000,-92.082],[1791591300000,-90.811],[1791860280000,-94.85],[1792030980000,-101.976],[1792196100000,-104.328],[1792508280000,-109.789]],"paper_R":-0.075,"paper_R_funding":-0.0743,"max_dd_R":139.69,"total_R":-109.789,"max_R":5.743,"min_R":-1.114,"ganadoras_n":567,"ganadoras_bajo_2R":424,"ganadoras_bajo_1R":285},"dentro":{"n":2389,"mean_R":-0.0569,"win_rate":0.3738,"salidas":{"tiempo":851,"seguimiento":139,"stop":1254,"cerrojo":145},"horas_media":15.2,"largos":{"n":1191,"mean_R":-0.0447},"cortos":{"n":1198,"mean_R":-0.0691},"desde":1698624900000,"hasta":1755328500000,"curva_R":[[1698711300000,-0.183],[1698930420000,-1.082],[1699349640000,-4.419],[1699609920000,-3.419],[1700055240000,4.893],[1700493240000,5.258],[1700825700000,6.311],[1701251580000,4.59],[1701688380000,-5.552],[1701968100000,-5.593],[1702402500000,9.718],[1702625220000,13.779],[1703031300000,2.164],[1703319300000,-1.301],[1703708580000,3.787],[1704240900000,-3.911],[1704474000000,-16.175],[1704847860000,-26.118],[1705330440000,-26.512],[1705685760000,-10.387],[1706084100000,-14.649],[1706492220000,-13.83],[1706750460000,-21.211],[1707236820000,-26.144],[1707570900000,-25.926],[1707978240000,-33.472],[1708392180000,-35.153],[1708678380000,-42.067],[1709079300000,-43.796],[1709338500000,-52.311],[1709700840000,-59.115],[1710126480000,-60.301],[1710409860000,-76.892],[1710807300000,-72.98],[1711043820000,-79.48],[1711463280000,-83.253],[1711757700000,-87.138],[1712236500000,-77.212],[1712650260000,-78.51],[1712938800000,-81.705],[1713337380000,-75.866],[1713597300000,-74.588],[1713976080000,-80.13],[1714398240000,-90.849],[1714781700000,-74.299],[1715213700000,-79.515],[1715670900000,-76.536],[1716181320000,-69.388],[1716472260000,-63.029],[1716941700000,-61.89],[1717247700000,-67.808],[1717724700000,-61.021],[1718176500000,-55.063],[1718669700000,-48.388],[1718893320000,-54.497],[1719360900000,-61.515],[1719645300000,-66.546],[1720011060000,-78.164],[1720405560000,-58.649],[1720692300000,-69.106],[1721088900000,-65.31],[1721397060000,-70.191],[1721862360000,-77.228],[1722298500000,-75.224],[1722562260000,-79.02],[1722989700000,-66.578],[1723260600000,-62.239],[1723686300000,-67.127],[1724159700000,-72.768],[1724570160000,-62.351],[1724937300000,-66.842],[1725408900000,-59.92],[1725608220000,-65.694],[1726100100000,-67.616],[1726578900000,-66.719],[1726902900000,-62.174],[1727334900000,-68.635],[1727741700000,-76.774],[1728026100000,-82.166],[1728519300000,-88.751],[1728913860000,-88.268],[1729257300000,-90.947],[1729689300000,-98.774],[1730160900000,-93.657],[1730448900000,-94.425],[1730880300000,-87.146],[1731319680000,-91.039],[1731517620000,-90.082],[1731923940000,-90.127],[1732161840000,-95.815],[1732608900000,-83.622],[1732839300000,-92.99],[1733233740000,-94.272],[1733507760000,-97.433],[1733928540000,-83.993],[1734394500000,-82.045],[1734574320000,-87.525],[1735028100000,-81.831],[1735391700000,-90.927],[1735832160000,-90.934],[1736262120000,-92.064],[1736554500000,-87.672],[1736946900000,-88.973],[1737343260000,-88.392],[1737591300000,-90.426],[1737943260000,-104.15],[1738206660000,-115.418],[1738644780000,-106.433],[1738887300000,-106.522],[1739329680000,-114.392],[1739765940000,-114.019],[1740061260000,-113.614],[1740442620000,-119.325],[1740733020000,-108.893],[1741100400000,-78.785],[1741306860000,-87.036],[1741751160000,-90.502],[1742123220000,-92.771],[1742544900000,-79.798],[1742948100000,-81.727],[1743207300000,-79.806],[1743608040000,-84.792],[1743988740000,-97.315],[1744323420000,-95.544],[1744737840000,-89.598],[1745280900000,-95.656],[1745543520000,-98.687],[1745972100000,-107.463],[1746515700000,-111.16],[1746792540000,-99.082],[1747268100000,-100.295],[1747674480000,-102.247],[1747959300000,-104.236],[1748327760000,-117.636],[1748905260000,-111.128],[1749194760000,-114.881],[1749631860000,-115.662],[1750051620000,-113.446],[1750340700000,-123.862],[1750892700000,-129.552],[1751328900000,-134.105],[1751616660000,-135.894],[1752089880000,-141.764],[1752624900000,-126.534],[1752930900000,-122.388],[1753341360000,-124.297],[1753755540000,-132.96],[1754095320000,-135.398],[1754561700000,-135.206],[1755069300000,-136.678],[1755328500000,-136.053]],"max_dd_R":162.69,"total_R":-136.053,"max_R":7.48,"min_R":-1.112,"ganadoras_n":893,"ganadoras_bajo_2R":570,"ganadoras_bajo_1R":395},"nombre":"6 diarias v2","params":{"measure_min":15,"min_move_pct":0.0,"entry":"t:15","rvol_min":null,"vol_filter":"todos","btc_filter":"ninguno","news_mode":"fiables","windows":["tokio-seul","china","europa","saopaulo","nuevayork"],"coins":["BTC","ETH","SOL","XRP"],"sl_pct":2.0,"target_r":null,"max_hold_h":24.0,"min_net_pct":3.0,"avg_hold_h":16.0,"long_instrument":"spot","short_instrument":"perp","risk_pct":null,"max_day_entries":6,"max_day_risk_pct":3.0,"lab":null,"tp1_r":3.0,"tp1_frac":0.5,"lock_r":3.0,"floor_r":2.0,"trail_r":2.0,"trail_atr":null,"max_hold_active_h":168.0,"estrategia":"impulso"}}</script>
 <script type="application/json" id="ruptura3Data">{"generated":1793275485542,"split":1755295200000,"sl_pct":2.0,"nota":"Réplica del motor con el preset RUPTURA3 («Ruptura V3»): apertura.RupturaRun con el contexto de bot/ruptura3.py (régimen cripto de la skill crypto-regime-analyzer con las 4 monedas: largos solo en RISK_ON y cortos solo en RISK_OFF; tendencia diaria y de 4 h y ADX(14) de 4 h ≥ 25), rango de los 15 primeros min, disparo al cierre de 5 min fuera del rango con volumen ≥ 1,5 × el del rango y rango verdadero ≥ 1,5 × ATR(14) de 5 min hasta +240 min, stop máx(2 %, el otro lado del rango + 0,10 %) hasta el 3 %, como mucho 2 por apertura, y la salida A de «6 diarias v2» con R = ese stop (apertura.simulate_plan), una posición por moneda, ≤ 6 entradas y 3 % de riesgo por día y los controles del paper, 0,10 % de comisión por lado y 2 pb de deslizamiento. Coincide operación a operación con BACKTEST_DIR/controles/selectiva/medir_selectiva.py (las 277 operaciones). mean_R y paper_R van sin funding; paper_R_funding, con el funding real. La historia no tiene noticias: el veto de noticias corroboradas no actúa. Fuera de muestra +0,429 R en 118 operaciones (0,39 por jornada), pero dentro -0,033 R en 159: el signo cambia con el periodo (dentro casi todo largos, fuera casi todo cortos) y frente a su base con el sentido al azar p = 0,09 (medir_selectiva.py): NO es una ventaja demostrada. La puerta fijada antes de medir (diseno_ruptura.md, sección 11, sobre V1) dio «no pasa: no hay ventaja medida» (V1: -0,02 R dentro y +0,30 R fuera, por debajo del p95 de su base al azar, +0,43) y el diseño no asciende otra variante tras ver los datos: V3 sale de la regla de elección del script (máximo R dentro entre las de ≥ 150 operaciones dentro) y es la mejor fuera de muestra de las 23 configuraciones medidas (de -0,10 a +0,43 R), así que su cifra de fuera es optimista. Se prueba en paper por decisión del usuario, no porque pasara su puerta. El resultado de fuera de muestra sale de los cortos (en RISK_OFF): sus 90 cortos dan +0,511 R por operación (46,0 de los 50,6 R); los 166 largos de los 3 años dan +0,013 R (dentro -0,017 en 138, fuera +0,162 en 28). Sin cuenta X-Perps no hay cortos: con 0,35 % por lado sus compras dan -0,253 R dentro y -0,079 R fuera (controles/costes/bruto_neto.json). Con los cierres diarios guardados hasta el 27-10-2026, el régimen está en NEUTRAL (72,1 puntos) desde el 19-10-2026: así no mira ninguna moneda (en RISK_ON solo compraría, el lado sin resultado). Con los costes de hoy del paper (OKX EU con X-Perps): -0,026 R dentro y +0,468 R fuera. Antes de costes las mismas operaciones dan +0,087 R dentro y +0,539 R fuera; los costes se llevan 0,120 y 0,111 R por operación (con stops de ≈ 2 %, 0,24 % de ida y vuelta son ≈ 0,12 R). Corte dentro/fuera el 16-08-2025, como seis2_resumen.json.","costes":{"perfil":"okx_eu_con_xperps","comision_pct":0.1,"deslizamiento_bps":2.0,"coste_rt_pct":0.24,"texto":"Calculado con 0,10 % de comisión por lado (también en los perpetuos) y 2 pb de deslizamiento por lado: el perfil «OKX EU con cuenta X-Perps» (tomador del contado)","aviso":"Sin cuenta X-Perps el contado cuesta 0,35 % por lado (tomador) y no hay cortos: con ese perfil estas cifras serían peores","perfil_en_uso":"okx_eu_con_xperps"},"fuera":{"n":118,"mean_R":0.4288,"win_rate":0.5085,"salidas":{"stop":50,"tiempo":40,"cerrojo":19,"seguimiento":9},"horas_media":14.6,"largos":{"n":28,"mean_R":0.1621},"cortos":{"n":90,"mean_R":0.5117},"desde":1756088400000,"hasta":1791294600000,"curva_R":[[1756098840000,-1.078],[1756102680000,-2.187],[1756442700000,-1.051],[1757638500000,0.87],[1757734800000,2.585],[1757772000000,4.072],[1757921880000,2.964],[1757923380000,1.855],[1759325100000,3.223],[1759413900000,4.12],[1759499700000,4.653],[1759584900000,5.327],[1759796400000,5.406],[1759796400000,5.727],[1759849620000,4.618],[1760018700000,4.127],[1763353620000,3.016],[1763390220000,1.919],[1763428200000,0.807],[1763433120000,-0.304],[1763437680000,-1.415],[1763455020000,0.983],[1763472600000,2.601],[1763476680000,1.49],[1763479200000,0.378],[1763585760000,2.776],[1763593740000,5.174],[1763598000000,5.21],[1763604300000,4.098],[1763675160000,6.496],[1763710680000,8.894],[1763710860000,11.334],[1763728800000,13.732],[1763731080000,17.104],[1764681480000,15.993],[1764684540000,14.882],[1764685620000,13.77],[1765882020000,12.659],[1765983360000,11.548],[1765984020000,10.437],[1766114040000,9.325],[1770146040000,11.723],[1770146400000,14.121],[1770171300000,14.494],[1770230460000,16.944],[1770282540000,15.862],[1770312420000,22.062],[1770338160000,26.605],[1770338340000,32.247],[1770371340000,31.136],[1770649620000,30.025],[1770655560000,28.914],[1770655620000,27.802],[1770769500000,29.484],[1770770700000,29.877],[1770864600000,30.397],[1770956400000,30.827],[1770995100000,30.41],[1771946700000,29.299],[1771953300000,29.382],[1771964220000,28.27],[1772286000000,29.535],[1774263960000,28.424],[1779721920000,27.313],[1779985140000,26.201],[1780068960000,25.09],[1780100340000,23.979],[1780365900000,25.764],[1780452600000,28.043],[1780468500000,30.441],[1780468500000,29.33],[1780480380000,28.219],[1780495500000,29.261],[1780539780000,31.658],[1780540440000,34.552],[1780542360000,36.949],[1780543020000,39.383],[1780641900000,41.78],[1780644000000,43.128],[1780644900000,45.525],[1780676160000,47.923],[1780725660000,50.327],[1780754400000,50.197],[1781076600000,51.699],[1781097600000,52.3],[1781098680000,51.188],[1781138100000,52.426],[1782395100000,53.397],[1782396480000,55.795],[1782441900000,57.28],[1782446220000,59.678],[1782457560000,58.567],[1782482160000,57.456],[1782482160000,56.344],[1782703680000,55.233],[1782703680000,54.122],[1782734940000,53.011],[1782762120000,51.9],[1782826800000,52.937],[1782880980000,51.825],[1782894900000,51.864],[1782895200000,52.034],[1786629900000,52.226],[1786806000000,52.076],[1786949340000,50.965],[1787012400000,50.182],[1790038860000,53.126],[1790055180000,55.518],[1790083500000,55.199],[1790140740000,57.591],[1790165880000,56.482],[1790172720000,55.374],[1790172840000,54.265],[1790316840000,53.156],[1790562900000,52.047],[1790952900000,50.938],[1791292800000,50.661],[1791294600000,50.594]],"op_jornada":0.386,"stop_medio_pct":2.039,"antes_de_costes":{"n":118,"R_bruto":0.5392,"deslizamiento_R":-0.0123,"comisiones_R":-0.0982,"funding_R":-0.0003,"R_neto":0.4285,"costes_R":-0.1107,"gana_bruto_pct":51.7,"gana_neto_pct":50.8,"stop_medio_pct":2.039,"cuenta_jornada_bruto_pct":0.104,"cuenta_jornada_costes_pct":-0.0214,"cuenta_jornada_neto_pct":0.0826,"op_jornada":0.386},"paper_R":0.4288,"paper_R_funding":0.4285,"max_dd_R":9.5,"total_R":50.594,"max_R":6.2,"min_R":-1.112,"ganadoras_n":60,"ganadoras_bajo_2R":31,"ganadoras_bajo_1R":16},"dentro":{"n":159,"mean_R":-0.0331,"win_rate":0.3711,"salidas":{"seguimiento":9,"tiempo":51,"cerrojo":11,"stop":88},"horas_media":13.5,"largos":{"n":138,"mean_R":-0.0167},"cortos":{"n":21,"mean_R":-0.1408},"desde":1698712500000,"hasta":1755174900000,"curva_R":[[1698751260000,2.403],[1698799500000,2.179],[1698864180000,9.006],[1698902820000,7.897],[1698932700000,6.789],[1698942060000,5.691],[1699243740000,4.597],[1699287120000,6.989],[1699371300000,5.88],[1699455780000,4.772],[1699533300000,3.663],[1699543140000,7.037],[1699545540000,5.928],[1699624740000,8.354],[1699665900000,7.245],[1699667220000,10.679],[1699673700000,10.993],[1699871220000,8.79],[1699921080000,7.682],[1700019540000,6.593],[1700050200000,8.985],[1700068080000,7.877],[1701534000000,7.998],[1701688380000,6.89],[1701739200000,8.463],[1701739200000,8.976],[1701877200000,9.335],[1701877800000,10.973],[1701940560000,9.865],[1701991080000,12.257],[1702009500000,14.873],[1702047900000,15.202],[1702050840000,17.594],[1703227140000,16.519],[1704229500000,14.301],[1704281100000,13.192],[1705047900000,12.789],[1705078440000,11.681],[1706657880000,10.572],[1707831420000,9.495],[1707835800000,9.531],[1707923640000,11.923],[1707974640000,10.814],[1707987300000,12.373],[1708011240000,11.264],[1708043100000,11.617],[1708075200000,11.138],[1708389600000,10.401],[1708395300000,11.009],[1708440060000,9.904],[1708674600000,7.687],[1708939320000,6.578],[1709045400000,8.745],[1709141160000,11.276],[1709141460000,10.175],[1709141520000,9.067],[1709338800000,9.931],[1709338800000,10.781],[1709513400000,9.672],[1709513400000,8.563],[1709607300000,10.172],[1709646000000,11.871],[1709654880000,14.269],[1709906700000,16.161],[1710781500000,15.068],[1711548720000,13.959],[1711671600000,14.469],[1717634400000,14.755],[1717746000000,14.742],[1721720400000,14.547],[1721741520000,13.438],[1721869800000,12.329],[1721874540000,11.223],[1724817360000,10.111],[1724838720000,9.0],[1724932020000,7.889],[1725025500000,8.489],[1725027600000,10.706],[1725270420000,9.595],[1725270840000,8.484],[1725287760000,7.373],[1725289860000,6.261],[1725625860000,5.15],[1725626280000,4.039],[1725666420000,8.834],[1725684900000,11.623],[1725873000000,10.512],[1725898380000,9.4],[1731029400000,11.404],[1731085740000,10.296],[1731161100000,10.34],[1731298860000,9.231],[1731406020000,8.126],[1731407820000,11.362],[1731425700000,11.531],[1731473280000,10.422],[1731590700000,11.944],[1731595320000,10.866],[1731935520000,9.757],[1731947940000,8.669],[1732130400000,6.452],[1732155900000,5.343],[1732203060000,4.234],[1732281660000,3.125],[1732282080000,2.051],[1732329600000,1.839],[1732535040000,0.767],[1732541220000,-0.342],[1732594500000,-0.027],[1732932900000,0.15],[1733308740000,-0.959],[1734446400000,-0.063],[1734551880000,-1.172],[1735957800000,-0.94],[1736007900000,-1.355],[1736214900000,-1.515],[1736261940000,-2.624],[1737557280000,-4.818],[1737750300000,-5.927],[1744076220000,-7.038],[1744076340000,-8.149],[1744164420000,-4.838],[1744174080000,-5.95],[1744335180000,-7.061],[1752313200000,-7.515],[1752508380000,-8.616],[1752539100000,-8.186],[1752539100000,-8.095],[1752545880000,-9.204],[1752591120000,-10.313],[1752760020000,-7.275],[1752762900000,-5.054],[1752764400000,-5.294],[1752825240000,-6.374],[1752848760000,-6.339],[1752870240000,-7.448],[1753147080000,-8.554],[1753149000000,-7.428],[1753154400000,-8.537],[1753154520000,-9.646],[1753194900000,-8.32],[1753254660000,-9.429],[1754667840000,-10.537],[1754812920000,-7.53],[1754910360000,-8.638],[1754913240000,-9.747],[1754958300000,-10.066],[1755005700000,-7.685],[1755092580000,-5.293],[1755132000000,-4.15],[1755174900000,-5.259]],"op_jornada":0.34,"stop_medio_pct":2.083,"antes_de_costes":{"n":159,"R_bruto":0.0868,"deslizamiento_R":-0.023,"comisiones_R":-0.0969,"funding_R":0.0,"R_neto":-0.033,"costes_R":-0.1198,"gana_bruto_pct":38.4,"gana_neto_pct":37.1,"stop_medio_pct":2.083,"cuenta_jornada_bruto_pct":0.0147,"cuenta_jornada_costes_pct":-0.0204,"cuenta_jornada_neto_pct":-0.0056,"op_jornada":0.34},"paper_R_funding":-0.033,"max_dd_R":28.13,"total_R":-5.259,"max_R":6.827,"min_R":-1.112,"ganadoras_n":59,"ganadoras_bajo_2R":33,"ganadoras_bajo_1R":22},"nombre":"Ruptura V3: rango de apertura con tendencia, volumen y régimen","params":{"measure_min":15,"entry":"brk","entry_end_min":240,"rvol_min":null,"vol_filter":"todos","btc_filter":"ninguno","news_mode":"corroboradas","windows":["tokio-seul","china","europa","saopaulo","nuevayork"],"coins":["BTC","ETH","SOL","XRP"],"sl_pct":2.0,"target_r":null,"max_hold_h":24.0,"min_net_pct":3.0,"avg_hold_h":16.0,"long_instrument":"spot","short_instrument":"perp","risk_pct":null,"max_day_entries":6,"max_day_risk_pct":3.0,"tp1_r":3.0,"tp1_frac":0.5,"lock_r":3.0,"floor_r":2.0,"trail_r":2.0,"trail_atr":null,"max_hold_active_h":168.0,"modelo":"ruptura3","rp_max_apertura":2,"rp_stop_max_pct":3.0,"estrategia":"impulso","preset":"ruptura3"}}</script>
+<script type="application/json" id="rankingData">{"formato":1,"ejemplo":true,"tiempos":"relativos","ts":-60000,"nota":"Ejemplo para la demostración. Con el bot en marcha, el ranking lo calcula bot/ranking.py con los estudios de BACKTEST_DIR/ranking, el laboratorio vivo y lo que opera el paper.","fuentes":{"estandar":{"archivos":11,"filas":11,"errores":[],"ts":-5400000},"lab_vivo":{"estado":"activo","filas":1,"ts":-1800000},"paper":{"operaciones":0,"filas":0,"ts":-300000},"vigilancia":{"estrategias":4,"estado":"ok","ts":-600000}},"filas":[{"id":"curso-ej","nombre":"Ejemplo: técnica del curso con 41 operaciones","familia":"curso","origen":"curso","regla":"Ejemplo inventado: compra la vuelta al alza tras tres velas rojas de 4 h con divergencia del RSI; stop 2 % y objetivo 3R.","cumple_reglas":true,"perfil_costes":"backtest","perfil_texto":"backtest con la gestión del paper: 0,10 % por lado y 2 pb (también en los perpetuos), con su funding","perfil_corto":"costes del backtest","fecha":"2026-10-28","archivo":"controles/curso/medir_curso.json","dentro":{"n":66,"R":0.05,"gana_pct":34.8},"fuera":{"n":41,"R":0.62,"gana_pct":39.0},"op_dia":0.9,"pct_dia":0.279,"R_dia":0.558,"caida_max_pct":6.5,"robustez":{"sin_5_mayores":-0.08,"dentro_positivo":true,"corregida":{"tipo":"holm","metodo":"holm","valor":0.41,"pasa":false},"mitades":[1.1,0.12]},"estado":"backtest","fragil":true,"fragil_motivos":["sin sus 5 mejores operaciones pierde","no pasa la corrección por número de pruebas"],"poca_muestra":false},{"id":"lv-ruptura-canal-48h","nombre":"Ejemplo: ruptura del canal de 48 h (laboratorio vivo)","familia":"ruptura_canal","origen":"laboratorio_vivo","regla":"Ejemplo inventado: compra si el cierre de 1 h supera el máximo de las 48 h anteriores con la tendencia diaria a favor (vende en perpetuo al revés); stop 2 %, la mitad sale en 3R y el resto corre con el cerrojo.","cumple_reglas":true,"perfil_costes":"okx_eu_con_xperps","perfil_texto":"OKX EU con X-Perps: contado 0,10 / 0,08 %, X-Perps 0,05 / 0,02 %, 2 pb y el funding de los perpetuos","perfil_corto":"costes OKX EU con X-Perps","fecha":"2026-10-21","archivo":"lab_vivo/hipotesis/h-20261020-0900-ruptura_canal_48h.json","dentro":{"n":512,"R":0.08,"gana_pct":38.1},"fuera":{"n":330,"R":0.21,"gana_pct":40.3,"p":0.003,"q":0.07},"op_dia":1.4,"pct_dia":0.145,"R_dia":0.29,"caida_max_pct":8.2,"robustez":{"sin_5_mayores":0.1,"dentro_positivo":true,"corregida":{"tipo":"bh","metodo":"q","valor":0.07,"pasa":true},"mitades":[0.18,0.24]},"en_vivo":{"fuente":"lab_vivo","virtual":true,"n":12,"R":0.3,"neto_usdc":null,"desde":-777600000},"estado":"en_avance","probadas":40,"fragil":false,"fragil_motivos":[],"poca_muestra":false},{"id":"cierre4h-ej","nombre":"Ejemplo: cierre a las 4 h (fuera de tus reglas)","familia":"salidas","origen":"salidas","regla":"Ejemplo inventado: las entradas de «6 diarias» cerradas siempre a las 4 h. Rompe tu regla de no cerrar a las 4 h.","cumple_reglas":false,"perfil_costes":"backtest","perfil_texto":"backtest con la gestión del paper: 0,10 % por lado y 2 pb (también en los perpetuos), con su funding","perfil_corto":"costes del backtest","fecha":"2026-10-28","archivo":"controles/salidas_motor.json","dentro":{"n":1390,"R":0.01,"gana_pct":46.2},"fuera":{"n":820,"R":0.03,"gana_pct":47.0},"op_dia":2.7,"pct_dia":0.0405,"R_dia":0.081,"caida_max_pct":9.8,"robustez":{"sin_5_mayores":-0.01,"dentro_positivo":true,"corregida":{"tipo":"sin_p","metodo":"sin p ni corrección: una de 378 configuraciones de su estudio","valor":null,"pasa":false},"mitades":[0.05,0.01]},"estado":"backtest","probadas":378,"fragil":true,"fragil_motivos":["sin sus 5 mejores operaciones pierde","sin corrección por número de pruebas: una de 378 configuraciones de su estudio, que sube en el ranking por su resultado fuera de muestra"],"poca_muestra":false},{"id":"murphy-ej","nombre":"Ejemplo: divergencia de Murphy con 22 operaciones","familia":"murphy","origen":"selectiva","regla":"Ejemplo inventado: compra la divergencia alcista del MACD de 4 h en un soporte semanal; stop 2,5 % y objetivo 3R.","cumple_reglas":true,"perfil_costes":"backtest","perfil_texto":"backtest con la gestión del paper: 0,10 % por lado y 2 pb (también en los perpetuos), con su funding","perfil_corto":"costes del backtest","fecha":"2026-10-28","archivo":"controles/selectiva/medir_selectiva.json","dentro":{"n":30,"R":-0.12,"gana_pct":26.7},"fuera":{"n":22,"R":0.9,"gana_pct":45.5},"op_dia":0.072,"pct_dia":0.0324,"R_dia":0.0648,"caida_max_pct":3.1,"robustez":{"sin_5_mayores":-0.15,"dentro_positivo":false,"corregida":null,"mitades":null},"estado":"backtest","fragil":true,"fragil_motivos":["gana fuera de muestra pero pierde dentro","sin sus 5 mejores operaciones pierde"],"poca_muestra":true},{"id":"salidas-ej","nombre":"Ejemplo: salida «estirar el chicle» n.º 17","familia":"salidas","origen":"salidas","regla":"Ejemplo inventado: las entradas de «6 diarias» con el cerrojo en +4R y el seguimiento a 3R.","cumple_reglas":true,"perfil_costes":"backtest","perfil_texto":"backtest con la gestión del paper: 0,10 % por lado y 2 pb (también en los perpetuos), con su funding","perfil_corto":"costes del backtest","fecha":"2026-10-28","archivo":"controles/salidas_motor.json","dentro":{"n":2015,"R":-0.004,"gana_pct":30.5},"fuera":{"n":1210,"R":0.012,"gana_pct":31.2},"op_dia":4.1,"pct_dia":0.0246,"R_dia":0.049,"caida_max_pct":14.2,"robustez":{"sin_5_mayores":-0.02,"dentro_positivo":false,"corregida":{"tipo":"sin_p","metodo":"sin p ni corrección: una de 378 configuraciones de su estudio","valor":null,"pasa":false},"mitades":null},"estado":"backtest","probadas":378,"fragil":true,"fragil_motivos":["gana fuera de muestra pero pierde dentro","sin sus 5 mejores operaciones pierde","sin corrección por número de pruebas: una de 378 configuraciones de su estudio, que sube en el ranking por su resultado fuera de muestra"],"poca_muestra":false},{"id":"fibo-ej","nombre":"Ejemplo: Fibonacci 61,8 % con la segunda salida","familia":"fibonacci","origen":"selectiva","regla":"Ejemplo inventado: compra en el retroceso del 61,8 % de la subida de 4 h con la tendencia diaria a favor.","cumple_reglas":true,"perfil_costes":"backtest","perfil_texto":"backtest con la gestión del paper: 0,10 % por lado y 2 pb (también en los perpetuos), con su funding","perfil_corto":"costes del backtest","fecha":"2026-10-28","archivo":"controles/selectiva/medir_selectiva.json","dentro":{"n":141,"R":0.02,"gana_pct":37.6},"fuera":{"n":96,"R":-0.04,"gana_pct":36.5},"op_dia":0.31,"pct_dia":-0.0062,"R_dia":-0.0124,"caida_max_pct":7.3,"robustez":{"sin_5_mayores":null,"dentro_positivo":true,"corregida":null,"mitades":null},"estado":"backtest","fragil":false,"fragil_motivos":[],"poca_muestra":false},{"id":"ruptura3","nombre":"Ruptura V3: rango de apertura con tendencia, volumen y régimen","familia":"Ruptura del rango de apertura","origen":"estudio","estudio":"ruptura3","regla":"Solo la moneda con el régimen cripto, la tendencia diaria y la de 4 h (ADX ≥ 25) a favor; entra si una vela de 5 min cierra fuera del rango de los 15 primeros min con volumen ≥ 1,5 × el del rango y expansión ≥ 1,5 ATR, antes de +240 min; stop 2-3 % (el otro lado del rango), como mucho 2 por apertura; la mitad sale en 3R y el resto corre con el cerrojo; veto de noticias corroboradas en contra","cumple_reglas":true,"perfil_costes":"backtest","perfil_texto":"backtest con la gestión del paper: 0,10 % por lado y 2 pb (también en los perpetuos), con su funding","perfil_corto":"costes del backtest","fecha":"2026-10-29","archivo":"ruptura3_resumen.json","dentro":{"n":159,"R":-0.033,"gana_pct":37.1},"fuera":{"n":118,"R":0.4285,"gana_pct":50.8,"jornadas":306.0,"R_bruto":0.5392},"op_dia":0.386,"pct_dia":0.0826,"R_dia":0.1654,"op_dia_natural":0.2738,"caida_max_pct":4.17,"robustez":{"sin_5_mayores":0.2468,"dentro_positivo":false,"corregida":{"tipo":"holm","metodo":"Holm entre las 23 configuraciones del estudio (p frente a la base emparejada)","valor":1.0,"pasa":false},"mitades":[0.476,0.3759],"base_p":0.0939},"estado":"backtest","probadas":23,"nota":"Réplica del motor operación a operación (scripts/replica_ruptura3.py). No pasó su puerta prerregistrada (la V1, frente a su base, no llega) y es la mejor fuera de muestra de 23 configuraciones medidas ese día: cifra optimista. Fuera gana sobre todo por los cortos de 2026; dentro pierde.","perfiles":{"sin_costes":{"n":118.0,"R":0.5392,"gana_pct":51.7,"op_dia":0.386,"pct_dia":0.104,"pct_dia_natural":0.0738},"backtest":{"n":118.0,"R":0.4285,"gana_pct":50.8,"op_dia":0.386,"pct_dia":0.0826,"pct_dia_natural":0.0587},"okx_eu_con_xperps":{"n":118.0,"R":0.4675,"gana_pct":50.8,"op_dia":0.386,"pct_dia":0.0901,"pct_dia_natural":0.064},"okx_eu_sin_xperps":{"n":28.0,"R":-0.079,"gana_pct":42.9,"op_dia":0.092,"pct_dia":-0.0036,"pct_dia_natural":-0.0026}},"fragil":true,"fragil_motivos":["gana fuera de muestra pero pierde dentro","no pasa la corrección por número de pruebas"],"poca_muestra":false},{"id":"e2_impulso_7d","nombre":"E2 · impulso (variante de 7 días)","familia":"Impulso de apertura","origen":"estudio","estudio":"impulso_7d","regla":"Impulso de los primeros 15 min (≥ 0,2 %) con volumen relativo ≥ 1,5 y BTC a favor, entrada a +30 min, stop 3 % y objetivo 3R, sin tope (7 días de seguridad)","cumple_reglas":true,"perfil_costes":"backtest","perfil_texto":"backtest con la gestión del paper: 0,10 % por lado y 2 pb (también en los perpetuos), con su funding","perfil_corto":"costes del backtest","fecha":"2026-10-28","archivo":"impulso_7d.json","dentro":{"n":469,"R":0.1297,"gana_pct":33.3},"fuera":{"n":202,"R":0.3753,"gana_pct":41.1,"jornadas":309.0},"op_dia":0.6537,"pct_dia":0.1227,"R_dia":0.2453,"caida_max_pct":10.82,"robustez":{"sin_5_mayores":0.2803,"dentro_positivo":true,"corregida":{"tipo":"sin_p","metodo":"sin corrección: la salida de 7 días se eligió después de ver los datos (con la salida del laboratorio, E2 tiene q 1,00 entre las 2.000)","valor":null,"pasa":false},"mitades":[0.321,0.3708]},"estado":"descartada_por_el_usuario","nota":"Descartada por el usuario el 29-10-2026 («poco beneficio, pocas operaciones»). La salida de 7 días se eligió después de ver los datos: el laboratorio nunca la validó.","fragil":true,"fragil_motivos":["sin corrección por número de pruebas","la salida de 7 días se eligió después de ver los datos: no está validada"],"poca_muestra":false},{"id":"seis2","nombre":"6 diarias v2","familia":"Impulso de apertura","origen":"estudio","estudio":"seis2","regla":"Impulso de los primeros 15 min sin filtros, stop 2 %; la mitad sale en 3R y el resto corre con un cerrojo (a +3R su stop sube a +2R y sigue al precio a 2R); 24 h sin activar y hasta 7 días activado; veto de noticias fiables en contra","cumple_reglas":true,"perfil_costes":"backtest","perfil_texto":"backtest con la gestión del paper: 0,10 % por lado y 2 pb (también en los perpetuos), con su funding","perfil_corto":"costes del backtest","fecha":"2026-10-29","archivo":"seis2_resumen.json","dentro":{"n":2389,"R":-0.0569,"gana_pct":37.4},"fuera":{"n":1464,"R":-0.0743,"gana_pct":38.7,"jornadas":306.0},"op_dia":4.7843,"pct_dia":-0.1777,"R_dia":-0.3555,"op_dia_natural":3.3968,"caida_max_pct":51.42,"robustez":{"sin_5_mayores":-0.0937,"dentro_positivo":false,"corregida":null,"mitades":[-0.0541,-0.0958]},"estado":"backtest","nota":"Réplica del motor con el preset «6 diarias v2» (3 años). Pierde dentro y fuera de muestra: los costes se llevan más de lo que gana antes de pagarlos.","perfiles":{"sin_costes":{"n":1463.0,"R":0.0435,"gana_pct":42.0,"op_dia":4.781,"pct_dia":0.104,"pct_dia_natural":0.0738},"backtest":{"n":1463.0,"R":-0.0736,"gana_pct":38.8,"op_dia":4.781,"pct_dia":-0.1759,"pct_dia_natural":-0.1249},"okx_eu_con_xperps":{"n":1463.0,"R":-0.0486,"gana_pct":39.5,"op_dia":4.781,"pct_dia":-0.1161,"pct_dia_natural":-0.0824},"okx_eu_sin_xperps":{"n":1236.0,"R":-0.4133,"gana_pct":30.1,"op_dia":4.039,"pct_dia":-0.8348,"pct_dia_natural":-0.5927}},"fragil":true,"fragil_motivos":["sin sus 5 mejores operaciones pierde"],"poca_muestra":false},{"id":"seis","nombre":"6 diarias","familia":"Impulso de apertura","origen":"estudio","estudio":"seis","regla":"Impulso de los primeros 15 min sin filtros, stop 1,5 % y objetivo 3R, como mucho 24 h; veto de noticias fiables en contra","cumple_reglas":true,"perfil_costes":"backtest","perfil_texto":"backtest con la gestión del paper: 0,10 % por lado y 2 pb (también en los perpetuos), con su funding","perfil_corto":"costes del backtest","fecha":"2026-10-28","archivo":"seis_diarias_resumen.json","dentro":{"n":2536,"R":-0.1112,"gana_pct":32.9},"fuera":{"n":1538,"R":-0.119,"gana_pct":35.2,"jornadas":306.0},"op_dia":5.0261,"pct_dia":-0.2991,"R_dia":-0.5981,"op_dia_natural":3.5684,"caida_max_pct":70.15,"robustez":{"sin_5_mayores":-0.1298,"dentro_positivo":false,"corregida":null,"mitades":[-0.1295,-0.1105]},"estado":"backtest","nota":"Réplica del motor con el preset «6 diarias» (3 años). Pierde fuera de muestra.","fragil":true,"fragil_motivos":["sin sus 5 mejores operaciones pierde"],"poca_muestra":false},{"id":"lab2000:ap_mom:15:0,2|rvol:1,5|todos|a_favor|todas|todas|todos|t:30|3|3|sig","nombre":"Movimiento de los primeros minutos: sigue el movimiento de los primeros 15 min si pasa de ±0,2 % · entra a +30 min · SL 3 % · TP 3R · hasta la apertura siguiente","familia":"Movimiento de los primeros minutos","origen":"laboratorio_2000","estudio":"laboratorio_2000","regla":"Movimiento de los primeros minutos: sigue el movimiento de los primeros 15 min si pasa de ±0,2 % · entra a +30 min · si el volumen relativo ≥ 1,5 · todas las aperturas, todas las monedas, solo a favor de la tendencia de BTC · SL 3 % · TP 3R (9 %) · hasta la misma apertura del día siguiente","cumple_reglas":true,"perfil_costes":"laboratorio","perfil_texto":"laboratorio de 2.000: 0,10 % por lado, 2 pb y 5-20 pb más en los stops, todo con el modelo del contado (también los cortos) y sin funding","perfil_corto":"costes del laboratorio (sin funding)","fecha":"2026-10-26","archivo":"laboratorio.json","dentro":{"n":557,"R":0.0436,"gana_pct":40.6,"jornadas":466.0},"fuera":{"n":278,"R":0.1402,"gana_pct":51.8,"p":0.1437,"q":1.0,"dias":434.0,"jornadas":309.0,"desde":"2025-08-16","hasta":"2026-10-23"},"op_dia":0.8997,"pct_dia":0.0631,"R_dia":0.1261,"op_dia_natural":0.6406,"pct_dia_natural":0.0449,"caida_max_pct":10.52,"robustez":{"sin_5_mayores":0.0892,"dentro_positivo":true,"corregida":{"tipo":"bh","metodo":"Benjamini-Hochberg (q) entre las 2.000 del laboratorio","valor":1.0,"pasa":false},"mitades":[0.1321,0.1485],"sin_mejor_mes":0.0773,"base_p":0.0149},"estado":"descartada_por_el_usuario","probadas":2000,"nota":"Laboratorio de 2.000 (3 años, del 01-11-2023 al 23-10-2026): cada estrategia se mide sola, sin el libro del paper, y ninguna de las 2.000 pasó todas las pruebas contra la suerte; prometedora: positiva dentro y fuera y bate a su base, pero no robusta; es E2, descartada por el usuario el 29-10-2026","fragil":true,"fragil_motivos":["no pasa la corrección por número de pruebas"],"poca_muestra":false},{"id":"lab2000:btc:ma20|rvol:1,5|todos|ninguno|asia|SOL|todos|pb:15|3|2|sig","nombre":"Tendencia diaria de BTC: a favor de BTC frente a su media de 20 días · entra en la reanudación tras retroceder la mitad del movimiento de los primeros 15 min · SL 3 % · TP 2R · hasta la apertura siguiente","familia":"Tendencia diaria de BTC","origen":"laboratorio_2000","estudio":"laboratorio_2000","regla":"Tendencia diaria de BTC: a favor de BTC frente a su media de 20 días · entra en la reanudación tras retroceder la mitad del movimiento de los primeros 15 min · si el volumen relativo ≥ 1,5 · solo Asia (Tokio-Seúl y China), SOL · SL 3 % · TP 2R (6 %) · hasta la misma apertura del día siguiente","cumple_reglas":true,"perfil_costes":"laboratorio","perfil_texto":"laboratorio de 2.000: 0,10 % por lado, 2 pb y 5-20 pb más en los stops, todo con el modelo del contado (también los cortos) y sin funding","perfil_corto":"costes del laboratorio (sin funding)","fecha":"2026-10-26","archivo":"laboratorio.json","dentro":{"n":57,"R":0.0943,"gana_pct":45.6,"jornadas":466.0},"fuera":{"n":34,"R":0.2048,"gana_pct":55.9,"p":0.1633,"q":1.0,"dias":434.0,"jornadas":309.0,"desde":"2025-08-16","hasta":"2026-10-23"},"op_dia":0.11,"pct_dia":0.0113,"R_dia":0.0225,"op_dia_natural":0.0783,"pct_dia_natural":0.008,"caida_max_pct":2.26,"robustez":{"sin_5_mayores":-0.0926,"dentro_positivo":true,"corregida":{"tipo":"bh","metodo":"Benjamini-Hochberg (q) entre las 2.000 del laboratorio","valor":1.0,"pasa":false},"mitades":[0.3559,0.0535],"sin_mejor_mes":0.0773,"base_p":0.0249},"estado":"backtest","probadas":2000,"nota":"Laboratorio de 2.000 (3 años, del 01-11-2023 al 23-10-2026): cada estrategia se mide sola, sin el libro del paper, y ninguna de las 2.000 pasó todas las pruebas contra la suerte; prometedora: positiva dentro y fuera y bate a su base, pero no robusta","fragil":true,"fragil_motivos":["sin sus 5 mejores operaciones pierde","no pasa la corrección por número de pruebas"],"poca_muestra":false}],"criterio":{"orden":"pct_dia (fuera de muestra, neto de costes) de mayor a menor; desempate op_dia y n fuera","entra":"fuera.R ≥ 0 (no pierde fuera de muestra, neto de costes)","riesgo_pct":0.5,"jornada":"día de lunes a viernes con aperturas (salvo el 1 de enero)","fragil":"gana fuera y pierde dentro, sin sus 5 mayores pierde, no pasa la corrección por número de pruebas o no la tiene siendo una de varias configuraciones de su estudio","poca_muestra":"menos de 30 operaciones fuera de muestra","nueva":"entró en el ranking en las últimas 24 h","costes":"cada fila con los costes con los que la midió su estudio (perfil_costes): las réplicas, las selectivas, el curso y las salidas, 0,10 % por lado y 2 pb con funding; el laboratorio de 2.000, 5-20 pb más en los stops y sin funding; el laboratorio vivo, OKX EU con X-Perps (más barato)"},"perfiles_costes":[{"id":"backtest","texto":"backtest con la gestión del paper: 0,10 % por lado y 2 pb (también en los perpetuos), con su funding","n_ranking":6},{"id":"laboratorio","texto":"laboratorio de 2.000: 0,10 % por lado, 2 pb y 5-20 pb más en los stops, todo con el modelo del contado (también los cortos) y sin funding","n_ranking":2},{"id":"okx_eu_con_xperps","texto":"OKX EU con X-Perps: contado 0,10 / 0,08 %, X-Perps 0,05 / 0,02 %, 2 pb y el funding de los perpetuos","n_ranking":1}]}</script>
+<script type="application/json" id="labVivoData">{"formato":1,"ejemplo":true,"tiempos":"relativos","estado":{"formato":1,"ts":-12000,"latido":-12000,"pid":22100,"arranque":-23400000,"version":"lab_vivo 1","estado":"activo","motivo":null,"aviso":"Laboratorio de investigación: nada de esto opera. Lo que aguanta pasa a una prueba en avance VIRTUAL y a la cartera paper solo si tú lo decides.","proxima_pausa":{"ventana":"europa","nombre":"Europa","desde":3120000,"hasta":5220000},"recursos":{"procesos":1,"procesos_max":2,"cpus":[3,4,5],"prioridad":"por debajo de lo normal","memoria_libre_mb":3120,"memoria_limite_mb":2500,"memoria_usada_mb":910,"cpu_pc_pct":38.5,"limitado_por":null},"datos":{"epoca":"2026-10","periodo":{"desde":"2023-10-01","hasta":"2026-09-30","corte":"2025-08-16"},"firma":"63232e29f557","datos_hasta":-2505600000,"atrasados":false},"codigo":{"firma":"2e9e28c1179c","canario":{"estado":"ok","ts":-93600000,"libro":{"dentro_n":2389,"dentro_R":-0.0569,"fuera_n":1464,"fuera_R":-0.075,"reproduce":true}}},"criterios":{"version":1,"fecha":"2026-10-29","sha":"28677aac54e1"},"contadores":{"hipotesis":{"total":58,"hoy":12,"en_cola":3,"cupo_hoy":24},"n":{"total":214,"fuera":61,"efectivo":38.4,"previo":3917,"dsr":2336.4},"descartes_por_motivo":{"R2":97,"K2":31,"R1":22,"B1":6,"K3":4,"B2":2,"B7":1}},"embudo":[{"etapa":"recibidas","n":58},{"etapa":"admitidas","n":51},{"etapa":"pasan_rapida","n":61},{"etapa":"pasan_completa","n":9},{"etapa":"candidatas","n":1},{"etapa":"en_avance","n":1},{"etapa":"listas","n":0}],"meta":{"objetivo_pct_dia":1,"riesgo_pct":0.5,"objetivo_R_dia":2,"mejor":{"variante":"h-20261020-0900-ruptura_canal_48h:V2","R_dia":0.4,"pct_dia":0.2,"tramo":"avance","clase":"en_avance"},"falta_R_dia":1.6,"falta_pct_dia":0.8,"texto":"Lo más cerca que ha estado algo de la meta (h-20261020-0900-ruptura_canal_48h:V2, en avance; en avance): Le faltan 1,60 R al día (0,80 % de la cuenta con 0,5 % de riesgo). El riesgo no se sube.","nota":"con 0,5 % de riesgo por operación (no se sube)"},"en_curso":[{"trabajo":"rapida-3f2a9c1d7b5e04","tipo":"rapida","hipotesis":"h-20261029-1130-h06-keltner_1h","paso":"V3","desde":-240000,"progreso":0.55}],"cola":{"pendientes":3,"por_tipo":{"rapida":2,"completa":1},"siguientes":[{"trabajo":"rapida-8e1f40a2c9d311","tipo":"rapida","objetivo":"h-20261029-1130-h06-keltner_1h:V4","prioridad":33},{"trabajo":"rapida-c0d7e5b91a2f66","tipo":"rapida","objetivo":"h-20261029-1130-h07-compresion_bollinger:V1","prioridad":33},{"trabajo":"completa-5b2e88d0f1a3c7","tipo":"completa","objetivo":"h-20261027-0715-funding_extremo:V3","prioridad":42}]},"mejores":[{"id":"h-20261020-0900-ruptura_canal_48h:V2","hipotesis":"h-20261020-0900-ruptura_canal_48h","titulo":"Ruptura del canal de 48 h con la tendencia diaria a favor","familia":"ruptura_canal","regla":"Compra si el cierre de 1 h supera el máximo de las 48 h anteriores y la tendencia diaria es alcista (vende en perpetuo al revés); stop 2 %, la mitad sale en 3R y el resto corre con el cerrojo.","clase":"en_avance","etapa":"avance","cumple_reglas":true,"fuera_de_reglas":false,"frecuencia":"frecuente","op_dia":1.4,"dentro":{"n":512,"R":0.08,"ic95":[-0.05,0.21]},"fuera":{"n":330,"R":0.21,"ic95":[0.04,0.38],"p":0.003,"q":0.07,"dsr":0.97,"mitades":[0.18,0.24]},"avance_trimestral":{"R":0.12,"positivos":"4 de 5"},"robustez":{"base_p":0.01,"sin_5_mayores":0.1,"sin_mejor_semana":0.15,"desliz_x2":0.12,"entrada_1_min":0.18,"estabilidad":"4 de 6","sin_xperps":-0.05,"objetivo_2pb":0.19,"solo_largos":0.09},"cuenta":{"R_dia":0.29,"pct_dia":0.145,"pct_dia_compuesto":0.144,"caida_max_pct":8.2},"meta":{"R_dia":0.29,"pct_dia":0.145,"falta_R_dia":1.71,"falta_pct_dia":0.855,"texto":"Le faltan 1,71 R al día (0,86 % de la cuenta con 0,5 % de riesgo). El riesgo no se sube."},"motivos":[],"puntuacion":0.04,"avance":{"desde":-777600000,"completas":12,"abiertas":2,"R_medio":0.3,"p_holm":null,"caida_max_pct":1.2,"faltan":"28 operaciones y 19 días"}},{"id":"h-20261027-0715-funding_extremo:V2","hipotesis":"h-20261027-0715-funding_extremo","titulo":"Contra el funding extremo tras una cascada de liquidaciones","familia":"funding_extremo_liquidacion","regla":"Si el funding de 8 h pasa del percentil 95 de 90 días y el precio cae más de un 4 % en 4 h, compra al contado a la hora siguiente; stop 2,5 %, la mitad sale en 3R y el resto corre con el cerrojo.","clase":"descartada_robustez","etapa":"robustez","cumple_reglas":true,"fuera_de_reglas":false,"frecuencia":"selectiva","op_dia":0.6,"dentro":{"n":205,"R":0.05,"ic95":[-0.12,0.22]},"fuera":{"n":140,"R":0.12,"ic95":[-0.02,0.26],"p":0.04,"q":0.31,"dsr":0.41,"mitades":[0.21,0.03]},"avance_trimestral":{"R":0.04,"positivos":"3 de 5"},"robustez":{"base_p":0.03,"sin_5_mayores":-0.03,"sin_mejor_semana":0.02,"desliz_x2":0.06,"entrada_1_min":0.09,"estabilidad":"2 de 6","sin_xperps":0.12,"objetivo_2pb":0.11,"solo_largos":0.12},"cuenta":{"R_dia":0.072,"pct_dia":0.036,"pct_dia_compuesto":0.035,"caida_max_pct":6.1},"meta":{"falta_R_dia":1.928,"falta_pct_dia":0.964,"texto":"Le faltan 1,93 R al día (0,96 % de la cuenta con 0,5 % de riesgo). El riesgo no se sube."},"motivos":["B2: sin sus 5 mayores operaciones R medio -0,03 (tiene que ser > 0)","B7: q 0,31 (hace falta ≤ 0,10)"],"puntuacion":-0.02,"no_ha_pasado":"no ha pasado: B2: sin sus 5 mayores operaciones R medio -0,03 (tiene que ser > 0)"},{"id":"h-20261020-0900-ruptura_canal_48h:V3","hipotesis":"h-20261020-0900-ruptura_canal_48h","titulo":"Ruptura del canal de 48 h con filtro de volumen","familia":"ruptura_canal","regla":"Como la V2, pero solo si el volumen de la hora de la ruptura es al menos 1,5 veces su media de 20 días.","clase":"descartada_robustez","etapa":"robustez","cumple_reglas":true,"fuera_de_reglas":false,"frecuencia":"frecuente","op_dia":1.1,"dentro":{"n":388,"R":0.06,"ic95":[-0.08,0.2]},"fuera":{"n":260,"R":0.09,"ic95":[-0.06,0.24],"p":0.11,"q":0.52,"dsr":0.38,"mitades":[0.12,0.06]},"robustez":{"base_p":0.11,"sin_5_mayores":0.02,"sin_mejor_semana":0.04,"desliz_x2":0.03,"entrada_1_min":0.07,"estabilidad":"4 de 6","sin_xperps":-0.08,"objetivo_2pb":0.08,"solo_largos":0.05},"cuenta":{"R_dia":0.099,"pct_dia":0.0495,"pct_dia_compuesto":0.049,"caida_max_pct":9.4},"meta":{"falta_R_dia":1.901,"falta_pct_dia":0.9505,"texto":"Le faltan 1,90 R al día (0,95 % de la cuenta con 0,5 % de riesgo). El riesgo no se sube."},"motivos":["B1: frente a su base emparejada p = 0,11 (hace falta < 0,05)"],"puntuacion":-0.06,"no_ha_pasado":"no ha pasado: B1: frente a su base emparejada p = 0,11 (hace falta < 0,05)"},{"id":"h-20261024-1215-sesion_extrema:V1","hipotesis":"h-20261024-1215-sesion_extrema","titulo":"Seguir en Europa la sesión extrema de Asia","familia":"sesion_extrema","regla":"Si la sesión de Asia mueve una moneda más de 2 veces su rango medio, entra a favor en la apertura de Europa; stop 2 % y la salida de «6 diarias v2».","clase":"descartada_completa","etapa":"completa","cumple_reglas":true,"fuera_de_reglas":false,"frecuencia":"frecuente","op_dia":2.3,"dentro":{"n":720,"R":0.03,"ic95":[-0.06,0.12]},"fuera":{"n":512,"R":-0.06,"ic95":[-0.17,0.05],"p":0.86,"q":1,"dsr":0.02,"mitades":[-0.09,-0.03]},"robustez":null,"cuenta":{"R_dia":-0.138,"pct_dia":-0.069,"pct_dia_compuesto":-0.07,"caida_max_pct":31.5},"meta":{"falta_R_dia":2.138,"falta_pct_dia":1.069,"texto":"Le faltan 2,14 R al día (1,07 % de la cuenta con 0,5 % de riesgo). El riesgo no se sube."},"motivos":["K2: R medio fuera -0,06 (tiene que ser > 0)","K3: una mitad del fuera de muestra pierde"],"puntuacion":-0.17,"no_ha_pasado":"no ha pasado: K2: R medio fuera -0,06 (tiene que ser > 0)"}],"en_avance":[{"id":"h-20261020-0900-ruptura_canal_48h:V2","hipotesis":"h-20261020-0900-ruptura_canal_48h","titulo":"Ruptura del canal de 48 h con la tendencia diaria a favor","familia":"ruptura_canal","regla":"Compra si el cierre de 1 h supera el máximo de las 48 h anteriores y la tendencia diaria es alcista (vende en perpetuo al revés); stop 2 %, la mitad sale en 3R y el resto corre con el cerrojo.","clase":"en_avance","etapa":"avance","cumple_reglas":true,"fuera_de_reglas":false,"frecuencia":"frecuente","op_dia":1.4,"dentro":{"n":512,"R":0.08,"ic95":[-0.05,0.21]},"fuera":{"n":330,"R":0.21,"ic95":[0.04,0.38],"p":0.003,"q":0.07,"dsr":0.97,"mitades":[0.18,0.24]},"avance_trimestral":{"R":0.12,"positivos":"4 de 5"},"robustez":{"base_p":0.01,"sin_5_mayores":0.1,"sin_mejor_semana":0.15,"desliz_x2":0.12,"entrada_1_min":0.18,"estabilidad":"4 de 6","sin_xperps":-0.05,"objetivo_2pb":0.19,"solo_largos":0.09},"cuenta":{"R_dia":0.29,"pct_dia":0.145,"pct_dia_compuesto":0.144,"caida_max_pct":8.2},"meta":{"R_dia":0.29,"pct_dia":0.145,"falta_R_dia":1.71,"falta_pct_dia":0.855,"texto":"Le faltan 1,71 R al día (0,86 % de la cuenta con 0,5 % de riesgo). El riesgo no se sube."},"motivos":[],"puntuacion":0.04,"avance":{"desde":-777600000,"completas":12,"abiertas":2,"R_medio":0.3,"p_holm":null,"caida_max_pct":1.2,"faltan":"28 operaciones y 19 días","curva":[[-743040000,-1],[-691200000,2.1],[-639360000,1.1],[-596160000,0.1],[-518400000,3],[-449280000,2],[-397439999.99999994,1],[-345600000,0],[-259200000,3.2],[-190080000.00000003,2.2],[-129600000,1.2],[-69120000,3.6]]}}],"listas":[],"consolidacion":{"ts":-50400000,"umbral_dsr_z":3.64,"bh_m":4131,"cuenta_honesta":{"trimestres":[{"trimestre":"2025-T4","R":-0.05},{"trimestre":"2026-T1","R":0.02},{"trimestre":"2026-T2","R":-0.03}],"R_medio":-0.02}},"diario_hoy":{"dia":"0","lineas":["Vuelve a trabajar tras la pausa de Tokio y Seúl","El generador dejó 6 hipótesis en la cola","ruptura_canal_48h V2: una operación virtual nueva en avance"]},"errores":[],"diario":{"formato":1,"dia":"0","ts":-300000,"hipotesis":{"recibidas":12,"admitidas":10,"rechazadas":[{"id":"h-20261029-0715-h31-media_movil_200","motivos":["A7: ya probada (h-20261024-1215-precio_media_movil)"]},{"id":"h-20261029-0715-h33-scalping_5m","motivos":["A5: objetivo 1,2R < 2R (tus reglas)"]}]},"variantes":{"rapida":48,"completa":6,"robustez":1,"n_fin_del_dia":214},"candidatas_nuevas":[],"revocadas":[],"listas_nuevas":[],"avance":[{"variante":"h-20261020-0900-ruptura_canal_48h:V2","nuevas":1,"completas":12,"R_medio":0.3}],"pausas":[{"ventana":"tokio-seul","desde":-36000000,"hasta":-33840000}],"cpu_horas":5.2,"errores":0,"lecciones":["ruptura_canal: 6 variantes, 4 pasan la rápida y 1 la completa","sesion_extrema: 6 variantes, 2 pasan la rápida y ninguna la completa (K2: pierden fuera de muestra)"],"generador":["07:15: 6 hipótesis (2 de la familia nueva lider_btc)","12:15: 6 hipótesis"],"texto":["Hoy: 10 hipótesis admitidas de 12 recibidas, 48 variantes medidas en la etapa rápida; ninguna candidata nueva."]}},"cola":{"formato":1,"ts":-12000,"pendientes":3,"por_tipo":{"rapida":2,"completa":1},"en_curso":[{"trabajo":"rapida-3f2a9c1d7b5e04","tipo":"rapida","hipotesis":"h-20261029-1130-h06-keltner_1h","paso":"V3","desde":-240000,"progreso":0.55}],"fallidos_24h":[{"id":"completa-77ab01c3e2d4f5","tipo":"completa","objetivo":"h-20261024-1215-sesion_extrema:V4","prioridad":42,"estado":"fallido","intentos":3,"creado":-72000000,"error":"excepción en la familia: ATR de 5 min sin velas en un hueco de datos"}],"siguientes":[{"trabajo":"rapida-8e1f40a2c9d311","tipo":"rapida","objetivo":"h-20261029-1130-h06-keltner_1h:V4","prioridad":33},{"trabajo":"rapida-c0d7e5b91a2f66","tipo":"rapida","objetivo":"h-20261029-1130-h07-compresion_bollinger:V1","prioridad":33},{"trabajo":"completa-5b2e88d0f1a3c7","tipo":"completa","objetivo":"h-20261027-0715-funding_extremo:V3","prioridad":42}]},"generador":[{"ts":-9000000,"archivo":"pasada-1215","resumen":"6 hipótesis: 2 de la familia nueva lider_btc (BTC adelanta a las alts en las rupturas de 4 h) y 4 variantes del funding extremo; 3 ideas descartadas antes de enviar por buscar movimientos de pocos pb"},{"ts":-27000000,"archivo":"pasada-0715","resumen":"6 hipótesis: el canal de 48 h en otras ventanas y la sesión extrema con filtro de régimen"},{"ts":-57600000,"archivo":"pasada-2230","resumen":"Sin propuestas: el cupo del día estaba lleno"}],"diarios":{"-1":{"formato":1,"dia":"-1","hipotesis":{"recibidas":24,"admitidas":21,"rechazadas":[{"id":"h-20261028-1730-h22-rsi_2","motivos":["A9: muy pocas señales (0,11 al día dentro de muestra)"]}]},"variantes":{"rapida":46,"completa":3,"robustez":1,"n_fin_del_dia":166},"candidatas_nuevas":[],"revocadas":[],"listas_nuevas":[],"pausas":[{"ventana":"europa"},{"ventana":"nuevayork"},{"ventana":"tokio-seul"},{"ventana":"china"}],"cpu_horas":11.8,"errores":1,"lecciones":["funding_extremo_liquidacion: la V2 pasa la completa pero cae en robustez (B2: sin sus 5 mayores pierde)"],"generador":["07:15: 6 hipótesis","12:15: 6 hipótesis","17:30: 6 hipótesis","22:30: 6 hipótesis"],"texto":["Hoy: 21 hipótesis admitidas de 24 recibidas, 46 variantes medidas en la etapa rápida; ninguna candidata nueva.","Una tarea de la etapa completa falló tres veces y queda apartada (excepción en la familia)."]},"-2":{"formato":1,"dia":"-2","hipotesis":{"recibidas":22,"admitidas":20,"rechazadas":[]},"variantes":{"rapida":44,"completa":2,"robustez":0,"n_fin_del_dia":120},"candidatas_nuevas":[],"revocadas":[],"listas_nuevas":[],"pausas":[],"cpu_horas":10.4,"errores":0,"lecciones":["donchian_4h: 6 variantes, ninguna pasa la rápida (R2: pierden dentro de muestra)"],"generador":["07:15: 6 hipótesis","12:15: 6 hipótesis","17:30: 4 hipótesis","22:30: 6 hipótesis"],"texto":["Hoy: 20 hipótesis admitidas de 22 recibidas, 44 variantes medidas en la etapa rápida; ninguna candidata nueva."]}},"hipotesis":{"h-20261020-0900-ruptura_canal_48h":{"formato":1,"hipotesis":{"id":"h-20261020-0900-ruptura_canal_48h","titulo":"Ruptura del canal de 48 h","familia":"ruptura_canal","autor":"generador"},"admision":{"ok":true,"motivos":[]},"estado":"terminada","variantes":[{"id":"h-20261020-0900-ruptura_canal_48h:V2","tarjeta":{"id":"h-20261020-0900-ruptura_canal_48h:V2","checks":{"R1":true,"R2":true,"K1":true,"K2":true,"K3":true,"K4":true,"K5":true,"B1":true,"B2":true,"B3":true,"B4":true,"B5":true,"B6":true,"B7":true,"B8":true},"avance":{"desde":-777600000,"completas":12,"abiertas":2,"R_medio":0.3,"p_holm":null,"caida_max_pct":1.2,"faltan":"28 operaciones y 19 días","curva":[[-743040000,-1],[-691200000,2.1],[-639360000,1.1],[-596160000,0.1],[-518400000,3],[-449280000,2],[-397439999.99999994,1],[-345600000,0],[-259200000,3.2],[-190080000.00000003,2.2],[-129600000,1.2],[-69120000,3.6]]}},"operaciones":{"fuera_demo":{"n":330,"R":0.21,"semilla":11}}},{"id":"h-20261020-0900-ruptura_canal_48h:V3","tarjeta":{"id":"h-20261020-0900-ruptura_canal_48h:V3","checks":{"R1":true,"R2":true,"K1":true,"K2":true,"K3":true,"K4":true,"K5":true,"B1":false,"B2":true,"B3":true,"B4":true,"B5":true,"B6":true,"B7":false,"B8":false}},"operaciones":{"fuera_demo":{"n":260,"R":0.09,"semilla":12}}}]},"h-20261027-0715-funding_extremo":{"formato":1,"hipotesis":{"id":"h-20261027-0715-funding_extremo","titulo":"Contra el funding extremo","familia":"funding_extremo_liquidacion","autor":"generador"},"admision":{"ok":true,"motivos":[]},"estado":"terminada","variantes":[{"id":"h-20261027-0715-funding_extremo:V2","tarjeta":{"id":"h-20261027-0715-funding_extremo:V2","checks":{"R1":true,"R2":true,"K1":true,"K2":true,"K3":true,"K4":true,"K5":true,"B1":true,"B2":false,"B3":true,"B4":true,"B5":true,"B6":true,"B7":false,"B8":false}},"operaciones":{"fuera_demo":{"n":140,"R":0.12,"semilla":13}}}]},"h-20261024-1215-sesion_extrema":{"formato":1,"hipotesis":{"id":"h-20261024-1215-sesion_extrema","titulo":"Sesión extrema de Asia","familia":"sesion_extrema","autor":"generador"},"admision":{"ok":true,"motivos":[]},"estado":"terminada","variantes":[{"id":"h-20261024-1215-sesion_extrema:V1","tarjeta":{"id":"h-20261024-1215-sesion_extrema:V1","checks":{"R1":true,"R2":true,"K1":true,"K2":false,"K3":false,"K4":false,"K5":true}},"operaciones":{"fuera_demo":{"n":512,"R":-0.06,"semilla":14}}}]}}}</script>
 <script>
 "use strict";
 // ---------- Datos reales de mercado (escaneo de Binance) ----------
@@ -1350,7 +1447,13 @@ const S = {
   comis:null, comPend:null, demoCom:null,
   // Cuenta real (OKX EU): último «cuenta_real» o GET /api/real, estado de esa ruta, orden pendiente, lo que se escribe en el
   // panel (frase y límites, para no perderlo al redibujar) y el modo de ejemplo de la demostración
-  real:null, realApi:null, realPend:null, realForm:{frase:"", lim:{}}, realDemo:"apagado"
+  real:null, realApi:null, realPend:null, realForm:{frase:"", lim:{}}, realDemo:"apagado",
+  // Ranking de estrategias (GET /api/ranking y mensaje «ranking»): respuesta de la API, último del bus, estado de la ruta,
+  // filtros, orden, fila abierta y cuántas filas se ven
+  rk:null, rkBus:null, rkApi:null, rkEtag:null, rkVisto:0, rkF:{origen:"", cumple:false, minOp:0, sinFragiles:false}, rkSort:{k:"pos", dir:1}, rkSel:null, rkMas:50, rkRev:0, rkDemo:false,
+  // Laboratorio vivo (proceso aparte, docs/07): GET /api/lab_vivo, último «lab_vivo» del bus, estado de la ruta, cola, notas
+  // del generador, diarios anteriores, detalle de cada hipótesis, variante abierta y orden pendiente (pausar o reanudar)
+  lv:null, lvBus:null, lvApi:null, lvCola:null, lvGen:null, lvDiarios:{}, lvDet:{}, lvSel:null, lvPend:null, lvRev:0, lvDemo:false
 };
 for (const c of COINS){ S.prices[c]=INFO[c].price; S.p0[c]=INFO[c].price; S.hist[c]=[]; }
 S.prices.USDT = 1;
@@ -1387,6 +1490,8 @@ function ingest(msg){
   if (msg.type==="noticias_fiables") onFiables(msg);
   if (msg.type==="decision_apertura") onDecision(msg);
   if (msg.type==="cuenta_real") onReal(msg);   // modo real (docs/06): lo del panel «Cuenta real»; nunca lleva claves
+  if (msg.type==="ranking") onRanking(msg);   // ranking de estrategias (bot/ranking.py): las 20 primeras, cuando cambia
+  if (msg.type==="lab_vivo") onLabVivo(msg);   // laboratorio vivo (proceso aparte): resumen de su estado.json
   if (msg.type==="comisiones" && (strOk(msg.perfil) || strOk(msg.id))) { S.comis = msg; S.dirty = true; }   // perfil suelto (la cartera manda)
   if (msg.type==="portfolio") { applyPortfolio(msg); S.dirty=true; }
   if (msg.type==="market") {
@@ -1436,6 +1541,8 @@ async function loadApi(which){   // datos que no van por el WebSocket: backtest 
   } catch(e){ /* un bot sin esta ruta todavía: se espera al mensaje del WebSocket */ }
   // Por qué entra o no: no va en el estado inicial del WebSocket. Una sola petición a la vez; quien llegue mientras tanto la espera.
   if (!which || which==="dec"){ if (!S.decP) S.decP = loadDec().finally(() => { S.decP = null; }); await S.decP; }
+  if (!which || which==="ranking") await loadRanking();   // ranking de estrategias: todas las filas (el bus trae solo las 20 primeras)
+  if (!which || which==="lab") await loadLab("main");   // laboratorio vivo (proceso aparte): estado, las mejores y el diario de hoy
 }
 async function loadDec(){
   try {
@@ -2026,6 +2133,7 @@ function renderHeader(){
   const pb = $("#pendBadge"); pb.hidden = !S.pending.length; pb.textContent = S.pending.length;
   const np = !S.evoDemo && isObj(S.evo) && Array.isArray(S.evo.propuestas) ? S.evo.propuestas.length : 0;   // propuestas de la evolución
   const eb = $("#evoBadge"); eb.hidden = !np; eb.textContent = np;
+  safe(rkLvBadges);   // nuevas en el ranking y listas para proponer del laboratorio vivo (solo en directo)
   // Cuenta real: aviso en la pestaña con una posición SIN STOP en OKX, una parada activa o el modo real activo
   const V = S.live ? realView() : null, rb = $("#realBadge"), ss = realSinStop(V), rt = ss.length ? "SIN STOP" : isObj(V) && isObj(V.parada) ? "parada" : realModo(V)==="real" ? "activo" : "";
   rb.hidden = !rt; rb.textContent = rt;
@@ -4337,6 +4445,11 @@ function onOrden(m){
     if (p && reciente(p)){ S.realPend = null;
       toast(ok ? `Hecho (modo real): ${REAL_ACC_TXT[m.accion] || "orden atendida"}.${typeof m.why==="string" && m.why ? ` ${m.why}` : ""}` : `El bot no lo ha hecho (modo real): ${why}.`, 9000); }
     loadReal();
+  } else if (m.area==="lab_vivo"){ const p = S.lvPend;   // pausar o reanudar el laboratorio vivo (docs/07, 14.3)
+    if (p && reciente(p)){ S.lvPend = null;
+      toast(ok ? `Hecho: ${(m.accion || p.accion)==="reanudar" ? "el laboratorio vuelve a trabajar" : "laboratorio en pausa manual"} (no toca el paper).${typeof m.why==="string" && m.why ? ` ${m.why}` : ""}`
+        : `El bot no lo ha hecho (laboratorio): ${why}.`, 7000); }
+    loadLab("main"); lvBump();
   } else if (m.area==="comisiones"){ const p = S.comPend;   // perfil de comisiones del paper
     if (p && reciente(p)){ S.comPend = null;
       toast(ok ? `Hecho: las comisiones del paper pasan a «${comNombre(m.id || p.perfil)}»${typeof m.why==="string" && m.why ? ` (${m.why})` : ""}.` : `No se pudo cambiar el perfil de comisiones: ${why}.`, 8000); }
@@ -4496,7 +4609,7 @@ let lastFeedSig = "";
 // Botones de acción (aprobar, rechazar, cancelar, cerrar). Mientras se pulsan no se redibuja nada, para que el clic
 // llegue entero al mismo botón (los paneles se rehacen cada medio segundo), y el foco del teclado se recoloca tras redibujar.
 const ACT_ATTRS = ["data-approve","data-reject","data-cancel","data-close","data-evo-aplicar","data-evo-descartar","data-evo-revertir","data-fv-acc","data-apr-auto",
-  "data-real-acc","data-real-aprob","data-real-approve","data-real-reject","data-real-close"], ACT_SEL = ACT_ATTRS.map(a=>`[${a}]`).join(",");
+  "data-real-acc","data-real-aprob","data-real-approve","data-real-reject","data-real-close","data-lv-acc"], ACT_SEL = ACT_ATTRS.map(a=>`[${a}]`).join(",");
 let holdUntil = 0;
 function render(force){
   if (performance.now() < holdUntil) return;
@@ -4514,6 +4627,7 @@ function renderAll(force){
   renderHeader();
   if (S.tab==="world") safe(World.panes);
   if (S.tab==="mando") safe(renderMando);
+  if (S.tab==="lab") safe(() => renderLab(force));   // laboratorio vivo: la cuenta atrás de la pausa va cada segundo
   if (!S.dirty && !force) { if (S.tab==="live" && S.sel) safe(renderTrace); return; }
   S.dirty = false;
   if (S.tab==="live"){
@@ -4529,6 +4643,7 @@ function renderAll(force){
   if (S.tab==="results") safe(renderResults);
   if (S.tab==="real") safe(renderReal);
   if (S.tab==="evo") safe(() => renderEvo(force));
+  if (S.tab==="ranking") safe(() => renderRanking(force));
   // La firma incluye los tres backtests: llegan por separado y cualquiera puede llegar después del primer pintado.
   const btSig = [S.backtest ? S.backtest.generated + JSON.stringify(S.btFilter) + S.btSel : "x", (S.btOpen||{}).generated,
                  ((S.btImp||{}).impulso||{}).generated, ((S.btImp||{}).lab||{}).generated, ((S.btImp||{}).seis||{}).generated, ((S.btImp||{}).seis2||{}).generated, ((S.btImp||{}).ruptura3||{}).generated, motorPreset().preset].join("|");
@@ -4597,6 +4712,7 @@ function renderMando(){
           ["Cuenta real", `<span data-tabgo="real" style="cursor:pointer">${esc(realShort())}</span>`]]);
   safe(renderMdFiab);   // noticias fiables y entradas por noticia
   safe(renderMdDec);    // por qué entra o no en la última apertura
+  safe(renderMdRk);     // ranking de estrategias: las 5 primeras y la que está en marcha
   const preds = ((S.predictions && S.predictions.items) || []).filter(p => p.kind!=="bolsa").sort((a,b) => a.when_utc-b.when_utc).slice(0,8);   // solo cripto
   $("#mdPred").innerHTML = preds.map(p => `<li data-tabgo="pred"><span class="led ${p.confidence==="alta"?"busy":p.confidence==="media"?"wait":""}"></span><span class="nm">${esc(p.label)}</span>
     <span class="tx">${p.when_utc>now ? "en "+dur(p.when_utc-now) : "ahora"} · confianza ${esc(p.confidence)}</span><b class="${p.prob_up>=0.5?"pos":"neg"}">${Math.round(p.prob_up*100)} %</b></li>`).join("")
@@ -4867,8 +4983,811 @@ function demoReal(modo){
     cerradas:[{story:"a-as-xrp-ej", coin:"XRP", side:"long", closed:now - 26*3600e3, reason:"Stop de pérdida", pnl:-0.11, R:-1.1}]};
 }
 
+// ---------- Ranking de estrategias (bot/ranking.py: GET /api/ranking y mensaje «ranking»; docs/04) ----------
+// Todas las estrategias medidas, en una fila común (estudios, laboratorio de 2.000, laboratorio vivo, curso, selectivas,
+// salidas, en vivo…), de más a menos % de la cuenta al día fuera de muestra con 0,5 % de riesgo y NETO de costes. Entran
+// las que no pierden fuera de muestra (R ≥ 0); la que está en marcha se enseña siempre aparte, con su puesto o «fuera del
+// ranking: pierde». La web solo lee: filtra y ordena en el navegador. Cualquier campo puede faltar o llegar a null.
+// Nombres de los orígenes (los mismos que bot/ranking.ORIGENES; la API los manda en «origenes» y mandan los suyos)
+const RK_ORIGEN = {laboratorio_vivo:"Laboratorio vivo", estudio:"Réplicas del motor", laboratorio_2000:"Laboratorio de 2.000", curso:"Técnicas del curso",
+  selectiva:"Selectivas (Murphy, Fibonacci y Ruptura)", salidas:"Salidas, stops y objetivos", en_vivo:"Solo en vivo (sin backtest)"};
+const RK_ESTADO = {backtest:["muted","Backtest"], en_avance:["info","En avance"], en_paper:["good","En paper"], descartada_por_el_usuario:["bad","Descartada por ti"]};
+const RK_FUENTE = {estandar:"Estudios", estudios:"Estudios", lab_vivo:"Laboratorio vivo", laboratorio_vivo:"Laboratorio vivo", en_vivo:"En vivo",
+  paper:"Paper", vigilancia:"Prueba en avance"};
+const RK_VIVO = {paper:"en la cartera paper", vigilancia:"virtual, en la prueba en avance", lab_vivo:"virtual, en el laboratorio vivo"};
+const RK_MINOP = [0, 0.25, 0.5, 1, 2, 3, 5], RK_PAG = 50;
+const RK_ID_PRESET = {seis2:"seis2", seis:"seis", ruptura3:"ruptura3", impulso:"e2_impulso_7d"};   // preset del motor → su fila (bot/ranking.PRESET_FILA)
+const rkO = v => isObj(v) && !Array.isArray(v) ? v : {};
+const rkN = v => isNum(v) ? v : null;
+const rkTxt = (v, n=200) => typeof v==="string" && v.trim() ? short(v.trim(), n) : "";
+const rkR = f => rkN(rkO(rkO(f).fuera).R);
+// Entra si no pierde fuera de muestra (R neto ≥ 0, con alguna operación); el bot pone «posicion: null» a las que no entran.
+const rkEntra = f => isObj(f) && f.en_ranking!==false && f.posicion!==null && isNum(rkR(f)) && rkR(f) >= 0 && !(isNum(rkO(f.fuera).n) && f.fuera.n < 1);
+const rkId = f => typeof f.id==="string" && f.id ? f.id : isNum(f.id) ? String(f.id) : "";
+const rkNombre = f => rkTxt(f.nombre, 160) || rkTxt(f.id, 120) || "Sin nombre";
+const rkOrig = o => typeof o==="string" && o ? rkCache.orig[o] || RK_ORIGEN[o] || o.replace(/_/g, " ") : "";
+const rkGana = v => isNum(v) ? (Math.abs(v) <= 1 ? v*100 : v) : null;   // % de ganadoras (también si llega en fracción)
+const rkPct = v => isNum(v) ? `${v>0?"+":""}${nf(v, Math.abs(v) >= 1 ? 2 : 3)} %` : "–";
+const rkP = v => isNum(v) ? (v > 0 && v < 0.001 ? "< 0,001" : nf(v, v < 0.01 ? 3 : 2)) : "–";
+const rkCls = v => isNum(v) ? (v > 0 ? "pos" : v < 0 ? "neg" : "") : "";
+const rkTs = x => isObj(x) && isNum(x.ts) ? x.ts : 0;
+function rkFecha(v){   // «2026-10-29», ms o ISO → 29-10-2026
+  if (okT(v)){ const d = madDay(v); return `${d.slice(8,10)}-${d.slice(5,7)}-${d.slice(0,4)}`; }
+  const m = typeof v==="string" ? /^(\d{4})-(\d{2})-(\d{2})/.exec(v) : null;
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : rkTxt(v, 24) || "–";
+}
+const rkFechaMs = v => { if (okT(v)) return v; const t = typeof v==="string" && /^\d{4}-\d{2}-\d{2}/.test(v) ? Date.parse(v.slice(0,10)) : NaN; return isNum(t) ? t : null; };
+function rkBump(){ S.rkRev++; S.dirty = true; }
+// Lo que se enseña: lo más nuevo entre la respuesta de la API (todas las filas) y el último «ranking» del bus (las 20 primeras).
+function rkSrc(){
+  const A = isObj(S.rk) && !Array.isArray(S.rk) ? S.rk : null, B = S.live && isObj(S.rkBus) && !Array.isArray(S.rkBus) ? S.rkBus : null;
+  if (!A || !B) return A || B;
+  // mientras llega la tabla entera nueva, se queda la entera de antes; un 304 dice que sigue al día (S.rkVisto)
+  return rkTs(B) > Math.max(rkTs(A), S.rkVisto || 0) && !S.rkP ? B : A;
+}
+// Filas que entran (las que no pierden fuera de muestra) con su puesto: el del bot o, si no lo trae, el de la regla
+// (% de la cuenta al día de mayor a menor; desempate: operaciones al día y operaciones fuera de muestra).
+const rkCache = {src:null, rows:[], orig:{}};
+function rkRanked(src){
+  if (rkCache.src===src) return rkCache.rows;
+  const rows = objs(src && src.filas).filter(rkEntra), key = f => [rkN(f.pct_dia), rkN(f.op_dia), rkN(rkO(f.fuera).n)];
+  const rule = (a, b) => { const x = key(a), y = key(b);
+    for (let i = 0; i < 3; i++){ const p = x[i], q = y[i]; if (p===q) continue; if (p==null) return 1; if (q==null) return -1; return q - p; } return 0; };
+  const conPos = rows.length > 0 && rows.every(f => isNum(f.posicion));
+  const out = rows.slice().sort(conPos ? (a, b) => a.posicion - b.posicion || rule(a, b) : rule).map((f, i) => ({...f, _pos:conPos ? f.posicion : i + 1}));
+  const og = objs(src && src.origenes).filter(o => typeof o.id==="string" && rkTxt(o.nombre, 80));
+  if (og.length) rkCache.orig = Object.fromEntries(og.map(o => [o.id, rkTxt(o.nombre, 80)]));
+  rkCache.src = src; rkCache.rows = out;
+  return out;
+}
+// La estrategia en marcha (en_marcha del bot: {id, preset, nombre, desde, pausada, fuente, posicion, n_ranking,
+// en_ranking, texto, fila}, o una fila con en_marcha: true): su puesto, o por qué no entra.
+function rkLiveInfo(src, ranked){
+  const e = isObj(src) && isObj(src.en_marcha) && !Array.isArray(src.en_marcha) ? src.en_marcha : null;
+  let E = null;
+  if (e){ const {fila, ...resto} = e, F = isObj(fila) && !Array.isArray(fila) ? fila : null;
+    E = F ? {...F, ...Object.fromEntries(Object.entries(resto).filter(([, v]) => v!=null))} : e; }   // lo que falta en en_marcha, de su fila
+  else E = objs(src && src.filas).find(f => f.en_marcha===true) || null;
+  if (!E) return null;
+  const id = rkId(E), hit = id ? ranked.find(f => rkId(f)===id) : null, R = rkR(E);
+  const pos = isNum(E.posicion) ? E.posicion : hit ? hit._pos : null;
+  const dentro = isNum(pos) && E.en_ranking!==false && !(isNum(R) && R < 0);
+  const de = isNum(E.n_ranking) ? E.n_ranking : isNum(src.n_ranking) ? src.n_ranking : ranked.length;
+  const why = dentro ? "" : isNum(R) && R < 0 ? "pierde" : isNum(R) ? "no entra" : "sin medida fuera de muestra";
+  return {E:hit ? {...hit, ...E} : E, id, pos, de, dentro, why, texto:rkTxt(E.texto, 240)};
+}
+function rkFiltered(rows, sinFragiles = S.rkF.sinFragiles){
+  const F = S.rkF;
+  return rows.filter(f => (!F.origen || f.origen===F.origen) && (!F.cumple || f.cumple_reglas===true)
+    && (!F.minOp || (isNum(f.op_dia) && f.op_dia >= F.minOp)) && (!sinFragiles || f.fragil!==true));
+}
+const rkFActivo = () => !!(S.rkF.origen || S.rkF.cumple || S.rkF.minOp || S.rkF.sinFragiles);
+const RK_COLS = [
+  {k:"pos", t:"#", d:1, r:true, v:f => f._pos, tip:"Puesto en el ranking: % de la cuenta al día fuera de muestra, neto de costes"},
+  {k:"nombre", t:"Estrategia", d:1, s:true, v:f => rkNombre(f).toLowerCase(), tip:"Pulsa el nombre para ver su regla"},
+  {k:"pct_dia", t:"% cuenta/día", d:-1, r:true, v:f => rkN(f.pct_dia), tip:"% de la cuenta por jornada con aperturas, con 0,5 % de riesgo por operación, fuera de muestra y neto de los costes de su estudio (comisiones y deslizamiento; el funding de los perpetuos donde el estudio lo mide: no en el laboratorio de 2.000)"},
+  {k:"R", t:"R/op.", d:-1, r:true, v:rkR, tip:"R medio por operación fuera de muestra, neto de costes"},
+  {k:"op_dia", t:"Op./día", d:-1, r:true, v:f => rkN(f.op_dia), tip:"Operaciones medias por jornada con aperturas"},
+  {k:"n", t:"Operaciones", d:-1, r:true, v:f => rkN(rkO(f.fuera).n), tip:"Operaciones fuera de muestra / dentro de muestra"},
+  {k:"gana", t:"Ganadoras", d:-1, r:true, v:f => rkGana(rkO(f.fuera).gana_pct), tip:"% de operaciones ganadoras fuera de muestra"},
+  {k:"caida", t:"Caída máx.", d:1, r:true, v:f => rkN(f.caida_max_pct), tip:"Caída máxima de la cuenta fuera de muestra, en %"},
+  {k:"rob", t:"Robustez", d:1, v:f => f.fragil===true ? 1 : 0, tip:"Frágil: gana fuera pero pierde dentro, o pierde sin sus 5 mayores operaciones, o no pasa la corrección por número de pruebas, o no la tiene siendo una de varias configuraciones de su estudio"},
+  {k:"estado", t:"Estado", d:1, s:true, v:f => (RK_ESTADO[f.estado] ? RK_ESTADO[f.estado][1] : rkTxt(f.estado, 40)).toLowerCase() || null},
+  {k:"cumple", t:"Tus reglas", d:1, v:f => f.cumple_reglas===true ? 0 : f.cumple_reglas===false ? 1 : null, tip:"¿Cumple tus reglas (≥ 2:1, stop ≥ 1,5 %, ≥ 3 % neto…)?"},
+  {k:"fecha", t:"Fecha", d:-1, r:true, v:f => rkFechaMs(f.fecha)},
+  {k:"nueva", t:"Nueva", d:1, v:f => f.nueva===true ? 0 : 1, tip:"Entró en el ranking en las últimas 24 h"}];
+function rkSort(rows){
+  const c = RK_COLS.find(x => x.k===S.rkSort.k) || RK_COLS[0], dir = S.rkSort.dir===-1 ? -1 : 1;
+  return rows.slice().sort((a, b) => { const x = c.v(a), y = c.v(b);
+    if (x==null || y==null) return x==null && y==null ? a._pos - b._pos : x==null ? 1 : -1;   // lo que falta, siempre al final
+    const o = c.s ? String(x).localeCompare(String(y), "es") : x - y;
+    return o ? o*dir : a._pos - b._pos; });
+}
+function rkChip(tone, txt, tip){ return `<span class="rkc ${tone}"${tip ? ` title="${esc(tip)}"` : ""}>${esc(txt)}</span>`; }
+// Corrección por número de pruebas: el chip lleva el tipo corto del bot (corregida.tipo) y el método largo va en el title
+const RK_MET = {p:"p", q:"q", bh:"q", holm:"Holm", p_holm:"Holm", bonferroni:"Bonferroni", dsr:"Sharpe defl."};
+function rkTipo(c){   // el tipo del bot o, de un bot anterior sin él, el que se deduce de su método
+  if (typeof c.tipo==="string" && c.tipo) return c.tipo;
+  const m = typeof c.metodo==="string" ? c.metodo.trim().toLowerCase() : "";
+  return RK_MET[m] ? m : /holm/.test(m) ? "holm" : /benjamini|\(q\)/.test(m) ? "bh" : /sharpe/.test(m) ? "dsr" : /bonferroni/.test(m) ? "bonferroni" : "";
+}
+// Booleano, número (p o q corregido) u objeto {tipo, metodo, valor, pasa}. Sin corrección siendo una de varias
+// configuraciones de su estudio (tipo «sin_p», o null con probadas > 1): «sin corregir (1 de N)», que no la pasa.
+function rkCorr(c, f){
+  const n = isObj(f) && isNum(f.probadas) && f.probadas > 1 ? f.probadas : null;
+  if (typeof c==="boolean") return {ok:c, txt:`corregida ${c ? "✓" : "✗"}`, tip:""};
+  if (isNum(c)) return {ok:null, txt:`corregida ${rkP(c)}`, tip:""};
+  const sinTxt = n ? `sin corregir (1 de ${nf(n,0)})` : "sin corregir";
+  if (c==null && n) return {ok:false, sin:true, txt:sinTxt, tip:`Sin corrección por número de pruebas: es una de ${nf(n,0)} configuraciones de su estudio`};
+  if (!isObj(c) || Array.isArray(c)) return null;
+  const tipo = rkTipo(c), met = rkTxt(c.metodo, 300);
+  if (tipo==="sin_p") return {ok:false, sin:true, txt:sinTxt, tip:met || "Sin corrección por número de pruebas"};
+  const ok = typeof c.pasa==="boolean" ? c.pasa : typeof c.ok==="boolean" ? c.ok : null;
+  const v = [c.valor, c.q, c.p_holm, c.holm, c.p].find(isNum), lab = RK_MET[tipo] || "";
+  return {ok, txt:`corregida${lab ? " " + lab : ""}${isNum(v) ? " " + rkP(v) : ""}${ok===true ? " ✓" : ok===false ? " ✗" : ""}`, tip:met};
+}
+function rkMitades(m){
+  if (Array.isArray(m)){ const v = m.filter(isNum); return v.length ? {ok:v.every(x => x > 0), txt:`mitades ${v.map(x => sgn(x,2)).join(" / ")}`} : null; }
+  if (typeof m==="boolean") return {ok:m, txt:`mitades ${m ? "✓" : "✗"}`};
+  return rkTxt(m, 30) ? {ok:null, txt:`mitades ${rkTxt(m, 30)}`} : null;
+}
+function rkFragilWhy(f){   // los motivos del bot (fragil_motivos) o, sin ellos, los de la regla de bot/ranking.fragilidad
+  const ms = (Array.isArray(f.fragil_motivos) ? f.fragil_motivos : []).filter(m => typeof m==="string" && m.trim()).slice(0, 5).map(m => short(m.trim(), 200));
+  if (ms.length) return ms.join("; ");
+  const t = rkTxt(f.fragil_motivo || f.motivo_fragil, 300); if (t) return t;
+  const r = rkO(f.robustez), fu = rkR(f), de = rkN(rkO(f.dentro).R), s5 = r.sin_5_mayores, c = rkCorr(r.corregida, f), out = [];
+  if (isNum(fu) && fu > 0 && isNum(de) && de < 0) out.push("gana fuera de muestra pero pierde dentro");
+  if ((isNum(s5) && s5 < 0) || s5===false) out.push("sin sus 5 mejores operaciones pierde");
+  if (c && c.ok===false) out.push(c.sin ? "sin corrección por número de pruebas" : "no pasa la corrección por número de pruebas");
+  return out.length ? out.join("; ") : "el ranking la marca como frágil";
+}
+function rkRob(f){
+  const r = rkO(f.robustez), out = [], s5 = r.sin_5_mayores;
+  if (f.fragil===true) out.push(rkChip("bad", "frágil", rkFragilWhy(f)));
+  if (f.poca_muestra===true) out.push(rkChip("warn", "poca muestra", "Menos de 30 operaciones fuera de muestra: su cifra puede ser pura suerte"));
+  if (isNum(s5)) out.push(rkChip(s5 >= 0 ? "good" : "bad", `sin 5 mayores ${sgn(s5,2)} R`, "R medio fuera de muestra sin sus 5 mejores operaciones"));
+  else if (typeof s5==="boolean") out.push(rkChip(s5 ? "good" : "bad", `sin 5 mayores ${s5 ? "✓" : "✗"}`, "¿Sigue sin perder fuera de muestra sin sus 5 mejores operaciones?"));
+  const de = rkN(rkO(f.dentro).R), dp = typeof r.dentro_positivo==="boolean" ? r.dentro_positivo : isNum(de) ? de > 0 : null;
+  if (dp!=null) out.push(rkChip(dp ? "good" : "bad", `dentro ${dp ? "✓" : "✗"}`, `Dentro de muestra (los datos con los que se eligió): ${isNum(de) ? rT(de) + " por operación" : dp ? "gana" : "pierde"}`));
+  const c = rkCorr(r.corregida, f);
+  if (c) out.push(rkChip(c.ok===true ? "good" : c.ok===false ? "bad" : "muted", c.txt, c.tip || "Corrección por el número de estrategias probadas (p, q o Holm)"));
+  const mi = rkMitades(r.mitades);
+  if (mi) out.push(rkChip(mi.ok===true ? "good" : mi.ok===false ? "bad" : "muted", mi.txt, "R medio en cada mitad del fuera de muestra"));
+  return out.join("") || '<span class="note">–</span>';
+}
+function rkEst(f){
+  const e = RK_ESTADO[f.estado], o = rkTxt(f.estado, 40);
+  return e ? `<span class="pill ${e[0]}">${esc(e[1])}</span>` : o ? `<span class="pill muted">${esc(o.replace(/_/g, " "))}</span>` : "–";
+}
+const rkCumple = f => f.cumple_reglas===true ? '<span class="pos" title="Cumple tus reglas">✓ sí</span>'
+  : f.cumple_reglas===false ? '<span class="neg" title="No cumple tus reglas: el paper la rechazaría">✗ no</span>' : "–";
+function rkPerfil(f){   // con qué costes se calculó: el texto del bot o el nombre del perfil
+  const t = rkTxt(f.perfil_texto, 200); if (t) return t;
+  const p = f.perfil_costes;
+  if (typeof p==="string" && p) return short(comNombre(p), 120);
+  if (isObj(p)) return rkTxt(p.texto, 200) || (typeof p.perfil==="string" && p.perfil ? short(comNombre(p.perfil), 120) : "");
+  return "";
+}
+function rkVivo(ev){   // en_vivo: {fuente, virtual, n, R, gana_pct, neto_usdc, desde, hasta, abiertas, avance}
+  const v = rkO(ev), p = [];
+  if (!Object.keys(v).length) return "";
+  const fu = RK_VIVO[v.fuente] || (v.virtual===true ? "virtual" : "");
+  if (isNum(v.n)) p.push(`${nf(v.n,0)} ${v.n===1 ? "operación cerrada" : "operaciones cerradas"}${fu ? " " + fu : ""}`); else if (fu) p.push(fu);
+  if (isNum(v.R)) p.push(`R medio ${rT(v.R)}`);
+  const g = rkGana(v.gana_pct); if (isNum(g)) p.push(`${pctp(g,0)} ganadoras`);
+  if (isNum(v.neto_usdc)) p.push(`${v.neto_usdc>0?"+":""}${nf(v.neto_usdc,2)} USDC ficticios`);
+  if (isNum(v.abiertas) && v.abiertas > 0) p.push(`${nf(v.abiertas,0)} ${v.abiertas===1 ? "abierta" : "abiertas"}`);
+  const d = rkFecha(v.desde); if (d!=="–") p.push(`desde el ${d}`);
+  const av = rkO(v.avance);
+  if (isNum(av.n)) p.push(`en la prueba en avance: ${nf(av.n,0)} op.${isNum(av.R) ? `, R medio ${rT(av.R)}` : ""}`);
+  return p.join(" · ");
+}
+function rkTramo(x, fuera){
+  const p = [], g = rkGana(x.gana_pct), ic = ic2(x.ic95, v => sgn(v,2));
+  if (isNum(x.n)) p.push(`${nf(x.n,0)} op.`); if (isNum(x.R)) p.push(`${rT(x.R)} por operación`); if (isNum(g)) p.push(`${pctp(g,0)} ganadoras`);
+  if (fuera){ if (ic) p.push(`IC 95 % ${ic}`); if (isNum(x.R_bruto)) p.push(`${rT(x.R_bruto)} antes de costes`); if (isNum(x.p)) p.push(`p ${rkP(x.p)}`);
+    if (isNum(x.q)) p.push(`q ${rkP(x.q)}`); if (isNum(x.p_holm)) p.push(`p de Holm ${rkP(x.p_holm)}`);
+    if (isNum(x.jornadas)) p.push(`${nf(x.jornadas,0)} jornadas`); }
+  const per = [x.desde, x.hasta].map(rkFecha);
+  if (per[0]!=="–" && per[1]!=="–") p.push(`del ${per[0]} al ${per[1]}`);
+  return p.length ? esc(p.join(" · ")) : "–";
+}
+// Con qué costes se midió, en corto (bot/ranking.PERFILES_CORTO; el bot lo manda en perfil_corto): el orden mezcla
+// estudios con costes distintos y cada fila tiene que decirlo
+const RK_PERFIL = {backtest:"costes del backtest", laboratorio:"costes del laboratorio (sin funding)", okx_eu_con_xperps:"costes OKX EU con X-Perps",
+  okx_eu_sin_xperps:"costes OKX EU sin X-Perps", sin_costes:"sin costes", paper:"costes del paper"};
+const rkPerfilCorto = f => rkTxt(f.perfil_corto, 60) || (typeof f.perfil_costes==="string" && f.perfil_costes ? RK_PERFIL[f.perfil_costes] || `costes: ${short(f.perfil_costes, 40)}` : "");
+function rkRowHtml(f, live, sel){
+  const fu = rkO(f.fuera), de = rkO(f.dentro), id = rkId(f) || `fila-${f._pos}`, g = rkGana(fu.gana_pct), R = rkR(f);
+  const pc = rkPerfilCorto(f), sub = [rkTxt(f.familia, 60), rkOrig(f.origen), pc].filter(Boolean).join(" · "), pa = rkN(f.posicion_antes);
+  const mov = isNum(pa) && isNum(f._pos) && pa!==f._pos ? `<span class="rk-sub ${pa > f._pos ? "pos" : "neg"}" title="Antes, puesto ${nf(pa,0)}">${pa > f._pos ? "▲" : "▼"}${nf(Math.abs(pa - f._pos),0)}</span>` : "";
+  return `<tr class="${live ? "rk-live" : ""}${sel ? " sel" : ""}"><td class="r mono">${isNum(f._pos) ? nf(f._pos,0) : "–"}${mov}</td>
+    <td class="wrapc"><button type="button" class="rk-nm" data-rk-sel="${esc(id)}" aria-expanded="${sel}"><b>${esc(rkNombre(f))}</b></button>${live ? ' <span class="pill good">en marcha</span>' : ""}${sub ? `<span class="rk-sub"${pc ? ` title="${esc("Costes: " + (rkPerfil(f) || pc))}"` : ""}>${esc(sub)}</span>` : ""}</td>
+    <td class="r"><b class="${rkCls(f.pct_dia)}">${rkPct(f.pct_dia)}</b></td><td class="r ${rkCls(R)}">${rT(R)}</td>
+    <td class="r">${isNum(f.op_dia) ? nf(f.op_dia,2) : "–"}</td><td class="r">${isNum(fu.n) ? nf(fu.n,0) : "–"} / ${isNum(de.n) ? nf(de.n,0) : "–"}</td>
+    <td class="r">${isNum(g) ? pctp(g,0) : "–"}</td><td class="r">${isNum(f.caida_max_pct) ? pctp(f.caida_max_pct,1) : "–"}</td>
+    <td class="rk-rob">${rkRob(f)}</td><td>${rkEst(f)}</td><td>${rkCumple(f)}</td><td class="mono">${esc(rkFecha(f.fecha))}</td>
+    <td>${f.nueva===true ? '<span class="pill info">nueva</span>' : ""}</td></tr>`;
+}
+function rkDetHtml(f){
+  const fu = rkO(f.fuera), de = rkO(f.dentro), r = rkO(f.robustez), regla = rkTxt(f.regla, 1500), pf = rkPerfil(f), vivo = rkVivo(f.en_vivo);
+  const nat = [isNum(f.op_dia_natural) ? `${nf(f.op_dia_natural,2)} op.` : "", isNum(f.pct_dia_natural) ? rkPct(f.pct_dia_natural) : ""].filter(Boolean).join(" · ");
+  const rob = [isNum(r.base_p) ? `frente a su base al azar p ${rkP(r.base_p)}` : "", isNum(r.sin_mejor_mes) ? `sin su mejor mes ${rT(r.sin_mejor_mes)}` : "",
+    isNum(r.sin_mejor_semana) ? `sin su mejor semana ${rT(r.sin_mejor_semana)}` : "", isNum(r.desliz_x2) ? `con el deslizamiento ×2 ${rT(r.desliz_x2)}` : "",
+    isObj(r.corregida) && rkTxt(r.corregida.metodo, 200) ? (rkTipo(r.corregida)==="sin_p" ? rkTxt(r.corregida.metodo, 200)   // ya dice que no la tiene
+      : `corrección: ${rkTxt(r.corregida.metodo, 200)}${isNum(r.corregida.valor) ? ` (${rkP(r.corregida.valor)})` : ""}`) : ""].filter(Boolean).join(" · ");
+  const perf = Object.entries(rkO(f.perfiles)).filter(([, v]) => isObj(v)).slice(0, 4).map(([k, v]) => `${comNombre(k)}: ${[isNum(v.R) ? rT(v.R) : "", isNum(v.pct_dia) ? `${rkPct(v.pct_dia)} al día` : ""].filter(Boolean).join(", ") || "–"}`).join(" · ");
+  const est = [rkTxt(f.estudio, 60), isNum(f.probadas) ? `una de ${nf(f.probadas,0)} configuraciones probadas en su estudio` : "", rkTxt(f.igual_que, 120) ? `igual que ${rkTxt(f.igual_que, 120)}` : ""].filter(Boolean).join(" · ");
+  return `<tr class="rk-det"><td colspan="${RK_COLS.length}"><div class="rk-det-b">
+    ${regla ? `<p><b>Regla:</b> ${esc(regla)}</p>` : `<p class="note">Sin la regla en texto llano.</p>`}
+    ${kv([["Fuera de muestra", rkTramo(fu, true)], ["Dentro de muestra", rkTramo(de, false)], ["R al día", rT(f.R_dia)], ["% de la cuenta al día", esc(rkPct(f.pct_dia))],
+      ["Por día natural", esc(nat || "–")], ["Caída máxima", isNum(f.caida_max_pct) ? pctp(f.caida_max_pct,1) : "–"], ["Costes", esc(pf || "–")],
+      ["Origen", esc(rkOrig(f.origen) || "–")], ["Estudio", esc(est || "–")], ["Archivo", esc(rkTxt(f.archivo, 160) || "–")], ["Fecha", esc(rkFecha(f.fecha))],
+      ["En el ranking desde", esc(okT(f.entra_desde) ? vigTime(f.entra_desde) : "–")], ["En vivo", esc(vivo || "no ha operado")]])}
+    ${rob ? `<p class="note"><b>Robustez:</b> ${esc(rob)}.</p>` : ""}${perf ? `<p class="note"><b>Con otros costes:</b> ${esc(perf)}.</p>` : ""}
+    ${f.fragil===true ? `<p class="note neg"><b>Frágil:</b> ${esc(rkFragilWhy(f))}.</p>` : ""}
+    ${f.poca_muestra===true ? `<p class="note neg"><b>Poca muestra:</b> menos de 30 operaciones fuera de muestra; su cifra puede ser pura suerte.</p>` : ""}
+    ${rkTxt(f.nota, 600) ? `<p class="note">${esc(rkTxt(f.nota, 600))}</p>` : ""}</div></td></tr>`;
+}
+function rkHeadHtml(){
+  return `<tr>${RK_COLS.map(c => { const on = S.rkSort.k===c.k, up = S.rkSort.dir===1;
+    return `<th class="${c.r ? "r" : ""}" aria-sort="${on ? (up ? "ascending" : "descending") : "none"}"${c.tip ? ` title="${esc(c.tip)}"` : ""}><button type="button" class="rk-sb" data-rk-sort="${c.k}">${esc(c.t)}${on ? (up ? " ▲" : " ▼") : ""}</button></th>`; }).join("")}</tr>`;
+}
+function rkFiltersHtml(ranked){
+  const F = S.rkF, orgs = {};
+  for (const f of ranked) if (typeof f.origen==="string" && f.origen) orgs[f.origen] = (orgs[f.origen] || 0) + 1;
+  if (F.origen && !(F.origen in orgs)) orgs[F.origen] = 0;
+  const so = `<select class="evo-sel" data-rk-f="origen" aria-label="Origen de las estrategias"><option value="">Todos los orígenes (${nf(ranked.length,0)})</option>${Object.entries(orgs).sort((a, b) => b[1] - a[1])
+    .map(([k, n]) => `<option value="${esc(k)}"${F.origen===k ? " selected" : ""}>${esc(rkOrig(k))} (${nf(n,0)})</option>`).join("")}</select>`;
+  const sm = `<select class="evo-sel" data-rk-f="min_op" aria-label="Mínimo de operaciones al día">${RK_MINOP.map(v => `<option value="${v}"${F.minOp===v ? " selected" : ""}>${v ? `≥ ${nf(v, v < 1 ? 2 : 0)} op./día` : "Cualquier n.º de op./día"}</option>`).join("")}</select>`;
+  const ch = (k, on, txt) => `<button type="button" class="chip" data-rk-t="${k}" aria-pressed="${on}">${esc(txt)}</button>`;
+  return `${so}${ch("cumple", F.cumple, "Solo las que cumplen tus reglas")}${sm}${ch("fragiles", F.sinFragiles, "Ocultar frágiles")}${rkFActivo() ? '<button type="button" class="chip" data-rk-reset="1">Quitar filtros</button>' : ""}`;
+}
+function rkFuente(k, v){
+  const nm = RK_FUENTE[k] || String(k).replace(/_/g, " ");
+  if (okT(v)) return `<li>${esc(nm)}: ${esc(vigTime(v))}</li>`;
+  if (typeof v==="string") return `<li>${esc(nm)}: ${esc(short(v, 120))}</li>`;
+  if (!isObj(v) || Array.isArray(v)) return `<li>${esc(nm)}: no hay</li>`;
+  const p = [], n = [v.filas, v.n].find(isNum), er = Array.isArray(v.errores) ? v.errores.filter(e => typeof e==="string") : [];
+  if (isNum(n)) p.push(`${nf(n,0)} ${n===1 ? "fila" : "filas"}`);
+  if (isNum(v.archivos)) p.push(`${nf(v.archivos,0)} archivos`);
+  if (isNum(v.operaciones)) p.push(`${nf(v.operaciones,0)} operaciones`);
+  if (isNum(v.estrategias)) p.push(`${nf(v.estrategias,0)} estrategias`);
+  if (okT(v.ts)) p.push(`al ${vigTime(v.ts)}`);
+  if (v.ok===false) p.push("falla");
+  const t = rkTxt(v.estado, 40) || rkTxt(v.nota, 160) || rkTxt(v.error, 160); if (t) p.push(t);
+  if (er.length) p.push(`${nf(er.length,0)} ${er.length===1 ? "archivo con error" : "archivos con error"}`);
+  return `<li${er.length ? ` title="${esc(er.slice(0, 5).map(e => short(e, 160)).join("\n"))}"` : ""}>${esc(nm)}: ${esc(p.join(" · ") || "sin datos")}</li>`;
+}
+function rkFootHtml(src, view, shown){
+  const out = [], nf_ = objs(src.filas).length;
+  if (view.length > shown.length) out.push(`<div class="rk-more"><button type="button" class="btn" data-rk-mas="1">Ver ${nf(Math.min(RK_PAG, view.length - shown.length),0)} más</button><span class="note">Se ven ${nf(shown.length,0)} de ${nf(view.length,0)}.</span></div>`);
+  if (S.live && src===S.rkBus && isNum(src.n_ranking) && src.n_ranking > nf_) out.push(`<p class="note">Llegan las ${nf(nf_,0)} primeras por el WebSocket; el resto, al leer GET /api/ranking${S.rkApi==="sin_ruta" ? " (el bot en marcha aún no tiene esa ruta)" : ""}.</p>`);
+  else if (S.live && src===S.rk && isNum(src.n_ranking) && src.n_ranking > nf_) out.push(`<p class="note">Se han leído las ${nf(nf_,0)} primeras de ${nf(src.n_ranking,0)}${S.rkP ? "; llega el resto…" : ""}.</p>`);
+  const nota = rkTxt(src.nota, 600); if (nota) out.push(`<p class="note">${esc(nota)}</p>`);
+  const pcs = objs(src.perfiles_costes).filter(p => typeof p.id==="string" && isNum(p.n_ranking));   // con qué costes va cada parte del ranking
+  if (pcs.length > 1) out.push(`<p class="note"><b>No hay un perfil de costes común:</b> ${esc(pcs.map(p => `${rkTxt(p.texto, 160) || RK_PERFIL[p.id] || p.id} (${nf(p.n_ranking,0)})`).join("; "))}. Una fila del laboratorio de 2.000 paga más en los stops y no lleva funding; una del laboratorio vivo, menos.</p>`);
+  const C = rkO(src.criterio), ct = [["orden", "Orden"], ["entra", "Entra"], ["fragil", "Frágil"], ["poca_muestra", "Poca muestra"], ["nueva", "Nueva"], ["costes", "Costes"], ["jornada", "Jornada"]]
+    .filter(([k]) => rkTxt(C[k], 300)).map(([k, l]) => `<li><b>${esc(l)}:</b> ${esc(rkTxt(C[k], 300))}</li>`).join("");
+  if (ct) out.push(`<details class="evo-more"><summary>Cómo se ordena y qué entra</summary><ul class="lv-dl">${ct}</ul></details>`);
+  const fs = Object.entries(rkO(src.fuentes)).map(([k, v]) => rkFuente(k, v));
+  if (fs.length) out.push(`<ul class="rk-src"><li><b>Fuentes</b></li>${fs.join("")}</ul>`);
+  if (okT(src.ts)) out.push(`<p class="note">Calculado el ${esc(vigTime(src.ts))} (Madrid)${S.live ? "" : " · ejemplo"}.</p>`);
+  return out.join("");
+}
+function rkLiveHtml(L){
+  if (!L){ const {preset, nombre} = motorPreset(), nm = nombre || PRESET_NM[preset] || "";
+    return `<p class="note">${esc(S.live ? `El ranking aún no dice cuál es la estrategia en marcha${nm ? ` (el motor de aperturas opera «${nm}»: pestaña Mercado y aperturas)` : ""}.` : "Sin estrategia en marcha en el ejemplo.")}</p>`; }
+  const E = L.E, fu = rkO(E.fuera), de = rkO(E.dentro), vivo = rkVivo(E.en_vivo), R = rkR(E);
+  const head = `<span class="pill ${L.dentro ? "good" : "bad"}">${esc(L.dentro ? `Puesto ${nf(L.pos,0)} de ${nf(L.de,0)}` : `Fuera del ranking: ${L.why}`)}</span>`
+    + (E.pausada===true ? ' <span class="pill warn">motor en pausa</span>' : "");
+  const txt = L.texto && !/^puesto \d/i.test(L.texto) ? L.texto : "", desde = okT(E.desde) ? vigTime(E.desde) : "";
+  const cif = [isNum(E.pct_dia) ? `${rkPct(E.pct_dia)} de la cuenta al día` : "", isNum(R) ? `${rT(R)} por operación fuera de muestra` : "",
+    isNum(E.op_dia) ? `${nf(E.op_dia,2)} operaciones al día` : "", isNum(fu.n) || isNum(de.n) ? `${isNum(fu.n) ? nf(fu.n,0) : "–"} operaciones fuera y ${isNum(de.n) ? nf(de.n,0) : "–"} dentro de muestra` : "",
+    isNum(de.R) ? `dentro ${rT(de.R)}` : ""].filter(Boolean).join(" · ");
+  const pierde = !L.dentro && isNum(R) && R < 0 ? `Pierde fuera de muestra con costes${isNum(E.pct_dia) ? ` (${rkPct(E.pct_dia)} de la cuenta al día)` : ""}: por eso no entra en el ranking, pero se enseña porque es la que opera. Se mide en paper tal cual.` : "";
+  return `<div class="rk-band${L.dentro ? "" : " out"}"><p><b>${esc(rkNombre(E))}</b>${head}${rkEst(E)}${E.fragil===true ? ' <span class="pill warn">frágil</span>' : ""}</p>
+    ${txt ? `<p class="note">${esc(txt.replace(/[.\s]+$/, ""))}.</p>` : ""}${cif ? `<p class="note">${esc(cif)}</p>` : ""}${pierde ? `<p class="note neg">${esc(pierde)}</p>` : ""}
+    ${E.fragil===true ? `<p class="note">Frágil: ${esc(rkFragilWhy(E))}.</p>` : ""}
+    <p class="note">En vivo: ${esc(vivo || "aún sin operaciones cerradas que cuenten")}${desde ? ` · la opera el motor desde el ${esc(desde)}` : ""}.</p></div>`;
+}
+// Sin respuesta del ranking (bot sin la ruta, fallo o cargando): la que opera el motor se nombra igual, por «openings»
+function rkMotorNombre(){ const {preset, nombre} = motorPreset(); return nombre || PRESET_NM[preset] || (preset ? `preset ${preset}` : ""); }
+function rkLiveSinDatos(){
+  const nm = S.live ? rkMotorNombre() : "";
+  if (!nm) return `<p class="note">${esc(rkEmptyTxt())}${S.live ? " El motor de aperturas aún no ha dicho qué estrategia opera." : ""}</p>`;
+  return `<div class="rk-band out"><p><b>${esc(nm)}</b><span class="pill muted">sin datos del ranking</span></p><p class="note">Es la que opera ahora el motor de aperturas en la cartera paper; su puesto llegará con el ranking. ${esc(rkEmptyTxt())}</p></div>`;
+}
+function rkEmptyTxt(){
+  if (!S.live) return "Sin datos de ejemplo.";
+  if (S.rkApi==="sin_ruta") return "El bot en marcha aún no tiene el ranking (GET /api/ranking no existe: llega al reiniciarlo).";
+  if (S.rkApi==="fallo") return "No se pudo leer GET /api/ranking (el bot quizá se está reiniciando): se reintenta al volver a abrir la pestaña.";
+  return "Cargando el ranking…";
+}
+function renderRanking(force){
+  const src = rkSrc(), sig = [S.rkRev, JSON.stringify(S.rkF), S.rkSort.k, S.rkSort.dir, S.rkSel, S.rkMas, rkTs(src), S.live].join("|");
+  if (!force && sig===S.rkSig) return;
+  S.rkSig = sig;
+  const demo = !S.live, dn = $("#rkDemoNote");
+  $("#v-ranking").classList.toggle("demo", demo); dn.hidden = !demo;
+  putH(dn, demo ? `<b>EJEMPLO: así se verá el ranking con el bot en marcha.</b><span>Las filas de Ruptura V3, E2 con su salida de 7 días, «6 diarias», «6 diarias v2» y las dos prometedoras del laboratorio de 2.000 (E1 y E2 con su salida del laboratorio) son las que enseña el bot con sus backtests al 29-10-2026: netas de costes, cada una con los costes de su estudio, y con su corrección y su fragilidad (scripts/ranking_importar.py --demo). Las que empiezan por «Ejemplo» son inventadas para enseñar cómo funciona, y la que está en marcha es la del motor simulado de esta demostración. Todo es paper.</span>` : "");
+  if (!src){ putH($("#rkLive"), rkLiveSinDatos()); putH($("#rkFilters"), ""); putH($("#rkHead"), rkHeadHtml());
+    putH($("#rkRows"), `<tr><td colspan="${RK_COLS.length}" class="empty">${esc(rkEmptyTxt())}</td></tr>`); putH($("#rkFoot"), "");
+    putH($("#rkSub"), "Pulsa una estrategia para ver su regla y sus cifras; pulsa una columna para ordenar."); return; }
+  const ranked = rkRanked(src), L = rkLiveInfo(src, ranked), view = rkSort(rkFiltered(ranked)), shown = view.slice(0, Math.max(RK_PAG, S.rkMas));
+  const nT = isNum(src.n_total) ? src.n_total : objs(src.filas).length, nR = isNum(src.n_ranking) ? src.n_ranking : ranked.length;
+  putH($("#rkLive"), rkLiveHtml(L));
+  putH($("#rkSub"), esc(`${nf(nR,0)} de ${nf(nT,0)} estrategias medidas no pierden fuera de muestra con costes y entran en el ranking${rkFActivo() ? `; con tus filtros se ven ${nf(view.length,0)}` : ""}. Pulsa una para ver su regla; pulsa una columna para ordenar.`));
+  putH($("#rkFilters"), rkFiltersHtml(ranked));
+  putH($("#rkHead"), rkHeadHtml());
+  const todasFragiles = S.rkF.sinFragiles && !view.length && rkFiltered(ranked, false).length > 0;   // «Ocultar frágiles» las quita todas
+  const empty = !ranked.length ? "Ninguna estrategia medida deja de perder fuera de muestra con costes: el ranking está vacío. Es lo que dicen los datos."
+    : todasFragiles ? "Con estos filtros, todas las que entran en el ranking son frágiles: ninguna ha demostrado ventaja. Es lo que dicen los datos; quita «Ocultar frágiles» para verlas."
+    : "Ninguna estrategia cumple estos filtros.";
+  putH($("#rkRows"), shown.map(f => { const id = rkId(f) || `fila-${f._pos}`, sel = S.rkSel===id, live = (!!L && !!L.id && rkId(f)===L.id) || f.en_marcha===true;
+    return rkRowHtml(f, live, sel) + (sel ? rkDetHtml(f) : ""); }).join("") || `<tr><td colspan="${RK_COLS.length}" class="empty">${esc(empty)}</td></tr>`);
+  putH($("#rkFoot"), rkFootHtml(src, view, shown));
+}
+// Mando: las 5 primeras y la que está en marcha (con su puesto o «fuera del ranking: pierde»)
+function renderMdRk(){
+  const src = rkSrc(), el = $("#mdRk"), li = (led, nm, tx, b="", cls="") => `<li data-tabgo="ranking" title="${esc(nm + (tx ? " · " + tx : ""))}"><span class="led ${led}"></span><span class="nm">${esc(nm)}</span><span class="tx">${esc(tx)}</span><b class="${cls}">${esc(b)}</b></li>`;
+  $("#mdRkSub").textContent = `Las 5 primeras por % de la cuenta al día fuera de muestra, con costes, y la que está en marcha${S.live ? "" : " (ejemplo)"}.`;
+  if (!src){ const nm = S.live ? rkMotorNombre() : "";
+    putH(el, li("off", "Sin ranking", S.live ? (S.rkApi==="sin_ruta" ? "el bot en marcha aún no tiene GET /api/ranking (llega al reiniciarlo)" : S.rkApi==="fallo" ? "no se pudo leer GET /api/ranking" : "aún no ha llegado") : "–")
+      + (S.live ? li("off", "En marcha", nm ? `${nm} · sin datos del ranking` : "el motor de aperturas aún no ha dicho cuál opera") : "")); return; }
+  const ranked = rkRanked(src), L = rkLiveInfo(src, ranked);
+  const top = ranked.slice(0, 5).map(f => { const live = (!!L && !!L.id && rkId(f)===L.id) || f.en_marcha===true;
+    return li(f.fragil===true ? "wait" : "busy", `${nf(f._pos,0)}. ${rkNombre(f)}`, [`${rT(rkR(f))}/op.`, isNum(f.op_dia) ? `${nf(f.op_dia,2)} op./día` : "",
+      f.fragil===true ? "frágil" : "", f.estado==="descartada_por_el_usuario" ? "descartada por ti" : "", live ? "en marcha" : ""].filter(Boolean).join(" · "), rkPct(f.pct_dia), rkCls(f.pct_dia)); }).join("");
+  const em = L ? li(L.dentro ? "busy" : "stop", "En marcha", `${rkNombre(L.E)} · ${L.dentro ? `puesto ${nf(L.pos,0)} de ${nf(L.de,0)}` : `fuera del ranking: ${L.why}`}`, rkPct(L.E.pct_dia), rkCls(L.E.pct_dia))
+    : li("off", "En marcha", "el ranking aún no dice cuál es");
+  putH(el, (top || li("off", "Ranking vacío", "ninguna estrategia deja de perder fuera de muestra")) + em);
+}
+function rkClick(t){   // true si el clic era de la pestaña Ranking
+  const so = t.closest("[data-rk-sort]");
+  if (so){ const k = so.dataset.rkSort, c = RK_COLS.find(x => x.k===k); if (c){ S.rkSort = S.rkSort.k===k ? {k, dir:-S.rkSort.dir} : {k, dir:c.d}; rkBump(); } return true; }
+  const se = t.closest("[data-rk-sel]"); if (se){ const id = se.dataset.rkSel || ""; S.rkSel = id && id!==S.rkSel ? id : null; rkBump(); return true; }
+  const tg = t.closest("[data-rk-t]");
+  if (tg){ const k = tg.dataset.rkT; if (k==="cumple") S.rkF.cumple = !S.rkF.cumple; else if (k==="fragiles") S.rkF.sinFragiles = !S.rkF.sinFragiles; S.rkMas = RK_PAG; rkBump(); return true; }
+  if (t.closest("[data-rk-mas]")){ S.rkMas = Math.max(RK_PAG, S.rkMas) + RK_PAG; rkBump(); return true; }
+  if (t.closest("[data-rk-reset]")){ S.rkF = {origen:"", cumple:false, minOp:0, sinFragiles:false}; S.rkMas = RK_PAG; rkBump(); return true; }
+  return false;
+}
+// Mensaje del bus (las 20 primeras, como mucho cada 60 s y solo si cambia): uno más viejo no pisa al nuevo.
+function onRanking(m){
+  if (!isObj(m) || Array.isArray(m)) return;
+  if (isObj(S.rkBus) && isNum(S.rkBus.ts) && isNum(m.ts) && m.ts < S.rkBus.ts) return;
+  S.rkBus = m;
+  if (S.live && S.rkApi==="ok" && rkTs(m) > Math.max(rkTs(S.rk), S.rkVisto || 0) && S.tab==="ranking") loadRanking();   // la tabla entera, por la API
+  rkBump();
+}
+// GET /api/ranking: con la pestaña abierta, todas las filas que entran (se filtran y ordenan aquí; el bot admite de 1 a
+// 5.000); si no, las primeras, que le bastan a Mando (el bus trae además las 20 primeras). Un bot sin la ruta da 404;
+// uno que no admita el límite, 400. Una petición a la vez: la que ya va, si basta, o al acabar, la de la tabla entera.
+// La tabla entera pesa ~2 MB y se vuelve a pedir cada 2 min y con cada «ranking» del bus: va con el ETag de la que ya
+// se tiene (If-None-Match) y, si no ha cambiado nada, el bot contesta 304 sin cuerpo y se queda la que hay.
+const rkEtagDe = r => { try { const h = r && r.headers && typeof r.headers.get==="function" ? r.headers.get("ETag") : null; return typeof h==="string" && h ? h : null; } catch(e){ return null; } };
+async function loadRanking(){
+  if (!S.live) return;
+  const lim = S.tab==="ranking" ? 5000 : 50;
+  while (S.rkP){ if (S.rkPLim >= lim) return S.rkP; await S.rkP; }
+  S.rkPLim = lim;
+  S.rkP = (async () => {
+    try {
+      const op = {cache:"no-store", headers:S.rk && S.rkEtag ? {"If-None-Match": S.rkEtag} : {}};
+      let r = await fetch(`/api/ranking?limite=${lim}`, op);
+      if (r && r.status===400) r = await fetch("/api/ranking", op);
+      if (r && r.status===304 && isObj(S.rk)){ S.rkApi = "ok"; S.rkVisto = Date.now(); }   // la que hay sigue al día
+      else {
+        const j = r && r.ok ? await r.json() : null;
+        if (isObj(j) && !Array.isArray(j) && (Array.isArray(j.filas) || isNum(j.n_total))){
+          if (!isNum(j.ts) || rkTs(j) >= rkTs(S.rk)){ S.rk = j; S.rkEtag = rkEtagDe(r); S.rkVisto = 0; }
+          S.rkApi = "ok"; }
+        else S.rkApi = r && r.status===404 ? "sin_ruta" : "fallo";
+      }
+    } catch(e){ S.rkApi = "fallo"; /* el bot puede estar reiniciándose: se reintenta al volver a la pestaña */ }
+    rkBump();
+  })().finally(() => { S.rkP = null; });
+  return S.rkP;
+}
+// Pestañas: las nuevas del ranking (solo en directo) y las listas para proponer del laboratorio vivo
+function rkLvBadges(){
+  const src = S.live ? rkSrc() : null, nn = src ? rkRanked(src).filter(f => f.nueva===true).length : 0;
+  const rb = $("#rkBadge"); rb.hidden = !nn; rb.textContent = nn;
+  const L = S.live ? lvView() : null, nl = L ? objs(L.listas).length : 0;
+  const lb = $("#lvBadge"); lb.hidden = !nl; lb.textContent = nl;
+}
+// Demostración: el ranking de EJEMPLO incrustado (rankingData), con la estrategia del motor simulado como «en marcha».
+function demoRel(d, now){   // tiempos relativos (ms desde ahora y días «0», «-1»…) → ms y AAAA-MM-DD
+  const TS = new Set(["ts", "latido", "arranque", "desde", "hasta", "datos_hasta", "vivo_hasta", "recibida", "creado", "t", "t_fill", "t_entrada", "t_salida", "ext"]);
+  const walk = (v, k) => {
+    if (Array.isArray(v)) return k==="curva" ? v.map(p => Array.isArray(p) && isNum(p[0]) ? [now + p[0], ...p.slice(1)] : p) : v.map(x => walk(x, null));
+    if (isObj(v)) return Object.fromEntries(Object.entries(v).map(([kk, x]) => [kk, walk(x, kk)]));
+    if (TS.has(k) && isNum(v)) return now + v;
+    if (k==="dia" && typeof v==="string" && /^[+-]?\d+$/.test(v)) return madDay(now + Number(v)*864e5);
+    return v; };
+  return d && d.tiempos==="relativos" ? walk(d, null) : d;
+}
+function demoRanking(d){   // d: el bloque ya leído (las pruebas lo pasan); sin él, el incrustado en la página
+  if (d===undefined) try { const b = document.getElementById("rankingData"); d = b ? JSON.parse(b.textContent) : null; } catch(e){ d = null; }
+  if (!isObj(d) || Array.isArray(d)) return;
+  const now = Date.now(), x = demoRel(d, now), pre = motorPreset().preset, live = RK_ID_PRESET[pre] || null;
+  const filas = objs(x.filas).map(f => ({...f, en_marcha:rkId(f)===live,
+    estado:f.estado==="descartada_por_el_usuario" ? f.estado : rkId(f)===live ? "en_paper" : f.estado==="en_paper" ? "backtest" : f.estado}));
+  const em = live ? filas.find(f => rkId(f)===live) || null : null;   // con la forma de bot/ranking (_en_marcha)
+  S.rk = {...x, ts:isNum(x.ts) ? x.ts : now, filas, n_total:filas.length, n_ranking:filas.filter(rkEntra).length,
+    en_marcha:em ? {id:rkId(em), preset:pre, nombre:em.nombre, fuente:"motor", pausada:false, fila:em} : null};
+  S.rkDemo = true; rkBump();
+}
+
+// ---------- Laboratorio vivo (bot/lab_vivo: proceso aparte, docs/07, apartados 13 y 14) ----------
+// El servidor no importa bot.lab_vivo: solo lee sus archivos (GET /api/lab_vivo, …/hipotesis, …/diario, …/cola y
+// …/generador) y publica el resumen «lab_vivo» cuando cambia estado.json. Desde la web solo se puede pausar o reanudar
+// ({type:"lab_vivo", accion}, con el origen estricto); el resultado vuelve en «orden_web». Nada de esto opera: lo que
+// aguanta pasa a una prueba en avance VIRTUAL y a la cartera paper solo si tú lo decides.
+const LV_ESTADO = {activo:["good","Activo"], pausa:["warn","En pausa"], en_espera:["info","En espera"], sin_datos:["warn","Preparando datos"],
+  canario_fallido:["bad","Canario fallido"], error:["bad","Error"], arrancando:["info","Arrancando"], parado:["bad","Parado"], apagado:["muted","Apagado"]};
+const LV_CLASE = {pendiente:"pendiente", duplicada:"duplicada", rechazada:"rechazada", fuera_de_reglas:"fuera de tus reglas",
+  descartada_rapida:"descartada en la rápida", descartada_completa:"descartada en la completa", descartada_robustez:"descartada en robustez",
+  candidata:"candidata", candidata_hermana:"candidata hermana", revocada:"revocada", en_avance:"en avance", descartada_avance:"descartada en avance",
+  lista:"lista para proponer", propuesta:"propuesta", aceptada:"aceptada", descartada_usuario:"descartada por ti", invalidada:"invalidada", error:"error"};
+const lvTono = c => /^(descartada|rechazada|fuera_de_reglas|invalidada|error|revocada|duplicada)/.test(c) ? "bad" : ["lista", "propuesta", "aceptada"].includes(c) ? "good"
+  : ["candidata", "candidata_hermana", "en_avance"].includes(c) ? "info" : "muted";
+const LV_ETAPA = [["recibidas", "Recibidas"], ["admitidas", "Admitidas"], ["pasan_rapida", "Pasan la rápida"], ["pasan_completa", "Pasan la completa"],
+  ["candidatas", "Candidatas"], ["en_avance", "En avance"], ["listas", "Listas"]];
+// Códigos de los criterios v1 (docs/07, apartados 8 y 10), en corto
+const LV_COD = {A1:"formato", A2:"familia", A3:"variantes", A4:"filtros", A5:"tus reglas", A6:"datos", A7:"ya probada", A8:"conformidad", A9:"pocas señales",
+  A10:"lógica", A11:"cupo", R1:"pocas op. dentro", R2:"pierde dentro", K1:"pocas op. fuera", K2:"pierde fuera", K3:"una mitad pierde", K4:"avance trimestral",
+  K5:"frecuencia", B1:"igual que al azar", B2:"sin sus 5 mayores", B3:"sin su mejor semana", B4:"deslizamiento ×2", B5:"entrada 1 min tarde", B6:"estabilidad",
+  B7:"corrección q", B8:"Sharpe deflactado", V1:"sigue candidata", V2:"op. y días en avance", V3:"Holm en avance", V4:"caída en avance", V5:"frecuencia en avance"};
+// Las mismas comprobaciones dichas en positivo, para las del detalle (✓ pasa, ✗ no pasa)
+const LV_CHK = {R1:"≥ 120 op. dentro", R2:"gana dentro", K1:"≥ 100 op. fuera", K2:"gana fuera", K3:"ganan las dos mitades", K4:"avance trimestral",
+  K5:"frecuencia", B1:"mejor que al azar", B2:"gana sin sus 5 mayores", B3:"gana sin su mejor semana", B4:"aguanta deslizamiento ×2", B5:"aguanta entrar 1 min tarde",
+  B6:"estabilidad", B7:"q ≤ 0,10", B8:"Sharpe deflactado ≥ 0,95", V1:"sigue candidata", V2:"≥ 40 op. en ≥ 28 días", V3:"gana en avance (Holm)", V4:"caída < 6 %", V5:"frecuencia en avance"};
+const LV_TIPO = {canario:"canario", admision:"admisión", rapida:"rápida", completa:"completa", robustez:"robustez", avance:"avance",
+  consolidacion:"consolidación", estres:"estrés", referencia:"referencia"};
+const LV_CAN = {ok:["good","Canario: el libro reproduce «6 diarias v2»"], pendiente:["warn","Canario pendiente"], fallido:["bad","Canario fallido: no se mide nada"]};
+const LV_ID = /^h-\d{8}-\d{4}-[a-z0-9_-]{3,60}$/, LV_DIA = /^\d{4}-\d{2}-\d{2}$/, LV_PARADO_MS = 3*60e3;
+const LV_AVISO = "Laboratorio de investigación: nada de esto opera. Lo que aguanta pasa a una prueba en avance VIRTUAL y a la cartera paper solo si tú lo decides.";
+function lvBump(){ S.lvRev++; S.dirty = true; }
+const lvVid = c => rkTxt(c.id, 140);
+const lvHid = id => { const h = String(id || "").split(":")[0]; return LV_ID.test(h) ? h : ""; };
+const lvTitulo = c => rkTxt(c.titulo, 140) || lvVid(c) || "Variante";
+function lvClase(c){ const k = typeof c.clase==="string" ? c.clase : ""; return k ? ` <span class="pill ${lvTono(k)}">${esc(LV_CLASE[k] || k.replace(/_/g, " "))}</span>` : ""; }
+const lvCodOrd = (a, b) => { const o = c => ["A","R","K","B","V"].indexOf(c[0]) * 100 + (parseInt(c.slice(1), 10) || 0); return o(a[0]) - o(b[0]); };
+// Lo que se enseña: GET /api/lab_vivo (estado.json, las 20 mejores y el diario de hoy) y, si el bus trae algo más nuevo,
+// su cabecera (estado, pausa, contadores, embudo y meta) y sus listas, que llegan recortadas a 5.
+function lvView(){
+  const A = isObj(S.lv) && !Array.isArray(S.lv) ? S.lv : null, B = S.live && isObj(S.lvBus) && !Array.isArray(S.lvBus) ? S.lvBus : null;
+  if (!A || !B) return A || B;
+  if (rkTs(B) <= rkTs(A)) return A;
+  const out = {...A};
+  for (const k of ["ts", "estado", "motivo", "latido", "aviso", "proxima_pausa", "contadores", "embudo", "meta", "canario", "pausa_manual"]) if (B[k]!==undefined) out[k] = B[k];
+  out.nota = B.nota; out.estado_corredor = B.estado_corredor;   // la nota de «parado» solo vale la del más nuevo
+  if (isObj(B.recursos)) out.recursos = {...rkO(A.recursos), ...B.recursos};
+  for (const k of ["mejores", "en_avance", "listas"]) if (Array.isArray(B[k]) && (!Array.isArray(A[k]) || B[k].length >= A[k].length)) out[k] = B[k];
+  return out;
+}
+function lvEstado(L, now){   // «parado» si el latido es de hace más de 3 min (lo hace también el servidor)
+  const e = rkTxt(L.estado, 40) || "sin_estado";
+  return e!=="apagado" && e!=="parado" && okT(L.latido) && now - L.latido > LV_PARADO_MS ? "parado" : e;
+}
+// ¿Pausa manual? El bot lo dice en «pausa_manual» (existe el archivo); sin ese campo, el motivo del corredor.
+const lvManual = L => isObj(L) && (typeof L.pausa_manual==="boolean" ? L.pausa_manual : /pausa manual/i.test(String(L.motivo || "")));
+function lvPausaTxt(L, e, now){
+  if (lvManual(L)) return "Pausa manual: la pediste tú. Vuelve a trabajar cuando pulses «Reanudar».";
+  const P = rkO(L.proxima_pausa), nm = rkTxt(P.nombre, 80) || rkTxt(P.ventana, 40) || "una bolsa";
+  if ((e==="pausa" || (okT(P.desde) && now >= P.desde)) && okT(P.hasta) && P.hasta > now) return `Pausa: apertura de ${nm}, vuelve a las ${madHM(P.hasta)} (dentro de ${dur(P.hasta - now)})`;
+  if (okT(P.desde) && P.desde > now) return `Próxima pausa: apertura de ${nm}, de las ${madHM(P.desde)}${okT(P.hasta) ? ` a las ${madHM(P.hasta)}` : ""} (dentro de ${dur(P.desde - now)})`;
+  return "";
+}
+function lvCanario(L){ const c = typeof L.canario==="string" ? L.canario : rkTxt(rkO(rkO(L.codigo).canario).estado, 20); return c ? LV_CAN[c] || ["muted", `Canario: ${c}`] : null; }
+function lvNoData(){
+  if (!S.live) return "Sin datos de muestra.";
+  if (S.lvApi==="sin_ruta") return "El bot en marcha aún no lee el laboratorio vivo (GET /api/lab_vivo no existe: llega al reiniciarlo).";
+  if (S.lvApi==="fallo") return "No se pudo leer GET /api/lab_vivo (el bot quizá se está reiniciando): se reintenta al volver a abrir la pestaña.";
+  return "Cargando el estado del laboratorio…";
+}
+function renderLvHead(L, now){
+  const ctl = $("#lvCtl"), el = $("#lvHead"), av = (isObj(L) && rkTxt(L.aviso, 400)) || LV_AVISO;
+  const aviso = `<p class="lv-virt"><b>Todo es virtual: nada opera.</b> ${esc(av)}</p>`;
+  if (!isObj(L)){ putH(ctl, ""); putH(el, `<p class="note">${esc(lvNoData())}</p>${aviso}`); return; }
+  const e = lvEstado(L, now), [tone, lbl] = LV_ESTADO[e] || ["muted", e.replace(/_/g, " ")];
+  if (e==="apagado"){ putH(ctl, ""); putH(el, `<div class="lv-st"><b class="big muted">Apagado</b><span>${esc(rkTxt(L.nota, 300) || "El laboratorio vivo no está en marcha (scripts/lab-vivo.ps1).")}</span></div>${aviso}`); return; }
+  const man = lvManual(L), pend = S.lvPend;
+  putH(ctl, e==="parado" ? "" : `<button type="button" class="btn${man ? " ok" : ""}" data-lv-acc="${man ? "reanudar" : "pausar"}" title="${man ? "Quita la pausa manual: el laboratorio vuelve a trabajar (sigue parándose en cada apertura)" : "Pausa manual del laboratorio: no empieza nada nuevo hasta que lo reanudes. No toca el paper ni tus reglas."}">${man ? "Reanudar" : "Pausar"}</button>`);
+  const cd = e==="parado" ? "" : lvPausaTxt(L, e, now), mot = rkTxt(L.motivo, 300), Rc = rkO(L.recursos), D = rkO(L.datos), per = rkO(D.periodo), C = rkO(rkO(L.contadores).hipotesis), can = lvCanario(L);
+  const proc = isNum(Rc.procesos) ? `${nf(Rc.procesos,0)}${isNum(Rc.procesos_max) ? ` de ${nf(Rc.procesos_max,0)}` : ""}${rkTxt(Rc.prioridad, 40) ? ` · ${rkTxt(Rc.prioridad, 40)}` : ""}` : "–";
+  const mem = [isNum(Rc.memoria_usada_mb) ? `usa ${nf(Rc.memoria_usada_mb,0)} MB` : "", isNum(Rc.memoria_limite_mb) ? `tope ${nf(Rc.memoria_limite_mb,0)} MB por tarea` : "",
+    isNum(Rc.memoria_libre_mb) ? `libres en el PC ${nf(Rc.memoria_libre_mb,0)} MB` : ""].filter(Boolean).join(" · ") || "–";
+  const datos = [rkTxt(D.epoca, 20) ? `época ${rkTxt(D.epoca, 20)}` : "", rkTxt(per.desde, 12) && rkTxt(per.hasta, 12) ? `velas del ${rkFecha(per.desde)} al ${rkFecha(per.hasta)}` : "",
+    rkTxt(per.corte, 12) ? `corte el ${rkFecha(per.corte)}` : "", D.atrasados===true ? "datos atrasados" : ""].filter(Boolean).join(" · ") || "–";
+  const lim = {memoria:"memoria", cpu:"CPU del PC", pausa:"pausa de apertura"}[Rc.limitado_por] || rkTxt(Rc.limitado_por, 30);
+  putH(el, `<div class="lv-st"><b class="big ${tone}">${esc(lbl)}</b>${cd ? `<span class="lv-cd">${esc(cd)}</span>` : ""}${can ? ` <span class="pill ${can[0]}">${esc(can[1])}</span>` : ""}</div>
+    ${mot && !(e==="pausa" && cd) && !(man && /pausa manual/i.test(mot)) && e!=="parado" ? `<p class="note">${esc(mot)}</p>` : ""}
+    ${e==="parado" ? `<p class="note neg">${esc(rkTxt(L.nota, 400) || `Sin latido desde hace más de 3 minutos${okT(L.latido) ? ` (el último, el ${vigTime(L.latido)})` : ""}: el proceso del laboratorio no responde y scripts/lab-vivo.ps1 lo vuelve a arrancar. Lo de abajo es lo último que hubo.`)}${rkTxt(L.estado_corredor, 40) ? ` Lo último que dijo: «${esc((LV_ESTADO[L.estado_corredor] || [, rkTxt(L.estado_corredor, 40)])[1])}».` : ""}</p>` : ""}
+    ${pend ? `<p class="note">Orden «${esc(pend.accion)}» enviada: pendiente de que el bot la confirme.</p>` : ""}
+    ${kv([["Procesos", esc(proc)], ["Memoria", esc(mem)], ["CPU del PC", isNum(Rc.cpu_pc_pct) ? pctp(Rc.cpu_pc_pct, 0) : "–"], ["Frenado por", esc(lim || "nada")],
+      ["Hipótesis hoy", isNum(C.hoy) ? `${nf(C.hoy,0)}${isNum(C.cupo_hoy) ? ` (cupo ${nf(C.cupo_hoy,0)})` : ""}` : "–"], ["Datos", esc(datos)],
+      ["Último latido", esc(okT(L.latido) ? vigTime(L.latido) : "–")]])}
+    ${aviso}`);
+}
+function lvMejores(L, now){
+  const fu = objs(L.mejores).map(c => ({c, R:rkN(rkO(c.cuenta).R_dia)})).filter(x => isNum(x.R)).sort((a, b) => b.R - a.R)[0] || null;
+  const av = objs(L.en_avance).map(c => { const A = rkO(c.avance), d = okT(A.desde) ? Math.max(1, Math.floor((now - A.desde)/864e5)) : null;
+    return {c, R:isNum(A.R_medio) && isNum(A.completas) && d ? A.R_medio*A.completas/d : null}; }).filter(x => isNum(x.R)).sort((a, b) => b.R - a.R)[0] || null;
+  return {fu, av};
+}
+function renderLvMeta(L, now){
+  const el = $("#lvMeta");
+  if (!isObj(L) || L.estado==="apagado"){ putH(el, `<p class="note">${esc(isObj(L) ? "El laboratorio vivo no está en marcha." : lvNoData())}</p><p class="note">Meta: 2 R al día = 1 % de la cuenta, con 0,5 % de riesgo por operación (no se sube).</p>`); return; }
+  const M = rkO(L.meta), obj = isNum(M.objetivo_R_dia) && M.objetivo_R_dia > 0 ? M.objetivo_R_dia : 2, rp = isNum(M.riesgo_pct) && M.riesgo_pct > 0 ? M.riesgo_pct : 0.5;
+  const {fu, av} = lvMejores(L, now), mj = isObj(M.mejor) ? M.mejor : null;
+  const fuR = fu ? fu.R : mj && mj.tramo==="fuera" ? rkN(mj.R_dia) : null, avR = av ? av.R : mj && mj.tramo==="avance" ? rkN(mj.R_dia) : null;
+  const fila = (lbl, R, quien, cls="") => { const w = isNum(R) ? Math.max(0, Math.min(1, R/obj))*100 : 0;
+    return `<div class="lv-mrow ${cls}"><span>${esc(lbl)}</span><div class="lv-mtr" title="${esc(quien)}"><span style="width:${w.toFixed(1)}%"></span></div><b class="${cls ? "" : rkCls(R)}">${isNum(R) ? esc(`${cls ? nf(R,2) : sgn(R,2)} R/día`) : "–"}</b></div>`; };
+  const quien = x => x ? `${lvTitulo(x.c)}${typeof x.c.clase==="string" ? ` (${LV_CLASE[x.c.clase] || x.c.clase.replace(/_/g, " ")})` : ""}` : "";
+  const best = [fuR, avR].filter(isNum).sort((a, b) => b - a)[0];
+  const falta = rkTxt(M.texto, 500) || (isNum(best) ? (best >= obj ? `Llega a la meta: ${sgn(best,2)} R al día. Ojo: la mejor de muchas siempre parece mejor de lo que es; lo dice la prueba en avance.`
+    : `Le faltan ${nf(obj - best, 2)} R al día (${nf((obj - best)*rp, 2)} % de la cuenta con ${nf(rp,1)} % de riesgo). El riesgo no se sube.`)
+    : `Sin datos todavía. La meta es ${nf(obj*rp, 0)} % al día: ${nf(obj, 0)} R al día con ${nf(rp,1)} % de riesgo.`);
+  const who = [fu ? `Fuera de muestra: ${quien(fu)}` : "", av ? `En avance: ${quien(av)}` : ""].filter(Boolean).join(" · ");
+  putH(el, `${fila("Mejor fuera de muestra", fuR, quien(fu))}${fila("Mejor en avance", avR, quien(av))}${fila("Meta", obj, "La meta del 1 % diario", "goal")}
+    <p class="lv-falta">${esc(falta)}</p>${who ? `<p class="note">${esc(who)}</p>` : ""}
+    <p class="note">Con 0,5 % de riesgo por operación (no se sube): ${esc(nf(obj,0))} R al día son el ${esc(nf(obj*rp,0))} % de la cuenta. Es una meta que se informa, nunca un filtro: la mejor de muchas siempre parece mejor de lo que es.</p>`);
+}
+function lvDiaHoy(L){ return isObj(L) && isObj(L.diario) && !Array.isArray(L.diario) ? L.diario : {}; }
+function renderLvFunnel(L){
+  const el = $("#lvFunnel");
+  if (!isObj(L) || L.estado==="apagado"){ putH(el, `<p class="note">${esc(isObj(L) ? "El laboratorio vivo no está en marcha." : lvNoData())}</p>`); return; }
+  const E = new Map(objs(L.embudo).filter(s => typeof s.etapa==="string").map(s => [s.etapa, rkN(s.n)]));
+  const D = lvDiaHoy(L), DH = rkO(D.hipotesis), DV = rkO(D.variantes), C = rkO(L.contadores), CH = rkO(C.hipotesis), N = rkO(C.n), Co = rkO(L.consolidacion);
+  const len = a => Array.isArray(a) ? a.length : null;
+  const hoy = {recibidas:[rkN(DH.recibidas) ?? rkN(CH.hoy), ""], admitidas:[rkN(DH.admitidas), ""], pasan_rapida:[rkN(DV.rapida), " medidas"],
+    pasan_completa:[rkN(DV.completa), " medidas"], candidatas:[len(D.candidatas_nuevas), " nuevas"], en_avance:[null, ""], listas:[len(D.listas_nuevas), " nuevas"]};
+  const mx = Math.max(1, ...[...E.values()].filter(isNum));
+  const st = LV_ETAPA.map(([k, lbl]) => { const n = E.has(k) ? E.get(k) : null, [h, suf] = hoy[k];
+    return `<div><small title="${esc(lbl)}">${esc(lbl)}</small><b>${isNum(n) ? nf(n,0) : "–"}</b><i><span style="width:${isNum(n) ? (n/mx*100).toFixed(1) : 0}%"></span></i><em>${isNum(h) ? esc(`hoy ${nf(h,0)}${suf}`) : "&nbsp;"}</em></div>`; }).join("");
+  const n1 = [isNum(N.total) ? `${nf(N.total,0)} variantes medidas en el laboratorio vivo (cada una cuenta una vez)` : "", isNum(N.fuera) ? `${nf(N.fuera,0)} con fuera de muestra` : "",
+    isNum(N.efectivo) ? `${nf(N.efectivo,1)} efectivas` : ""].filter(Boolean).join(", ");
+  const n2 = isNum(N.previo) ? `más ${nf(N.previo,0)} pruebas previas sobre la misma historia${isNum(N.dsr) ? ` (N para el Sharpe deflactado ≈ ${nf(N.dsr,0)})` : ""}` : "";
+  const z = rkN(Co.umbral_dsr_z), ut = rkTxt(rkO(L.umbral).texto, 240);
+  const liston = ut ? `Listón actual: ${ut}.` : isNum(z) && z > 0 ? `Listón actual: hace falta un Sharpe diario ≈ ${nf(z/Math.sqrt(440), 2)} fuera de muestra (z ≈ ${nf(z, 2)} con todo lo probado).`
+    : "Listón actual: sin consolidación todavía (se recalcula cada noche con todo lo probado).";
+  putH(el, `<div class="lv-fun">${st}</div><div class="lv-n">${n1 || n2 ? `<span><b>Pruebas acumuladas:</b> ${esc([n1, n2].filter(Boolean).join("; "))}. No se pueden «limpiar»: todo lo medido cuenta.</span>` : ""}<span>${esc(liston)}</span></div>`);
+}
+function renderLvBest(L){
+  const el = $("#lvBest"), cs = objs(isObj(L) ? L.mejores : null);
+  if (!cs.length){ putH(el, `<p class="note lv-pad">${esc(!isObj(L) ? lvNoData() : L.estado==="apagado" ? "El laboratorio vivo no está en marcha." : "Aún no hay variantes con fuera de muestra: primero tienen que pasar la etapa rápida (solo dentro de muestra) y después se miden en todo el periodo.")}</p>`); return; }
+  putH(el, `<table><thead><tr><th>Variante</th><th>Familia</th><th>Clase</th><th class="r">Op./día</th><th class="r">R fuera (IC 95 %)</th><th class="r">R/día</th><th class="r">% cuenta/día</th><th>Le falta</th><th>Motivo si no pasa</th></tr></thead><tbody>${cs.map(c => {
+    const id = lvVid(c), fu = rkO(c.fuera), cu = rkO(c.cuenta), me = rkO(c.meta), ic = ic2(fu.ic95, v => sgn(v,2)), sel = !!id && S.lvSel===id;
+    const mot = rkTxt(c.no_ha_pasado, 240) || (Array.isArray(c.motivos) ? rkTxt(c.motivos.find(m => typeof m==="string"), 240) : "");
+    const falta = isNum(me.falta_R_dia) ? (me.falta_R_dia > 0 ? `${nf(me.falta_R_dia,2)} R/día` : "llega a la meta") : "–";
+    return `<tr data-lv-sel="${esc(id)}" class="${sel ? "sel" : ""}"><td class="wrapc"><button type="button" class="rk-nm" data-lv-sel="${esc(id)}" aria-expanded="${sel}"><b>${esc(lvTitulo(c))}</b></button><span class="rk-sub mono">${esc(id)}</span></td>
+      <td>${esc(rkTxt(c.familia, 60) || "–")}</td><td>${lvClase(c) || "–"}${c.cumple_reglas===false || c.fuera_de_reglas===true ? ' <span class="rkc bad">fuera de tus reglas</span>' : ""}</td>
+      <td class="r">${isNum(c.op_dia) ? nf(c.op_dia,2) : "–"}</td>
+      <td class="r"><span class="${rkCls(fu.R)}">${rT(fu.R)}</span>${ic ? `<span class="rk-sub">${esc(ic)}</span>` : ""}${isNum(fu.n) ? `<span class="rk-sub">${nf(fu.n,0)} op.</span>` : ""}</td>
+      <td class="r ${rkCls(cu.R_dia)}">${rT(cu.R_dia)}</td><td class="r ${rkCls(cu.pct_dia)}">${rkPct(cu.pct_dia)}</td>
+      <td class="wrapc"${rkTxt(me.texto, 300) ? ` title="${esc(rkTxt(me.texto, 300))}"` : ""}>${esc(falta)}</td>
+      <td class="wrapc">${mot ? `<span class="neg">${esc(mot)}</span>` : '<span class="note">–</span>'}</td></tr>`; }).join("")}</tbody></table>`);
+}
+function lvAcum(ops){   // operaciones del detalle → R acumulado por fecha
+  const xs = ops.map(o => [[o.t, o.t_fill, o.t_entrada, o.ext].find(okT), [o.R_f, o.R].find(isNum)]).filter(p => okT(p[0]) && isNum(p[1])).sort((a, b) => a[0] - b[0]);
+  let acc = 0; return xs.map(p => [p[0], +(acc += p[1]).toFixed(4)]);
+}
+const lvCurva = c => Array.isArray(c) ? c.filter(p => Array.isArray(p) && okT(p[0]) && isNum(p[1])).map(p => [p[0], p[1]]) : [];
+// Curva de R de una variante: fuera de muestra (las últimas operaciones del backtest, línea) y en avance (virtual,
+// discontinua y a continuación de la anterior), con una marca donde empieza el avance.
+function lvCurveSvg(fu, av, nota){
+  const base = fu.length ? fu[fu.length - 1][1] : 0, B = av.map(p => [p[0], base + p[1]]), all = fu.concat(B);
+  if (all.length < 2) return `<p class="note">${esc(nota || "Sin curva todavía: llega con el detalle de la hipótesis (las 200 últimas operaciones fuera de muestra y todas las de avance).")}</p>`;
+  const W = 640, H = 170, L = 52, Rm = 10, T = 10, Bt = 22, xs = all.map(p => p[0]), ys = all.map(p => p[1]).concat([0]);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const X = t => L + (x1 > x0 ? (t - x0)/(x1 - x0) : 0.5)*(W - L - Rm), Y = v => T + (y1 > y0 ? (y1 - v)/(y1 - y0) : 0.5)*(H - T - Bt);
+  const path = s => s.map((p, i) => `${i ? "L" : "M"}${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join(" ");
+  const B2 = fu.length && B.length ? [fu[fu.length - 1], ...B] : B;
+  const yl = v => `<text x="${L - 6}" y="${(Y(v) + 4).toFixed(1)}" text-anchor="end" font-size="11" fill="var(--muted)">${esc(sgn(v,1))} R</text>`;
+  const mk = B.length ? `<line x1="${X(B[0][0]).toFixed(1)}" x2="${X(B[0][0]).toFixed(1)}" y1="${T}" y2="${H - Bt}" stroke="var(--good)" stroke-dasharray="2 3"/>` : "";
+  return `<div class="evo-curve"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="R acumulado fuera de muestra y en avance">
+    <line x1="${L}" x2="${W - Rm}" y1="${Y(0).toFixed(1)}" y2="${Y(0).toFixed(1)}" stroke="var(--line-2)" stroke-width="1"/>
+    ${fu.length > 1 ? `<path d="${path(fu)}" fill="none" stroke="var(--accent)" stroke-width="2"/>` : ""}${B2.length > 1 ? `<path d="${path(B2)}" fill="none" stroke="var(--good)" stroke-width="2" stroke-dasharray="5 4"/>` : ""}
+    ${mk}${[...new Set([y1, 0, y0])].map(yl).join("")}
+    <text x="${L}" y="${H - 5}" font-size="11" fill="var(--muted)">${esc(rkFecha(x0))}</text><text x="${W - Rm}" y="${H - 5}" font-size="11" text-anchor="end" fill="var(--muted)">${esc(rkFecha(x1))}</text></svg>
+    <div class="lg2"><span><i style="--c:var(--accent)"></i>Fuera de muestra (backtest, ${esc(nf(fu.length,0))} op.)</span><span><i class="dash" style="--c:var(--good)"></i>En avance (virtual, ${esc(nf(av.length,0))} puntos)</span></div></div>`;
+}
+function lvSpark(P){
+  const xs = P.map(p => p[0]), ys = P.map(p => p[1]).concat([0]), x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const X = t => 2 + (x1 > x0 ? (t - x0)/(x1 - x0) : 0.5)*236, Y = v => 2 + (y1 > y0 ? (y1 - v)/(y1 - y0) : 0.5)*32, last = P[P.length - 1][1];
+  return `<svg viewBox="0 0 240 36" preserveAspectRatio="none" role="img" aria-label="R acumulado en avance"><line x1="0" x2="240" y1="${Y(0).toFixed(1)}" y2="${Y(0).toFixed(1)}" stroke="var(--line-2)"/><path d="${P.map((p, i) => `${i ? "L" : "M"}${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join(" ")}" fill="none" stroke="${last >= 0 ? "var(--good)" : "var(--bad)"}" stroke-width="1.6"/></svg>`;
+}
+function lvDetKv(T){
+  const de = rkO(T.dentro), fu = rkO(T.fuera), at = rkO(T.avance_trimestral), rb = rkO(T.robustez), cu = rkO(T.cuenta), av = rkO(T.avance);
+  const ic = x => ic2(x.ic95, v => sgn(v,2)), j = a => esc(a.filter(Boolean).join(" · ")) || "–";
+  const out = [["Dentro de muestra", j([isNum(de.n) ? `${nf(de.n,0)} op.` : "", isNum(de.R) ? rT(de.R) : "", ic(de) ? `IC ${ic(de)}` : ""])],
+    ["Fuera de muestra", j([isNum(fu.n) ? `${nf(fu.n,0)} op.` : "", isNum(fu.R) ? rT(fu.R) : "", ic(fu) ? `IC ${ic(fu)}` : ""])],
+    ["p · q · DSR", j([isNum(fu.p) ? `p ${rkP(fu.p)}` : "", isNum(fu.q) ? `q ${rkP(fu.q)}` : "", isNum(fu.dsr) ? `DSR ${nf(fu.dsr,2)}` : ""])],
+    ["Mitades del fuera", Array.isArray(fu.mitades) && fu.mitades.some(isNum) ? esc(fu.mitades.filter(isNum).map(v => `${sgn(v,2)} R`).join(" / ")) : "–"],
+    ["Avance trimestral", j([isNum(at.R) ? rT(at.R) : "", rkTxt(at.positivos, 20) ? `${rkTxt(at.positivos, 20)} trimestres positivos` : ""])],
+    ["Base al azar (p)", rkP(rb.base_p)], ["Sin sus 5 mayores", rT(rb.sin_5_mayores)], ["Sin su mejor semana", rT(rb.sin_mejor_semana)],
+    ["Deslizamiento ×2", rT(rb.desliz_x2)], ["Entrada 1 min tarde", rT(rb.entrada_1_min)], ["Estabilidad", esc(rkTxt(rb.estabilidad, 20) || "–")],
+    ["Sin X-Perps", rT(rb.sin_xperps)], ["Solo largos", rT(rb.solo_largos)], ["R al día", rT(cu.R_dia)], ["% de la cuenta al día", esc(rkPct(cu.pct_dia))],
+    ["% al día compuesto", esc(rkPct(cu.pct_dia_compuesto))], ["Caída máxima", isNum(cu.caida_max_pct) ? pctp(cu.caida_max_pct,1) : "–"]];
+  if (Object.keys(av).length) out.push(["En avance", j([isNum(av.completas) ? `${nf(av.completas,0)} completas` : "", isNum(av.abiertas) ? `${nf(av.abiertas,0)} abiertas` : "",
+    isNum(av.R_medio) ? `R medio ${rT(av.R_medio)}` : "", isNum(av.p_holm) ? `p de Holm ${rkP(av.p_holm)}` : ""])], ["Le falta en avance", esc(rkTxt(av.faltan, 80) || "–")]);
+  return out;
+}
+function renderLvDet(L){
+  const el = $("#lvDet"), id = S.lvSel;
+  if (!id){ el.hidden = true; putH(el, ""); return; }
+  el.hidden = false;
+  const hid = lvHid(id), C = isObj(L) ? objs(L.mejores).concat(objs(L.en_avance), objs(L.listas)).find(c => lvVid(c)===id) || null : null;
+  const D = hid ? S.lvDet[hid] : null, det = D && isObj(D.data) && !Array.isArray(D.data) ? D.data : null;
+  const V = det ? objs(det.variantes).find(v => v.id===id) || null : null, T = V && isObj(V.tarjeta) && !Array.isArray(V.tarjeta) ? {...(C || {}), ...V.tarjeta} : C;
+  if (!T){ putH(el, `<p class="note">${esc(D && D.cargando ? "Cargando el detalle de la hipótesis…" : "Sin datos de esta variante.")}</p>`); return; }
+  const ops = V ? rkO(V.operaciones) : {}, fu = lvAcum(objs(ops.fuera)), av = lvCurva(rkO(T.avance).curva);
+  const nota = !hid ? "Sin curva: el id de la hipótesis no es válido." : D && D.cargando ? "Cargando las operaciones de la hipótesis…"
+    : S.live && D && D.err ? (D.st===404 ? "El laboratorio aún no ha escrito el detalle de esta hipótesis (404)." : "No se pudo leer el detalle de la hipótesis.") : "";
+  const chk = Object.entries(rkO(T.checks)).filter(([k, v]) => typeof v==="boolean" && /^[ARKBV]\d+$/.test(k)).sort(lvCodOrd);
+  const mot = (Array.isArray(T.motivos) ? T.motivos : []).filter(m => typeof m==="string").slice(0, 8);
+  putH(el, `<div class="lv-det-h"><b>${esc(lvTitulo(T))}</b>${lvClase(T)}<span class="mono note">${esc(id)}</span><button type="button" class="chip" data-lv-sel="${esc(id)}">Cerrar</button></div>
+    ${rkTxt(T.regla, 1200) ? `<p class="note"><b>Regla:</b> ${esc(rkTxt(T.regla, 1200))}</p>` : ""}
+    ${lvCurveSvg(fu, av, nota)}
+    ${chk.length ? `<div class="lv-chk">${chk.map(([k, ok]) => rkChip(ok ? "good" : "bad", `${ok ? "✓" : "✗"} ${k}${LV_CHK[k] ? " · " + LV_CHK[k] : ""}`, ok ? "Pasa" : "No pasa")).join("")}</div>`
+      : `<p class="note">Sin comprobaciones todavía${V ? "" : " (llegan con el detalle de la hipótesis)"}.</p>`}
+    ${kv(lvDetKv(T))}${mot.length ? `<ul class="lv-dl">${mot.map(m => `<li class="neg">${esc(short(m, 300))}</li>`).join("")}</ul>` : ""}`);
+}
+function renderLvAvance(L, now){
+  const el = $("#lvAvance"), cs = objs(isObj(L) ? L.en_avance : null);
+  if (!cs.length){ putH(el, `<p class="note">${esc(!isObj(L) ? lvNoData() : "Ninguna variante en prueba en avance todavía. Entra la que pase todas las etapas (admisión, rápida, completa y robustez); se mide con operaciones virtuales sobre los datos que van llegando.")}</p>`); return; }
+  putH(el, `<div class="lv-cards">${cs.map(c => { const A = rkO(c.avance), id = lvVid(c), hid = lvHid(id), dias = okT(A.desde) ? Math.max(0, Math.floor((now - A.desde)/864e5)) : null;
+    const D = hid ? S.lvDet[hid] : null, V = D && isObj(D.data) ? objs(D.data.variantes).find(v => v.id===id) : null;
+    const cur = lvCurva(A.curva).length > 1 ? lvCurva(A.curva) : V ? lvCurva(rkO(rkO(V.tarjeta).avance).curva) : [];
+    const g = [["Días", isNum(dias) ? nf(dias,0) : "–"], ["Completas", isNum(A.completas) ? nf(A.completas,0) : "–"], ["Abiertas", isNum(A.abiertas) ? nf(A.abiertas,0) : "–"],
+      ["R medio", rT(A.R_medio)], ["p de Holm", rkP(A.p_holm)], ["Caída máx.", isNum(A.caida_max_pct) ? pctp(A.caida_max_pct,1) : "–"]];
+    return `<button type="button" class="lv-card" data-lv-sel="${esc(id)}" aria-pressed="${!!id && S.lvSel===id}"><span class="t">${esc(lvTitulo(c))}${lvClase(c)}</span>
+      <span class="g">${g.map(([k, v]) => `<span><small>${esc(k)}</small><b>${esc(v)}</b></span>`).join("")}</span>
+      <span class="note">Le falta: ${esc(rkTxt(A.faltan, 80) || "–")}</span>${cur.length > 1 ? lvSpark(cur) : '<span class="note">Sin curva todavía.</span>'}</button>`; }).join("")}</div>`);
+}
+const lvStrs = (a, n) => (Array.isArray(a) ? a : []).filter(s => typeof s==="string" && s.trim()).slice(0, n);
+function lvDiaHtml(x, now){
+  const d = rkO(x.d), H = rkO(d.hipotesis), V = rkO(d.variantes), c = [];
+  if (isNum(H.recibidas)) c.push(`${nf(H.recibidas,0)} hipótesis recibidas${isNum(H.admitidas) ? `, ${nf(H.admitidas,0)} admitidas` : ""}`);
+  if ([V.rapida, V.completa, V.robustez].some(isNum)) c.push(`${nf(rkN(V.rapida) || 0,0)} variantes en la rápida, ${nf(rkN(V.completa) || 0,0)} en la completa y ${nf(rkN(V.robustez) || 0,0)} en robustez`);
+  for (const [k, t] of [["candidatas_nuevas", "candidatas nuevas"], ["revocadas", "revocadas"], ["listas_nuevas", "listas nuevas"]]) if (Array.isArray(d[k]) && d[k].length) c.push(`${nf(d[k].length,0)} ${t}`);
+  if (Array.isArray(d.pausas) && d.pausas.length) c.push(`${nf(d.pausas.length,0)} ${d.pausas.length===1 ? "pausa" : "pausas"} por aperturas`);
+  if (isNum(d.cpu_horas)) c.push(`${nf(d.cpu_horas,1)} h de CPU`);
+  if (isNum(d.errores) && d.errores) c.push(`${nf(d.errores,0)} ${d.errores===1 ? "error" : "errores"}`);
+  const rech = objs(H.rechazadas).slice(0, 4).map(r => [rkTxt(r.id, 80), lvStrs(r.motivos, 2).join("; ")].filter(Boolean).join(": ")).filter(Boolean);
+  const hoy = madDay(now), ayer = madDay(now - 864e5), lbl = x.dia===hoy ? "Hoy" : x.dia===ayer ? "Ayer" : rkFecha(x.dia);
+  // el diario de cada día empieza por «Hoy: …»: en los anteriores sobra
+  const txt = lvStrs(d.texto, 8).map((s, i) => !i && x.dia!==hoy ? s.replace(/^Hoy:\s*/, "").replace(/^./, ch => ch.toUpperCase()) : s);
+  const lec = lvStrs(d.lecciones, 6), gen = lvStrs(d.generador, 6), lin = lvStrs(x.lineas, 40).slice(-10);
+  if (!c.length && !txt.length && !lec.length && !gen.length && !lin.length && !rech.length) return "";
+  const ul = (a, cls="") => a.length ? `<ul class="lv-dl">${a.map(s => `<li${cls ? ` class="${cls}"` : ""}>${esc(short(s, 400))}</li>`).join("")}</ul>` : "";
+  return `<li><time>${esc(lbl)}</time><div class="tl-b">${txt.length ? `<b>${esc(short(txt[0], 300))}</b>` : ""}${c.length ? `<span class="tl-c">${esc(c.join(" · "))}</span>` : ""}
+    ${ul(txt.slice(1))}${lec.length ? `<span class="note">Lecciones:</span>${ul(lec)}` : ""}${gen.length ? `<span class="note">Generador:</span>${ul(gen)}` : ""}
+    ${rech.length ? `<span class="note">Rechazadas:</span>${ul(rech, "neg")}` : ""}${lin.length ? `<span class="note">Notas del corredor:</span>${ul(lin)}` : ""}</div><span></span></li>`;
+}
+function lvGenHtml(){
+  const G = objs(S.lvGen).slice(0, 6);
+  if (!G.length) return "";
+  return `<h4 class="lv-h">Notas del agente generador</h4><ul class="lv-q">${G.map(g => { const t = [g.ts, g.t].find(okT), arch = rkTxt(g.archivo || g.id || g.nombre, 40);
+    const am = /^(\d{4})-(\d{2})-(\d{2})-(\d{2})(\d{2})/.exec(arch), cu = t ? vigTime(t) : am ? `${am[3]}/${am[2]} ${am[4]}:${am[5]}` : arch || "–";   // generador\AAAA-MM-DD-HHMM.json
+    const n = [g.propuestas, g.hipotesis].find(Array.isArray), txt = rkTxt(g.resumen || g.texto || g.nota, 300) || (n ? `${nf(n.length,0)} hipótesis` : "") || "sin resumen";
+    return `<li><span class="mono">${esc(cu)}</span><span class="tx" title="${esc(txt)}">${esc(txt)}</span><b></b></li>`; }).join("")}</ul>`;
+}
+function renderLvDiario(L){
+  const el = $("#lvDiario"), now = Date.now();
+  if (!isObj(L)){ putH(el, `<p class="note">${esc(lvNoData())}</p>`); return; }
+  const D0 = isObj(L.diario) && !Array.isArray(L.diario) ? L.diario : null, DH = rkO(L.diario_hoy);
+  const d0 = D0 && LV_DIA.test(String(D0.dia)) ? D0.dia : LV_DIA.test(String(DH.dia)) ? DH.dia : madDay(now);
+  const dias = [{dia:d0, d:D0, lineas:DH.lineas}];
+  for (const [k, v] of Object.entries(rkO(S.lvDiarios)).sort((a, b) => b[0].localeCompare(a[0]))) if (k!==d0 && LV_DIA.test(k) && isObj(v)) dias.push({dia:k, d:v, lineas:[]});
+  const items = dias.map(x => lvDiaHtml(x, now)).filter(Boolean);
+  putH(el, (items.length ? `<ul class="tl">${items.join("")}</ul>` : `<p class="note">Aún no hay nada en el diario.</p>`) + lvGenHtml());
+}
+function renderLvCola(L){
+  const el = $("#lvCola");
+  if (!isObj(L)){ putH(el, `<p class="note">${esc(lvNoData())}</p>`); return; }
+  const C = isObj(S.lvCola) && !Array.isArray(S.lvCola) ? S.lvCola : rkO(L.cola), cur = objs(Array.isArray(L.en_curso) && L.en_curso.length ? L.en_curso : C.en_curso);
+  const tipo = t => LV_TIPO[t] || rkTxt(t, 30) || "–", obj = o => rkTxt(o.objetivo || o.hipotesis || o.trabajo, 120);
+  const pt = Object.entries(rkO(C.por_tipo)).filter(([, n]) => isNum(n) && n > 0).sort((a, b) => b[1] - a[1]);
+  const sig = objs(C.siguientes).slice(0, 8), fall = objs(C.fallidos_24h).slice(0, 5);
+  const desc = Object.entries(rkO(rkO(L.contadores).descartes_por_motivo)).filter(([, n]) => isNum(n) && n > 0).sort((a, b) => b[1] - a[1]).slice(0, 8), mx = desc.length ? desc[0][1] : 1;
+  putH(el, `<h4 class="lv-h">En curso</h4>${cur.length ? `<ul class="lv-q">${cur.map(x => `<li><span class="mono">${esc(tipo(x.tipo))}</span><span class="tx">${esc([obj(x), rkTxt(x.paso, 20)].filter(Boolean).join(" · ") || "–")}</span><b class="mono">${isNum(x.progreso) ? esc(pctp(Math.max(0, Math.min(1, x.progreso))*100, 0)) : ""}</b></li>`).join("")}</ul>`
+      : `<p class="note">Nada en curso${lvEstado(L, Date.now())==="pausa" ? " (en pausa por la apertura)" : ""}.</p>`}
+    <h4 class="lv-h">Pendientes</h4><p class="note">${esc(isNum(C.pendientes) ? `${nf(C.pendientes,0)} ${C.pendientes===1 ? "trabajo" : "trabajos"}${pt.length ? `: ${pt.map(([k, n]) => `${nf(n,0)} de ${tipo(k)}`).join(", ")}` : ""}` : "–")}</p>
+    ${sig.length ? `<ul class="lv-q">${sig.map(x => `<li><span class="mono">${esc(tipo(x.tipo))}</span><span class="tx" title="${esc(obj(x))}">${esc(obj(x) || "–")}</span><b class="mono">${isNum(x.prioridad) ? esc(`prioridad ${nf(x.prioridad,0)}`) : ""}</b></li>`).join("")}</ul>` : ""}
+    ${fall.length ? `<h4 class="lv-h">Fallidos en las últimas 24 h</h4><ul class="lv-q">${fall.map(x => `<li><span class="mono">${esc(tipo(x.tipo))}</span><span class="tx neg" title="${esc(rkTxt(x.error, 300))}">${esc([obj(x), rkTxt(x.error, 160)].filter(Boolean).join(": ") || "–")}</span><b class="mono">${isNum(x.intentos) ? esc(`${nf(x.intentos,0)} intentos`) : ""}</b></li>`).join("")}</ul>` : ""}
+    <h4 class="lv-h">Qué falla más</h4>${desc.length ? `<div class="bars">${desc.map(([k, n]) => `<div class="barrow"><span title="${esc(k)}">${esc(LV_COD[k] ? `${k} · ${LV_COD[k]}` : k)}</span><div class="track"><span style="width:${(n/mx*100).toFixed(1)}%;--c:var(--bad)"></span></div><span class="v">${esc(nf(n,0))}</span></div>`).join("")}</div>`
+      : `<p class="note">Aún no hay descartes.</p>`}`);
+}
+function renderLab(force){
+  const now = Date.now(), sig = [S.lvRev, S.lvSel, Math.floor(now/1000), S.live].join("|");
+  if (!force && sig===S.lvSig) return;
+  S.lvSig = sig;
+  const L = lvView(), demo = !S.live, dn = $("#lvDemoNote");
+  $("#v-lab").classList.toggle("demo", demo); dn.hidden = !demo;
+  putH(dn, demo ? `<b>DEMOSTRACIÓN: datos de muestra del laboratorio vivo.</b><span>Así se verá esta pestaña con el bot y el laboratorio en marcha (scripts/lab-vivo.ps1). Hipótesis, variantes, cifras y curvas son inventadas para enseñar cómo funciona; los botones no envían nada. Todo es virtual: nada opera.</span>` : "");
+  safe(() => renderLvHead(L, now)); safe(() => renderLvMeta(L, now)); safe(() => renderLvFunnel(L)); safe(() => renderLvBest(L)); safe(() => renderLvDet(L));
+  safe(() => renderLvAvance(L, now)); safe(() => renderLvDiario(L)); safe(() => renderLvCola(L));
+}
+// Mensaje del bus (un resumen cuando cambia estado.json; sin archivo, {estado:"apagado"} una vez)
+function onLabVivo(m){
+  if (!isObj(m) || Array.isArray(m)) return;
+  if (isObj(S.lvBus) && isNum(S.lvBus.ts) && isNum(m.ts) && m.ts < S.lvBus.ts) return;
+  S.lvBus = m;
+  if (S.live && S.tab==="lab" && S.lvApi!=="sin_ruta" && (!isNum(m.ts) || rkTs(m) > rkTs(S.lv))) loadLab("main");
+  lvBump();
+}
+// GET /api/lab_vivo y sus subrutas (solo lectura). Cada una por su lado: si falla, se queda lo que había. Una sola
+// carga de cada tipo a la vez: quien llegue mientras tanto espera la misma.
+const lvLoading = {}, lvLoadP = {};
+function loadLab(which){
+  if (!S.live) return Promise.resolve();
+  const k = which || "todo";
+  if (!lvLoadP[k]) lvLoadP[k] = loadLabUna(which).finally(() => { delete lvLoadP[k]; });
+  return lvLoadP[k];
+}
+async function loadLabUna(which){
+  const job = async (k, fn) => { if ((which && which!==k) || lvLoading[k]) return; lvLoading[k] = true;
+    try { await fn(); } catch(e){ /* el bot puede estar reiniciándose: se reintenta en la próxima ronda */ } finally { lvLoading[k] = false; lvBump(); } };
+  await job("main", async () => {
+    let r = null; try { r = await fetch("/api/lab_vivo"); } catch(e){ r = null; }
+    let j = null; if (r && r.ok) try { j = await r.json(); } catch(e){ j = null; }
+    if (isObj(j) && !Array.isArray(j)){ if (!isNum(j.ts) || rkTs(j) >= rkTs(S.lv)) S.lv = j; S.lvApi = "ok"; }
+    else S.lvApi = r && r.status===404 ? "sin_ruta" : "fallo"; });
+  if (which==="main" || S.lvApi!=="ok" || !isObj(S.lv) || S.lv.estado==="apagado") return;
+  await Promise.all([
+    job("cola", async () => { const j = await getJson("/api/lab_vivo/cola"); if (isObj(j) && !Array.isArray(j)) S.lvCola = j; }),
+    job("gen", async () => { const j = await getJson("/api/lab_vivo/generador?limite=10");
+      const a = Array.isArray(j) ? j : isObj(j) ? [j.notas, j.generador, j.items].find(Array.isArray) : null;
+      if (a) S.lvGen = a.map(x => typeof x==="string" ? {texto:x} : x).filter(isObj); }),
+    job("diarios", async () => { const now = Date.now();
+      for (let k = 1; k <= 2; k++){ const d = madDay(now - k*864e5), j = await getJson(`/api/lab_vivo/diario?dia=${d}`); S.lvDiarios[d] = isObj(j) && !Array.isArray(j) ? j : null; } }),
+    job("avance", async () => { for (const c of objs(lvView().en_avance).slice(0, 5)){ const h = lvHid(lvVid(c)); if (h) await lvDetFetch(h); } })]);
+}
+// Detalle de una hipótesis (GET /api/lab_vivo/hipotesis?id=): sus variantes con su tarjeta, pruebas y operaciones.
+// Una sola petición a la vez por hipótesis: quien llegue mientras tanto espera la misma.
+const lvDetP = {};
+function lvDetFetch(hid){
+  if (!S.live || typeof hid!=="string" || !LV_ID.test(hid)) return Promise.resolve();   // el mismo patrón que valida el servidor: nada de rutas
+  if (lvDetP[hid]) return lvDetP[hid];
+  const c = S.lvDet[hid];
+  S.lvDet[hid] = {...(c || {}), cargando:true}; lvBump();
+  return lvDetP[hid] = (async () => {
+    let r = null, j = null;
+    try { r = await fetch(`/api/lab_vivo/hipotesis?id=${encodeURIComponent(hid)}`); if (r && r.ok) j = await r.json(); } catch(e){ j = null; }
+    const ok = isObj(j) && !Array.isArray(j);
+    S.lvDet[hid] = {data:ok ? j : c && c.data ? c.data : null, err:!ok, st:r ? r.status : 0, t:Date.now(), cargando:false};
+    lvBump();
+  })().finally(() => { delete lvDetP[hid]; });
+}
+function lvAccion(acc){
+  if (acc!=="pausar" && acc!=="reanudar") return;
+  if (!S.live){ toast(DEMO_NADA, 5000); return; }
+  if (!sendBot({type:"lab_vivo", accion:acc})) return;
+  const p = S.lvPend = {accion:acc, t:Date.now()};
+  toast(acc==="pausar" ? "Pausa del laboratorio pedida al bot (no toca el paper ni tus reglas). Pendiente de que la confirme." : "Reanudación del laboratorio pedida al bot. Pendiente de que la confirme.", 6000);
+  confirmLater(() => S.lvPend!==p, "El bot no ha confirmado la orden del laboratorio: mira su estado o vuelve a intentarlo.");
+  lvBump();
+}
+function lvClick(t){   // true si el clic era de la pestaña Laboratorio
+  const ac = t.closest("[data-lv-acc]"); if (ac){ lvAccion(ac.dataset.lvAcc); return true; }
+  const se = t.closest("[data-lv-sel]");
+  if (se){ const id = se.dataset.lvSel || ""; S.lvSel = id && id!==S.lvSel ? id : null; const h = lvHid(S.lvSel); if (h) lvDetFetch(h); lvBump();
+    if (S.lvSel && se.classList && se.classList.contains("lv-card")) setTimeout(() => { const d = $("#lvDet"); if (d && !d.hidden) d.scrollIntoView({behavior:"smooth", block:"nearest"}); }, 60);   // el detalle está en «Mejores»
+    return true; }
+  return false;
+}
+// Demostración: datos de MUESTRA incrustados (labVivoData), con las operaciones de cada curva sintetizadas con semilla fija.
+function lvDemoOps(det){
+  const V = objs(det.variantes).map(v => { const o = rkO(v.operaciones), s = rkO(o.fuera_demo);
+    if (!isNum(s.n) || !isNum(s.R)) return v;
+    let k = (isNum(s.semilla) ? s.semilla : 7) >>> 0;
+    const rnd = () => { k = (k + 0x6D2B79F5) >>> 0; let t = k; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+    const n = Math.max(2, Math.min(200, Math.round(s.n))), p = Math.max(0.05, Math.min(0.9, (s.R + 0.84)/4.05));
+    const t0 = Date.parse(rkTxt(s.desde, 12) || "2025-08-16"), t1 = Date.parse(rkTxt(s.hasta, 12) || "2026-09-30");
+    const rs = Array.from({length:n}, () => { const u = rnd(); return u < p ? 2 + 2*rnd() : u < p + 0.2 ? -0.5 + rnd() : -1 - 0.1*rnd(); });
+    const corr = (n*s.R - rs.reduce((a, b) => a + b, 0))/n;
+    const fuera = rs.map((R, i) => ({t:Math.round(t0 + (t1 - t0)*(i + rnd())/n), R_f:+(R + corr).toFixed(3), demo:true}));
+    return {...v, operaciones:{...o, fuera}}; });
+  return {...det, variantes:V};
+}
+function demoLab(d){   // d: el bloque ya leído (las pruebas lo pasan); sin él, el incrustado en la página
+  if (d===undefined) try { const b = document.getElementById("labVivoData"); d = b ? JSON.parse(b.textContent) : null; } catch(e){ d = null; }
+  if (!isObj(d) || Array.isArray(d)) return;
+  const now = Date.now(), x = demoRel(d, now);
+  S.lv = isObj(x.estado) ? {...x.estado, demo:true} : null;
+  S.lvCola = isObj(x.cola) ? x.cola : null;
+  S.lvGen = objs(x.generador);
+  S.lvDiarios = {}; for (const v of objs(Object.values(rkO(x.diarios)))) if (LV_DIA.test(String(v.dia))) S.lvDiarios[v.dia] = v;
+  S.lvDet = {}; for (const [h, v] of Object.entries(rkO(x.hipotesis))) if (LV_ID.test(h) && isObj(v)) S.lvDet[h] = {data:lvDemoOps(v), err:false, st:200, t:now, cargando:false};
+  S.lvDemo = true; lvBump();
+}
+
 // ---------- Dos pantallas: enlaces por vista, segunda ventana y sincronización ----------
-const TAB_HASH = {directo:"live", mundo:"world", mando:"mando", predicciones:"pred", cartera:"trades", resultados:"results", "cuenta-real":"real", backtest:"bt", mercado:"market", evolucion:"evo", ia:"ai"};
+const TAB_HASH = {directo:"live", mundo:"world", mando:"mando", predicciones:"pred", cartera:"trades", resultados:"results", ranking:"ranking", "cuenta-real":"real", backtest:"bt", laboratorio:"lab", mercado:"market", evolucion:"evo", ia:"ai"};
 const HASH_OF = Object.fromEntries(Object.entries(TAB_HASH).map(([k,v]) => [v,k]));
 let toastTimer = 0;
 function toast(msg, ms=3200){
@@ -6133,15 +7052,19 @@ document.addEventListener("click", ev => {
   const cl = t.closest("[data-close]"); if (cl){ userClose(cl.dataset.close); return render(true); }
   if (realClick(t)) return render(true);   // pestaña Cuenta real: parada, límites, aprobación, frase, órdenes y ejemplos
   if (evoClick(t)) return render(true);   // pestaña Evolución: modo, evaluar, propuestas, revertir, fuentes y filtros
+  if (rkClick(t)) return render(true);   // pestaña Ranking: orden, filtros, regla de cada fila y «ver más»
+  if (lvClick(t)) return render(true);   // pestaña Laboratorio: pausar o reanudar y detalle de una variante
   const sp = t.closest("[data-speed]"); if (sp){ S.speed = +sp.dataset.speed; document.querySelectorAll("[data-speed]").forEach(b=>b.setAttribute("aria-pressed", b===sp)); return render(true); }
   const tb = t.closest("[data-tab]"); if (tb){ S.tab = tb.dataset.tab; document.querySelectorAll("[data-tab]").forEach(b=>b.setAttribute("aria-selected", b===tb));
-    for (const v of ["live","world","mando","pred","trades","results","real","bt","market","evo","ai"]) $("#v-"+v).hidden = v!==S.tab; try{ localStorage.setItem("radar.tab", S.tab); }catch(e){}
+    for (const v of ["live","world","mando","pred","trades","results","ranking","real","bt","lab","market","evo","ai"]) $("#v-"+v).hidden = v!==S.tab; try{ localStorage.setItem("radar.tab", S.tab); }catch(e){}
     if (S.tab==="evo") loadEvo();
     if (S.tab==="real") loadApi("real");   // cuenta real: lo último del bot (también llega por el WebSocket)
     try { if (HASH_OF[S.tab] && location.hash.slice(1)!==HASH_OF[S.tab]) history.replaceState(null, "", "#"+HASH_OF[S.tab]); } catch(e){}
     if (BC) try { BC.postMessage({type:"hello", from:ME, tab:S.tab}); } catch(e){}
     if (S.tab==="results" || S.tab==="mando") loadApi("res"); if (S.tab==="bt"){ S.btSig = null; if (!S.backtest) loadApi("bt"); }
     if (S.tab==="market" || S.tab==="mando") loadApi("dec");   // por qué entra o no: lo guardado en el bot
+    if (S.tab==="ranking" || (S.tab==="mando" && !S.rk && !S.rkBus)) loadRanking();   // ranking de estrategias (a Mando le basta el bus)
+    if (S.tab==="lab") loadLab();   // laboratorio vivo: estado, cola, generador, diarios y detalle de lo que está en avance
 
     document.body.classList.toggle("world-mode", S.tab==="world");
     document.body.classList.toggle("mando-mode", S.tab==="mando"); mdFeedSig = "";
@@ -6176,6 +7099,10 @@ document.addEventListener("change", ev => { if (ev.target.id==="btSort"){ S.btFi
 document.addEventListener("change", ev => {   // filtros de la línea de tiempo de la Evolución
   const k = ev.target && ev.target.dataset ? ev.target.dataset.evoF : null;
   if (k==="tipo" || k==="origen"){ S.evoF[k] = String(ev.target.value || ""); loadEvo("hist"); evoBump(); render(true); } });
+document.addEventListener("change", ev => {   // filtros del ranking: origen y mínimo de operaciones al día
+  const k = ev.target && ev.target.dataset ? ev.target.dataset.rkF : null;
+  if (k==="origen"){ S.rkF.origen = String(ev.target.value || "").slice(0, 60); S.rkMas = RK_PAG; rkBump(); render(true); }
+  if (k==="min_op"){ const v = Number(ev.target.value); S.rkF.minOp = RK_MINOP.includes(v) ? v : 0; S.rkMas = RK_PAG; rkBump(); render(true); } });
 document.addEventListener("input", ev => { if (ev.target.id==="q"){ S.filter.q = ev.target.value; lastFeedSig=""; renderFeed(); } });
 document.addEventListener("input", ev => {   // Cuenta real: lo que escribes en la frase y en los límites no se pierde al redibujar
   const t = ev.target; if (!t) return;
@@ -6232,6 +7159,8 @@ if (LIVE){
   const firstGood = [...S.stories.values()].reverse().find(x=>x.result) || [...S.stories.values()].reverse().find(x=>x.strat);
   S.sel = firstGood ? firstGood.id : null;
   safe(demoEvo);   // pestaña Evolución: estado de EJEMPLO, rotulado como tal
+  safe(demoRanking);   // pestaña Ranking: ranking de EJEMPLO (rankingData), con el motor simulado en marcha
+  safe(demoLab);   // pestaña Laboratorio: datos de MUESTRA del laboratorio vivo (labVivoData)
 }
 { const fromHash = TAB_HASH[location.hash.slice(1)];   // un enlace con #mundo, #mando… manda sobre la última pestaña usada
   let t = fromHash; if (!t) try { t = localStorage.getItem("radar.tab"); } catch(e){}
@@ -6247,7 +7176,7 @@ function connectLive(){
   const open = () => {
     let ws;
     try { ws = new WebSocket(url); } catch(e){ setTimeout(open, 3000); return; }
-    ws.onopen = () => { S.wsConn = ws; loadApi(); if (S.tab==="evo") loadEvo(); cs.textContent = `Conectado a ${url}. Todo lo que ves son datos reales; las operaciones son paper (dinero ficticio con precios reales).`; };
+    ws.onopen = () => { S.wsConn = ws; loadApi(); if (S.tab==="evo") loadEvo(); if (S.tab==="lab") loadLab(); cs.textContent = `Conectado a ${url}. Todo lo que ves son datos reales; las operaciones son paper (dinero ficticio con precios reales).`; };
     ws.onmessage = m => { try { const d = JSON.parse(m.data); (Array.isArray(d)?d:[d]).forEach(ingest); } catch(e){ console.error(e); } };
     ws.onclose = () => { if (S.wsConn===ws) S.wsConn = null; tag.textContent = "Bot desconectado · paper"; tag.className = "mode off";
       cs.textContent = "Se perdió la conexión con el bot. Reintento cada 3 s; lo que ves es lo último que llegó."; setTimeout(open, 3000); };
@@ -6256,6 +7185,8 @@ function connectLive(){
   setInterval(() => { if (S.tab==="results" || S.tab==="mando") loadApi("res"); }, 30000);   // Mando suele quedarse abierto en la 2.ª pantalla
   setInterval(() => loadApi("bt"), 30*60000);
   setInterval(() => { if (S.tab==="evo") loadEvo(); }, 120000);   // Evolución: historial, medios, noticias e informe
+  setInterval(() => { if (S.tab==="ranking") loadRanking(); }, 120000);   // la tabla entera; las 20 primeras llegan además por el bus cuando cambian
+  setInterval(() => { if (S.tab==="lab") loadLab(); }, 60000);   // laboratorio vivo: escribe su estado cada 30 s
 }
 
 let lastReal = performance.now();

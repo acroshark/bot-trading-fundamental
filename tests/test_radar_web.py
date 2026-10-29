@@ -396,7 +396,7 @@ def test_expediente_sin_objetivo_final_ni_promesas():
 
 def test_simulacion_pinta_todas_las_pestanas():
     """La demostración (sin bot) arranca y pinta todas las pestañas sin errores; cerrar una posición funciona."""
-    r = run("""for (const t of ["live", "world", "mando", "pred", "trades", "results", "real", "bt", "market", "evo", "ai"]) H.fire("click", {"data-tab": t});
+    r = run("""for (const t of ["live", "world", "mando", "pred", "trades", "results", "ranking", "real", "bt", "lab", "market", "evo", "ai"]) H.fire("click", {"data-tab": t});
       S.tab = "world"; renderAll(true);
       const p = S.positions[0]; if (p) userClose(p.id);
       H.elFire("#killBtn", "click", {});
@@ -3072,3 +3072,405 @@ def test_backtest_dice_con_que_comisiones_esta_calculado():
     assert ("<b>Comisiones del backtest:</b> 0,10 % por lado y 2 pb de deslizamiento, que no es menos que lo de OKX EU con cuenta "
             "X-Perps. Sin cuenta X-Perps no hay cortos y el contado cuesta 0,35 % a mercado: estas cifras serían peores.") in r["s2"]
     _sin_null(r["s1"], r["s2"], r["e2"])
+
+
+# ---------------------------------------------------------------- Ranking de estrategias (bot/ranking.py, docs/04 2.20)
+# Filas comunes con la forma de GET /api/ranking y del mensaje «ranking»; D es la que está en marcha y E pierde.
+RK = r"""
+const fila = (id, o = {}) => ({id, nombre: "Estrategia " + id, familia: "fam " + id, origen: "estudio", estudio: "est", regla: "Regla de " + id,
+  cumple_reglas: true, perfil_costes: "okx_eu_con_xperps", perfil_texto: "OKX EU con X-Perps: contado 0,10 / 0,08 %", fecha: "2026-10-29",
+  archivo: id + "_resumen.json", dentro: {n: 300, R: 0.05, gana_pct: 40}, fuera: {n: 120, R: 0.2, gana_pct: 45, p: 0.04, jornadas: 306},
+  op_dia: 1, pct_dia: 0.1, R_dia: 0.2, caida_max_pct: 5,
+  robustez: {sin_5_mayores: 0.05, dentro_positivo: true, corregida: {metodo: "Holm", valor: 0.03, pasa: true}, mitades: [0.1, 0.3]},
+  en_vivo: null, estado: "backtest", fragil: false, fragil_motivos: [], poca_muestra: false, nueva: false, posicion: null,
+  posicion_antes: null, en_marcha: false, ...o});
+const rk = (filas, o = {}) => ({ts: now, n_total: filas.length + 3, n_ranking: filas.filter(f => f.posicion).length, filas, en_marcha: null,
+  fuentes: {estandar: {archivos: 3, filas: 5, ts: now - 60000, errores: []}, lab_vivo: {estado: "activo", filas: 1, ts: now - 30000},
+            paper: {operaciones: 2, filas: 1, ts: now}, vigilancia: {estrategias: 3, ts: now, estado: "ok"}},
+  nota: "Ordenado por beneficio fuera de muestra con costes.", criterio: {orden: "pct_dia de mayor a menor", entra: "fuera.R ≥ 0"},
+  origenes: [{id: "estudio", nombre: "Réplicas del motor", n: 5, n_ranking: 3}, {id: "curso", nombre: "Técnicas del curso", n: 1, n_ranking: 1}], ...o});
+const A = fila("A", {posicion: 1, pct_dia: 0.3, op_dia: 2, fuera: {n: 400, R: 0.3, gana_pct: 41}, nueva: true});
+const B = fila("B", {posicion: 2, nombre: "Curso <b>negrita</b>", origen: "curso", pct_dia: 0.2, op_dia: 1.5, fuera: {n: 25, R: 0.27, gana_pct: 52},
+  dentro: {n: 40, R: -0.1, gana_pct: 30}, fragil: true, fragil_motivos: ["gana fuera de muestra pero pierde dentro"], poca_muestra: true,
+  robustez: {sin_5_mayores: -0.2, dentro_positivo: false, corregida: {metodo: "q", valor: 0.4, pasa: false}, mitades: [0.5, -0.1]}, posicion_antes: 1});
+const C = fila("C", {posicion: 3, pct_dia: 0.1, op_dia: 3, fuera: {n: 900, R: 0.07, gana_pct: 30}, cumple_reglas: false});
+const D = fila("D", {posicion: 4, nombre: "Ruptura V3", pct_dia: 0.05, op_dia: 0.2, fuera: {n: 60, R: 0.5, gana_pct: 50}, estado: "en_paper", en_marcha: true,
+  en_vivo: {fuente: "paper", virtual: false, n: 3, R: 0.4, gana_pct: 66.7, neto_usdc: 1.23, desde: now - 864e5, abiertas: 1}});
+const E = fila("E", {posicion: null, nombre: "Pierde", pct_dia: -0.2, fuera: {n: 1000, R: -0.1, gana_pct: 30}});
+const EM = (f, o = {}) => ({id: f.id, preset: "ruptura3", nombre: f.nombre, desde: now - 864e5, pausada: false, fuente: "motor", posicion: f.posicion,
+  n_ranking: 4, en_ranking: !!f.posicion, texto: f.posicion ? `Puesto ${f.posicion} de 4 en el ranking` : "Fuera del ranking: pierde fuera de muestra (−0,075 R por operación)",
+  fila: f, ...o});
+const RES = rk([A, B, C, D, E], {en_marcha: EM(D)});
+const rkReply = data => url => url.startsWith("/api/ranking") ? {ok: true, status: 200, json: async () => data} : {ok: false, status: 404};
+const rkHtml = () => ["#rkLive", "#rkRows", "#rkHead", "#rkFilters", "#rkFoot", "#rkSub"].map(i => H.el(i).innerHTML).join("\n");
+const visibles = () => ["A", "B", "C", "D"].filter(i => H.el("#rkRows").innerHTML.includes(`data-rk-sel="${i}"`)).join("");
+"""
+
+
+def test_ranking_pide_la_api_ordena_por_beneficio_y_marca_la_en_marcha():
+    """Al conectar y al abrir la pestaña se pide GET /api/ranking; las filas salen en su puesto (las que pierden, nunca),
+    con sus chips de robustez, la que está en marcha marcada en la tabla y aparte con su puesto, todo escapado; pulsar
+    una columna ordena (y otra vez, al revés) y pulsar una estrategia enseña su regla y sus cifras. En Mando, las 5
+    primeras y la que está en marcha. La web no envía nada al bot."""
+    r = run(RK + """H.fetchReply = rkReply(RES);
+      H.open(); reset(); await loadApi(); const f0 = H.fetches.slice();
+      H.fetches.length = 0; H.fire("click", {"data-tab": "ranking"}); await loadRanking(); renderAll(true);
+      const f1 = H.fetches.slice(), h0 = rkHtml(), rows0 = H.el("#rkRows").innerHTML;
+      const pos = h => ["A", "B", "C", "D"].map(i => h.indexOf(`data-rk-sel="${i}"`));
+      H.fire("click", {"data-rk-sort": "R"}); renderAll(true); const rDesc = pos(H.el("#rkRows").innerHTML), hR = H.el("#rkHead").innerHTML;
+      H.fire("click", {"data-rk-sort": "R"}); renderAll(true); const rAsc = pos(H.el("#rkRows").innerHTML);
+      H.fire("click", {"data-rk-sort": "pos"}); renderAll(true);
+      H.fire("click", {"data-rk-sel": "A"}); renderAll(true); const det = H.el("#rkRows").innerHTML;
+      H.fire("click", {"data-rk-sel": "A"}); renderAll(true); const cerrado = H.el("#rkRows").innerHTML;
+      S.tab = "mando"; renderAll(true);
+      return {f0, f1, h0, rows0, p0: pos(rows0), rDesc, rAsc, hR, det, cerrado, live: H.el("#rkLive").innerHTML, foot: H.el("#rkFoot").innerHTML,
+              sub: H.el("#rkSub").innerHTML, md: H.el("#mdRk").innerHTML, badge: [H.el("#rkBadge").hidden, String(H.el("#rkBadge").textContent)], sent: H.sent()};""")
+    # al conectar (en otra pestaña), las primeras, que bastan para Mando; al abrir la pestaña, la tabla entera
+    assert "/api/ranking?limite=50" in r["f0"] and "/api/ranking?limite=5000" not in r["f0"] and "/api/lab_vivo" in r["f0"]
+    assert "/api/ranking?limite=5000" in r["f1"]
+    p0, rows = r["p0"], r["rows0"]
+    assert all(x >= 0 for x in p0) and p0 == sorted(p0)   # en su puesto: % de la cuenta al día de mayor a menor
+    assert 'data-rk-sel="E"' not in rows and "Pierde" not in rows   # la que pierde fuera de muestra no entra
+    assert p0[2] < rows.index('<tr class="rk-live">') < p0[3] and "en marcha</span>" in rows
+    assert "Curso &lt;b&gt;negrita&lt;/b&gt;" in rows and "<b>negrita</b>" not in rows
+    assert 'title="gana fuera de muestra pero pierde dentro">frágil</span>' in rows and ">poca muestra</span>" in rows
+    assert ">sin 5 mayores -0,20 R</span>" in rows and ">dentro ✗</span>" in rows and ">corregida q 0,40 ✗</span>" in rows
+    assert ">mitades +0,50 / -0,10</span>" in rows and ">corregida Holm 0,03 ✓</span>" in rows and ">dentro ✓</span>" in rows
+    assert "+0,300 %" in rows and "+0,30 R" in rows and "400 / 300" in rows and '<span class="pill info">nueva</span>' in rows
+    assert 'title="Antes, puesto 1">▼1</span>' in rows and "✗ no</span>" in rows and "Descartada por ti" not in rows
+    assert r["rDesc"][3] < r["rDesc"][0] < r["rDesc"][1] < r["rDesc"][2] and r["rAsc"][2] < r["rAsc"][1] < r["rAsc"][0] < r["rAsc"][3]
+    assert 'aria-sort="descending"' in r["hR"] and "R/op. ▼" in r["hR"]
+    assert "Regla de A" in r["det"] and 'class="rk-det"' in r["det"] and "OKX EU con X-Perps" in r["det"] and "A_resumen.json" in r["det"]
+    assert 'class="rk-det"' not in r["cerrado"]
+    assert "Ruptura V3" in r["live"] and "Puesto 4 de 4" in r["live"] and "En paper" in r["live"]
+    assert "3 operaciones cerradas en la cartera paper" in r["live"] and "+1,23 USDC ficticios" in r["live"] and "1 abierta" in r["live"]
+    assert "4 de 8 estrategias medidas no pierden fuera de muestra con costes" in r["sub"]
+    assert "Estudios: 5 filas · 3 archivos" in r["foot"] and "Cómo se ordena y qué entra" in r["foot"]
+    md = r["md"]
+    assert md.count('data-tabgo="ranking"') == 5 and "1. Estrategia A" in md and "4. Ruptura V3" in md
+    assert "Ruptura V3 · puesto 4 de 4" in md and ">+0,300 %</b>" in md
+    assert r["badge"] == [False, "1"] and r["sent"] == []
+    _sin_null(r["h0"], r["det"], r["live"], md)
+
+
+def test_ranking_filtros_origen_reglas_operaciones_y_fragiles():
+    """Los filtros van en el navegador (sin volver a pedir nada): origen (con los nombres del bot), solo las que cumplen
+    tus reglas, mínimo de operaciones al día y ocultar las frágiles; «Quitar filtros» lo deja como estaba. Con un filtro
+    que no deja ninguna, se dice; la que está en marcha se sigue viendo aparte."""
+    r = run(RK + """H.fetchReply = rkReply(RES); H.open(); reset(); await loadApi();
+      S.tab = "ranking"; renderAll(true);
+      const ch = (k, v) => { const tg = H.target({"data-rk-f": k}); tg.value = v; H.fire("change", {}, {target: tg}); renderAll(true); return visibles(); };
+      const out = {todas: visibles(), filtros: H.el("#rkFilters").innerHTML}, n0 = H.fetches.length;
+      out.curso = ch("origen", "curso"); out.sub = H.el("#rkSub").innerHTML; ch("origen", "");
+      H.fire("click", {"data-rk-t": "cumple"}); renderAll(true); out.cumple = visibles(); H.fire("click", {"data-rk-t": "cumple"});
+      out.minop = ch("min_op", "0.25"); out.minop2 = ch("min_op", "2"); out.raro = ch("min_op", "7");
+      H.fire("click", {"data-rk-t": "fragiles"}); renderAll(true); out.sinFragiles = visibles(); out.filtros2 = H.el("#rkFilters").innerHTML;
+      H.fire("click", {"data-rk-reset": "1"}); renderAll(true); out.reset = visibles();
+      ch("origen", "nadie"); out.vacio = H.el("#rkRows").innerHTML; out.live = H.el("#rkLive").innerHTML; out.mas = H.fetches.length - n0;
+      return out;""")
+    assert r["todas"] == "ABCD" and r["curso"] == "B" and "con tus filtros se ven 1" in r["sub"]
+    assert ">Réplicas del motor (3)</option>" in r["filtros"] and ">Técnicas del curso (1)</option>" in r["filtros"]
+    assert r["cumple"] == "ABD" and r["minop"] == "ABC" and r["minop2"] == "AC" and r["raro"] == "ABCD" and r["sinFragiles"] == "ACD"
+    assert 'data-rk-t="fragiles" aria-pressed="true"' in r["filtros2"] and "Quitar filtros" in r["filtros2"] and r["reset"] == "ABCD"
+    assert "Ninguna estrategia cumple estos filtros." in r["vacio"] and "Ruptura V3" in r["live"] and r["mas"] == 0
+    _sin_null(*[v for v in r.values() if isinstance(v, str)])
+
+
+def test_ranking_sin_ruta_404_por_el_bus_la_en_marcha_fuera_y_campos_rotos():
+    """Un bot sin GET /api/ranking (404) no rompe nada y lo dice (también en Mando). El mensaje «ranking» del bus trae
+    las 20 primeras y se enseñan (avisando de que el resto llega por la API); uno más viejo no lo pisa. La estrategia en
+    marcha que pierde sale aparte, «fuera del ranking: pierde», y nunca en la tabla. Filas y campos rotos no rompen nada."""
+    r = run(RK + """H.fetchReply = url => ({ok: false, status: 404});
+      H.open(); reset(); await loadApi(); S.tab = "ranking"; renderAll(true);
+      const sinRuta = rkHtml(), api = S.rkApi; S.tab = "mando"; renderAll(true); const md0 = H.el("#mdRk").innerHTML;
+      const top = Array.from({length: 20}, (_, i) => fila("T" + i, {posicion: i + 1, pct_dia: 0.5 - i*0.01}));
+      const S2 = fila("seis2", {nombre: "6 diarias v2", posicion: null, pct_dia: -0.177, op_dia: 4.72, fuera: {n: 1464, R: -0.075, gana_pct: 38.7},
+        dentro: {n: 2389, R: -0.0569, gana_pct: 37.4}, estado: "en_paper", en_marcha: true});
+      H.recv({type: "ranking", ts: now, n_total: 830, n_ranking: 400, filas: top, nota: "Nota del bus", fuentes: {estandar: {ts: now, filas: 700, estado: null}},
+              en_marcha: EM(S2, {posicion: null, n_ranking: 400, en_ranking: false, preset: "seis2"})});
+      S.tab = "ranking"; renderAll(true); const bus = rkHtml();
+      S.tab = "mando"; renderAll(true); const md1 = H.el("#mdRk").innerHTML;
+      H.recv({type: "ranking", ts: now - 5000, n_total: 1, n_ranking: 1, filas: [fila("VIEJA", {posicion: 1})]}); const sigue = S.rkBus.n_total;
+      H.recv({type: "ranking"}, {type: "ranking", ts: now + 10, n_total: "x", n_ranking: null, en_marcha: 5, fuentes: {estandar: null, x: "texto", y: 5, z: [1]},
+        criterio: 7, origenes: [null, {id: 5}], nota: {a: 1},
+        filas: [null, 7, "x", {id: "x"}, {id: "y", fuera: {R: "x"}}, {id: "z", fuera: {n: 0, R: 0.5}, pct_dia: 0.1},
+                {id: "w", nombre: null, fuera: {n: 10, R: 0.1, gana_pct: "x", ic95: [1]}, dentro: 5, pct_dia: "x", op_dia: null, robustez: "x", en_vivo: 5,
+                 fecha: "ayer", fragil: true, fragil_motivos: [null, 3], posicion_antes: "x", estado: 9, cumple_reglas: "si", perfil_costes: {perfil: 5},
+                 perfiles: {p: 5}, entra_desde: "x", caida_max_pct: NaN}]});
+      S.tab = "ranking"; renderAll(true); const rotas = rkHtml();
+      H.fire("click", {"data-rk-sel": "w"}); renderAll(true); const det = H.el("#rkRows").innerHTML;
+      S.tab = "mando"; renderAll(true);
+      return {api, sinRuta, md0, bus, md1, sigue, rotas, det, md2: H.el("#mdRk").innerHTML};""")
+    assert r["api"] == "sin_ruta" and "aún no tiene el ranking (GET /api/ranking no existe" in r["sinRuta"]
+    assert "Sin ranking" in r["md0"] and "aún no tiene GET /api/ranking" in r["md0"]
+    bus = r["bus"]
+    assert 'data-rk-sel="T0"' in bus and 'data-rk-sel="T19"' in bus and "Llegan las 20 primeras por el WebSocket" in bus
+    assert ">Fuera del ranking: pierde</span>" in bus and "Fuera del ranking: pierde fuera de muestra (−0,075 R por operación)." in bus
+    assert "6 diarias v2" in bus and 'data-rk-sel="seis2"' not in bus and "400 de 830 estrategias" in bus and "Nota del bus" in bus
+    assert r["md1"].count('data-tabgo="ranking"') == 6 and "6 diarias v2 · fuera del ranking: pierde" in r["md1"] and "1. Estrategia T0" in r["md1"]
+    assert r["sigue"] == 830
+    assert 'data-rk-sel="w"' in r["rotas"] and all(f'data-rk-sel="{i}"' not in r["rotas"] for i in ("x", "y", "z"))
+    assert "el ranking la marca como frágil" in r["det"]
+    _sin_null(r["sinRuta"], r["md0"], bus, r["md1"], r["rotas"], r["det"], r["md2"])
+
+
+def test_ranking_correccion_costes_etag_y_en_marcha_sin_datos():
+    """El chip de la corrección lleva el tipo corto del bot y el método largo en el title; sin corrección siendo una de
+    varias configuraciones, «sin corregir (1 de N)». Cada fila dice con qué costes se midió y el pie avisa de que no hay
+    un perfil común. En Mando, «frágil» y «descartada por ti». La tabla entera se vuelve a pedir con su ETag y un 304
+    deja la que hay. Con «Ocultar frágiles» y todas frágiles, se dice. Sin datos del ranking, la estrategia en marcha
+    se nombra igual (por «openings»), aquí y en Mando."""
+    r = run(RK + """
+      const BT = "backtest con la gestión del paper: 0,10 % por lado y 2 pb (también en los perpetuos), con su funding";
+      const X = fila("X", {posicion: 1, pct_dia: 0.15, origen: "salidas", probadas: 378, perfil_costes: "backtest", perfil_corto: "costes del backtest",
+        perfil_texto: BT, fragil: true, fragil_motivos: ["sin corrección por número de pruebas: una de 378 configuraciones de su estudio"],
+        robustez: {sin_5_mayores: null, dentro_positivo: true, mitades: null,
+                   corregida: {tipo: "sin_p", metodo: "sin p ni corrección: una de 378 salidas de una rejilla", valor: null, pasa: false}}});
+      const Y = fila("Y", {posicion: 2, pct_dia: 0.12, nombre: "E2 · impulso (variante de 7 días)", estado: "descartada_por_el_usuario", perfil_costes: "backtest",
+        perfil_texto: BT, fragil: true, fragil_motivos: ["la salida de 7 días se eligió después de ver los datos: no está validada"],
+        robustez: {corregida: {tipo: "holm", metodo: "Holm entre las 23 configuraciones del estudio (p frente a la base emparejada)", valor: 1, pasa: false}}});
+      const Z = fila("Z", {posicion: 3, pct_dia: 0.1, origen: "laboratorio_2000", probadas: 2000, perfil_costes: "laboratorio", perfil_texto: null,
+        fragil: true, robustez: {corregida: null}});
+      const W = fila("W", {posicion: 4, pct_dia: 0.05, robustez: {corregida: {metodo: "Benjamini-Hochberg (q) entre las 2.000 del laboratorio", valor: 1, pasa: false}},
+        fragil: true});
+      const DATA = rk([X, Y, Z, W], {n_total: 4, n_ranking: 4, perfiles_costes: [{id: "backtest", texto: BT, n_ranking: 3},
+        {id: "laboratorio", texto: "laboratorio de 2.000: 5-20 pb más en los stops y sin funding", n_ranking: 1}]});
+      const calls = [];
+      window.fetch = async (url, op) => { const inm = op && op.headers ? op.headers["If-None-Match"] || null : null; calls.push([url, inm]);
+        if (!url.startsWith("/api/ranking")) return {ok: false, status: 404};
+        const hd = {get: k => k === "ETag" ? '"v1"' : null};
+        return inm === '"v1"' ? {ok: false, status: 304, headers: hd} : {ok: true, status: 200, headers: hd, json: async () => DATA}; };
+      H.open(); reset(); await loadApi(); const tras1 = S.rk;
+      S.tab = "ranking"; await loadRanking(); renderAll(true);
+      const out = {c304: calls.filter(c => c[0].startsWith("/api/ranking")), mismo: S.rk === tras1, api: S.rkApi, rows: H.el("#rkRows").innerHTML,
+                   foot: H.el("#rkFoot").innerHTML};
+      H.recv({type: "ranking", ts: now - 1000, n_total: 1, n_ranking: 1, filas: [fila("BUS", {posicion: 1})]}); renderAll(true);
+      out.siguenTodas = H.el("#rkRows").innerHTML.includes('data-rk-sel="W"');
+      H.fire("click", {"data-rk-t": "fragiles"}); renderAll(true); out.vacio = H.el("#rkRows").innerHTML;
+      S.tab = "mando"; renderAll(true); out.md = H.el("#mdRk").innerHTML;
+      return out;""")
+    llamadas = r["c304"]
+    assert [c[1] for c in llamadas] == [None, '"v1"'] and llamadas[1][0] == "/api/ranking?limite=5000"
+    assert r["mismo"] is True and r["api"] == "ok" and r["siguenTodas"] is True   # el 304 deja la tabla entera que había
+    rows = r["rows"]
+    assert 'title="sin p ni corrección: una de 378 salidas de una rejilla">sin corregir (1 de 378)</span>' in rows
+    assert 'title="Holm entre las 23 configuraciones del estudio (p frente a la base emparejada)">corregida Holm 1,00 ✗</span>' in rows
+    assert ">sin corregir (1 de 2000)</span>" in rows and ">corregida q 1,00 ✗</span>" in rows   # de un bot sin «tipo»
+    assert "Holm entre las 23 configuraciones del e…" not in rows and "fam X · Salidas, stops y objetivos · costes del backtest" in rows
+    assert 'title="Costes: ' + "backtest con la gestión del paper" in rows and "costes del laboratorio (sin funding)" in rows
+    assert "No hay un perfil de costes común" in r["foot"] and "(3)" in r["foot"]
+    assert "todas las que entran en el ranking son frágiles" in r["vacio"]
+    md = r["md"]
+    assert "1. Estrategia X" in md and "frágil" in md and "E2 · impulso (variante de 7 días)" in md and "descartada por ti" in md
+    _sin_null(rows, r["foot"], r["vacio"], md)
+    # sin datos del ranking (404) pero con «openings»: se nombra la que opera
+    s = run(RK + """H.fetchReply = url => ({ok: false, status: 404});
+      H.open(); reset(); H.recv({type: "openings", ts: now, params: {preset: "ruptura3", nombre: "Ruptura V3: rango de apertura"}});
+      await loadApi(); S.tab = "ranking"; renderAll(true); const live = H.el("#rkLive").innerHTML;
+      S.tab = "mando"; renderAll(true);
+      return {live, md: H.el("#mdRk").innerHTML};""")
+    assert "Ruptura V3: rango de apertura" in s["live"] and "sin datos del ranking" in s["live"] and "GET /api/ranking no existe" in s["live"]
+    assert "Ruptura V3: rango de apertura · sin datos del ranking" in s["md"] and "Sin ranking" in s["md"]
+    _sin_null(s["live"], s["md"])
+
+
+# ---------------------------------------------------------------- Laboratorio vivo (docs/07, 13 y 14; docs/04 2.19)
+# Con la forma de GET /api/lab_vivo (estado.json + mejores + diario + pausa_manual) y de sus subrutas.
+LV = r"""
+const H1 = "h-20261020-0900-ruptura_canal_48h";
+const tarjeta = (id, o = {}) => ({id, hipotesis: id.split(":")[0], titulo: "Título " + id, familia: "ruptura_canal", regla: "Regla " + id, clase: "candidata",
+  cumple_reglas: true, fuera_de_reglas: false, frecuencia: "frecuente", op_dia: 1.4, dentro: {n: 512, R: 0.08, ic95: [-0.05, 0.21]},
+  fuera: {n: 330, R: 0.21, ic95: [0.04, 0.38], p: 0.003, q: 0.07, dsr: 0.97, mitades: [0.18, 0.24]},
+  cuenta: {R_dia: 0.29, pct_dia: 0.145, pct_dia_compuesto: 0.144, caida_max_pct: 8.2},
+  meta: {falta_R_dia: 1.71, falta_pct_dia: 0.855, texto: "Le faltan 1,71 R al día"}, motivos: [], puntuacion: 0.04, ...o});
+const est = (o = {}) => ({formato: 1, ts: now - 5000, latido: now - 5000, estado: "pausa", motivo: "Pausa por la apertura de Europa hasta las 09:30",
+  aviso: "Laboratorio de investigación: nada de esto opera.", proxima_pausa: {ventana: "europa", nombre: "Europa", desde: now - 600000, hasta: now + 1500000},
+  recursos: {procesos: 0, procesos_max: 2, memoria_libre_mb: 2965, memoria_limite_mb: 2500, memoria_usada_mb: 0, cpu_pc_pct: 52.8, limitado_por: "pausa",
+             prioridad: "por debajo de lo normal"},
+  datos: {epoca: "2026-10", periodo: {desde: "2023-10-01", hasta: "2026-09-30", corte: "2025-08-16"}}, codigo: {canario: {estado: "ok"}},
+  contadores: {hipotesis: {total: 41, hoy: 41, en_cola: 41, cupo_hoy: 41}, n: {total: 214, fuera: 61, efectivo: 38.4, previo: 3917, dsr: 2336},
+               descartes_por_motivo: {R2: 9, K2: 3}},
+  embudo: [{etapa: "recibidas", n: 41}, {etapa: "admitidas", n: 41}, {etapa: "pasan_rapida", n: 12}, {etapa: "pasan_completa", n: 3},
+           {etapa: "candidatas", n: 1}, {etapa: "en_avance", n: 1}, {etapa: "listas", n: 0}],
+  meta: {objetivo_pct_dia: 1, riesgo_pct: 0.5, objetivo_R_dia: 2, mejor: null, falta_R_dia: 2, falta_pct_dia: 1,
+         texto: "Le faltan 1,71 R al día (0,86 % de la cuenta con 0,5 % de riesgo). El riesgo no se sube."},
+  en_curso: [], cola: {pendientes: 42, por_tipo: {admision: 41, canario: 1}, siguientes: []},
+  mejores: [tarjeta(H1 + ":V2"), tarjeta(H1 + ":V3", {clase: "descartada_robustez", no_ha_pasado: "no ha pasado: B1: p = 0,11",
+            fuera: {n: 260, R: 0.09, ic95: [-0.06, 0.24]}, cuenta: {R_dia: 0.1, pct_dia: 0.05}})],
+  en_avance: [tarjeta(H1 + ":V2", {clase: "en_avance", avance: {desde: now - 9 * 864e5, completas: 12, abiertas: 2, R_medio: 0.3, p_holm: null,
+              caida_max_pct: 1.2, faltan: "28 operaciones y 19 días"}})],
+  listas: [], consolidacion: {ts: now - 3600e3, umbral_dsr_z: 3.64, bh_m: 4131}, diario_hoy: {dia: madDay(now), lineas: ["13:55 Pausa por la apertura"]},
+  errores: [], diario: {dia: madDay(now), hipotesis: {recibidas: 41, admitidas: 41, rechazadas: []}, variantes: {rapida: 48, completa: 6, robustez: 1},
+  texto: ["Hoy: 41 hipótesis admitidas de 41 recibidas"], lecciones: [], generador: []}, pausa_manual: false, ...o});
+const DET = {formato: 1, hipotesis: {id: H1}, estado: "terminada", variantes: [{id: H1 + ":V2",
+  tarjeta: {...tarjeta(H1 + ":V2"), checks: {R1: true, K2: true, B1: false, X9: true, A1: "x"},
+            avance: {desde: now - 9 * 864e5, completas: 12, abiertas: 2, R_medio: 0.3, curva: [[now - 5 * 864e5, 1.0], [now - 864e5, 3.6]]}},
+  operaciones: {fuera: [{t: now - 300 * 864e5, R_f: 1.5}, {t: now - 200 * 864e5, R_f: -1}, {t: now - 100 * 864e5, R: 2.1}, {t: "x", R_f: 5}]}}]};
+const AYER = madDay(now - 864e5);
+const lvReply = (o = {}) => url => { const ok = d => ({ok: true, status: 200, json: async () => d});
+  if (url === "/api/lab_vivo") return ok(o.estado || est());
+  if (url === "/api/lab_vivo/cola") return ok({pendientes: 42, por_tipo: {admision: 41, canario: 1}, en_curso: [],
+    fallidos_24h: [{tipo: "completa", objetivo: H1 + ":V4", intentos: 3, error: "excepción <x>"}],
+    siguientes: [{tipo: "canario", objetivo: "canario", prioridad: 13}, {tipo: "admision", objetivo: "h-20261029-1130-h01-tsmom_diario", prioridad: 21}]});
+  if (url === "/api/lab_vivo/generador?limite=10") return ok({notas: [{archivo: "2026-10-29-1215.json", resumen: "6 hipótesis nuevas"}], n: 1});
+  if (url === `/api/lab_vivo/diario?dia=${AYER}`) return ok({dia: AYER, hipotesis: {recibidas: 24, admitidas: 21},
+    texto: ["Hoy: 21 hipótesis admitidas de 24 recibidas"], lecciones: ["lección de ayer"]});
+  if (url.startsWith("/api/lab_vivo/hipotesis?id=")) return ok(DET);
+  return {ok: false, status: 404}; };
+const lvHtml = () => ["#lvHead", "#lvCtl", "#lvMeta", "#lvFunnel", "#lvBest", "#lvDet", "#lvAvance", "#lvDiario", "#lvCola"].map(i => H.el(i).innerHTML).join("\n");
+"""
+
+
+def test_laboratorio_estado_pausa_meta_embudo_mejores_detalle_avance_diario_y_cola():
+    """Al conectar se pide GET /api/lab_vivo; al abrir la pestaña, también la cola, las notas del generador, los diarios
+    anteriores y el detalle de lo que está en avance. Se ve la pausa con su cuenta atrás, recursos, el botón Pausar y el
+    aviso de que todo es virtual; la meta del 1 % (fuera de muestra y en avance) con la nota fija del riesgo; el embudo
+    con el número de pruebas y el listón; las mejores con su IC y su motivo; y, al pulsar una, su curva y sus
+    comprobaciones en verde o rojo (ninguna petición con un id fuera del patrón)."""
+    r = run(LV + """H.fetchReply = lvReply(); H.open(); reset(); await loadApi(); const f0 = H.fetches.slice();
+      H.fetches.length = 0; H.fire("click", {"data-tab": "lab"}); await loadLab(); renderAll(true);
+      const f1 = H.fetches.slice(), a = Object.fromEntries(["#lvHead", "#lvCtl", "#lvMeta", "#lvFunnel", "#lvBest", "#lvAvance", "#lvDiario", "#lvCola"].map(i => [i, H.el(i).innerHTML]));
+      const hora = madHM(now + 1500000);
+      H.fire("click", {"data-lv-sel": H1 + ":V2"}); await lvDetFetch(H1); renderAll(true);
+      const det = H.el("#lvDet").innerHTML, detH = H.el("#lvDet").hidden;
+      H.fire("click", {"data-lv-sel": H1 + ":V2"}); renderAll(true);
+      return {f0, f1, a, hora, det, detH, cerrado: H.el("#lvDet").hidden, sent: H.sent(), todo: lvHtml()};""")
+    assert "/api/lab_vivo" in r["f0"] and not any(u.startswith("/api/lab_vivo/") for u in r["f0"])
+    f1 = r["f1"]
+    for u in ("/api/lab_vivo", "/api/lab_vivo/cola", "/api/lab_vivo/generador?limite=10", "/api/lab_vivo/hipotesis?id=h-20261020-0900-ruptura_canal_48h"):
+        assert u in f1, u
+    assert sum(u.startswith("/api/lab_vivo/diario?dia=") for u in f1) == 2
+    a = r["a"]
+    assert "En pausa" in a["#lvHead"] and f"Pausa: apertura de Europa, vuelve a las {r['hora']} (dentro de" in a["#lvHead"]
+    assert "0 de 2 · por debajo de lo normal" in a["#lvHead"] and "Todo es virtual: nada opera." in a["#lvHead"] and "Canario: el libro reproduce" in a["#lvHead"]
+    assert 'data-lv-acc="pausar"' in a["#lvCtl"] and ">Pausar</button>" in a["#lvCtl"]
+    m = a["#lvMeta"]
+    assert "Mejor fuera de muestra" in m and "+0,29 R/día" in m and "Mejor en avance" in m and "+0,40 R/día" in m and "2,00 R/día" in m
+    assert "Le faltan 1,71 R al día (0,86 % de la cuenta con 0,5 % de riesgo)" in m and "Con 0,5 % de riesgo por operación (no se sube)" in m
+    fu = a["#lvFunnel"]
+    assert ">Recibidas</small><b>41</b>" in fu and "hoy 41" in fu and "hoy 48 medidas" in fu and ">Listas</small><b>0</b>" in fu
+    assert "214 variantes medidas" in fu and "más 3917 pruebas previas" in fu and "hace falta un Sharpe diario ≈ 0,17 fuera de muestra" in fu
+    b = a["#lvBest"]
+    assert "Título h-20261020-0900-ruptura_canal_48h:V2" in b and "+0,21 R" in b and "+0,04 a +0,38" in b and "330 op." in b
+    assert "no ha pasado: B1: p = 0,11" in b and "1,71 R/día" in b and "descartada en robustez" in b
+    av = a["#lvAvance"]
+    assert "28 operaciones y 19 días" in av and "<small>Días</small><b>9</b>" in av and "<small>Completas</small><b>12</b>" in av and "<svg" in av
+    d = a["#lvDiario"]
+    assert ">Hoy</time>" in d and ">Ayer</time>" in d and "<b>21 hipótesis admitidas de 24 recibidas</b>" in d and "lección de ayer" in d
+    assert "13:55 Pausa por la apertura" in d and "29/10 12:15" in d and "6 hipótesis nuevas" in d
+    c = a["#lvCola"]
+    assert "42 trabajos: 41 de admisión, 1 de canario" in c and "prioridad 21" in c and "excepción &lt;x&gt;" in c
+    assert "Qué falla más" in c and "R2 · pierde dentro" in c and "K2 · pierde fuera" in c
+    det = r["det"]
+    assert r["detH"] is False and "<svg" in det and "Fuera de muestra (backtest, 3 op.)" in det and "En avance (virtual, 2 puntos)" in det
+    assert "✓ R1 · ≥ 120 op. dentro" in det and "✗ B1 · mejor que al azar" in det and "✓ K2 · gana fuera" in det and "X9" not in det
+    assert "Regla h-20261020-0900-ruptura_canal_48h:V2" in det and "p 0,003 · q 0,07 · DSR 0,97" in det
+    assert r["cerrado"] is True and r["sent"] == []
+    _sin_null(r["todo"], det, *a.values())
+
+
+def test_laboratorio_pausar_reanudar_orden_web_y_sin_conexion():
+    """Pausar y reanudar van por el WebSocket ({type: "lab_vivo", accion}); sin conexión se avisa y no se pierde el clic.
+    El resultado llega en «orden_web» (area lab_vivo), con su aviso; con la pausa manual puesta (pausa_manual del bot)
+    el botón pasa a «Reanudar»; una acción desconocida no se envía y si el bot no contesta se dice."""
+    r = run(LV + """H.fetchReply = lvReply(); reset();
+      S.lv = est(); S.lvApi = "ok"; S.tab = "lab"; renderAll(true);
+      H.fire("click", {"data-lv-acc": "pausar"}); const t0 = H.el("#toast").textContent, s0 = H.sent().length;
+      H.open(); await loadApi(); S.tab = "lab";
+      H.fire("click", {"data-lv-acc": "pausar"}); renderAll(true); const t1 = H.el("#toast").textContent, pend = H.el("#lvHead").innerHTML;
+      H.recv({type: "orden_web", ts: Date.now(), area: "lab_vivo", accion: "pausar", id: null, ok: true, why: null}); const t2 = H.el("#toast").textContent;
+      H.recv({type: "lab_vivo", ts: now + 1000, estado: "activo", motivo: "Pausa manual (archivo pausa_manual)", latido: now + 1000, pausa_manual: true,
+              proxima_pausa: {}, contadores: {}, embudo: [], meta: {}, mejores: [], en_avance: [], listas: [], canario: "ok", recursos: {procesos: 0, memoria_libre_mb: 3000}});
+      renderAll(true); const man = H.el("#lvCtl").innerHTML + H.el("#lvHead").innerHTML;
+      H.fire("click", {"data-lv-acc": "reanudar"});
+      H.recv({type: "orden_web", ts: Date.now(), area: "lab_vivo", accion: "reanudar", id: null, ok: false, why: "No estaba en pausa"}); const t3 = H.el("#toast").textContent;
+      H.fire("click", {"data-lv-acc": "borrar"}); H.fire("click", {"data-lv-acc": "pausar"});
+      H.timeouts.filter(x => x.ms === 10000).forEach(x => x.f());
+      return {t0, s0, t1, pend, t2, man, t3, t4: H.el("#toast").textContent, sent: H.sent()};""")
+    assert "Sin conexión con el bot" in r["t0"] and r["s0"] == 0
+    assert "Pausa del laboratorio pedida al bot (no toca el paper ni tus reglas)" in r["t1"] and "pendiente de que el bot la confirme" in r["pend"]
+    assert r["t2"] == "Hecho: laboratorio en pausa manual (no toca el paper)."
+    assert 'data-lv-acc="reanudar"' in r["man"] and ">Reanudar</button>" in r["man"] and "Pausa manual: la pediste tú" in r["man"]
+    assert r["t3"] == "El bot no lo ha hecho (laboratorio): No estaba en pausa."
+    assert "El bot no ha confirmado la orden del laboratorio" in r["t4"]
+    assert r["sent"] == [{"type": "lab_vivo", "accion": "pausar"}, {"type": "lab_vivo", "accion": "reanudar"}, {"type": "lab_vivo", "accion": "pausar"}]
+    _sin_null(r["pend"], r["man"])
+
+
+def test_laboratorio_sin_ruta_404_apagado_parado_y_campos_rotos():
+    """Un bot sin GET /api/lab_vivo (404) no rompe nada, lo dice y no pide las subrutas; «apagado» enseña su nota y no
+    ofrece mandos; «parado» (del bot, o porque el latido tiene más de 3 min) dice desde cuándo y lo último que hubo. Un
+    resumen del bus con todo roto no rompe nada y un id de hipótesis con una ruta dentro nunca se pide."""
+    r = run(LV + """H.fetchReply = url => ({ok: false, status: 404});
+      H.open(); reset(); await loadApi(); S.tab = "lab"; await loadLab(); renderAll(true);
+      const sinRuta = lvHtml(), api = S.lvApi, f404 = H.fetches.filter(u => u.startsWith("/api/lab_vivo/")).length;
+      H.fetchReply = url => url === "/api/lab_vivo" ? {ok: true, json: async () => ({estado: "apagado", nota: "El laboratorio vivo no está en marcha (scripts/lab-vivo.ps1)", pausa_manual: false})} : {ok: false, status: 404};
+      H.fetches.length = 0; await loadLab(); renderAll(true); const apagado = lvHtml(), fApag = H.fetches.slice();
+      S.lv = null; H.fetchReply = lvReply({estado: est({estado: "parado", estado_corredor: "activo", latido: now - 10 * 60e3,
+        nota: "El laboratorio vivo no da señales desde las 14:00 (más de 3 min)"})});
+      await loadLab(); renderAll(true); const parado = lvHtml();
+      S.lv = est({estado: "activo", latido: now - 10 * 60e3, ts: now - 10 * 60e3}); renderAll(true); const paradoWeb = H.el("#lvHead").innerHTML + H.el("#lvCtl").innerHTML;
+      H.recv({type: "lab_vivo", ts: now + 50, estado: 5, motivo: {}, latido: "x", aviso: 7, proxima_pausa: "x", recursos: [],
+        contadores: {n: "x", hipotesis: 3, descartes_por_motivo: {K2: "x", B1: -1}}, embudo: [null, 3, {etapa: 5, n: "x"}, {etapa: "recibidas", n: null}],
+        meta: {mejor: 5, texto: 9, objetivo_R_dia: "x"}, canario: 5, pausa_manual: "si", nota: 4,
+        mejores: [null, 7, {id: 5, fuera: "x", cuenta: {R_dia: "x"}, meta: 5, motivos: [null, 3]}, {id: H1 + ":V9", clase: 7, checks: 5}],
+        en_avance: [{avance: {curva: [[1, "x"], null, "x"], desde: "x"}}, {id: "malo/../../x:V1", avance: {completas: "x"}}], listas: "x"});
+      S.lvSel = H1 + ":V9"; renderAll(true); const rotas = lvHtml();
+      H.fetches.length = 0; H.fire("click", {"data-lv-sel": H1 + ":V9"}); H.fire("click", {"data-lv-sel": "malo/../../x:V1"}); renderAll(true);
+      const malo = H.el("#lvDet").innerHTML, fMalo = H.fetches.filter(u => u.includes("malo")).length;
+      H.recv({type: "lab_vivo", estado: "apagado"}); renderAll(true);
+      return {api, sinRuta, f404, apagado, fApag, parado, paradoWeb, rotas, malo, fMalo, fin: lvHtml()};""")
+    assert r["api"] == "sin_ruta" and "aún no lee el laboratorio vivo (GET /api/lab_vivo no existe" in r["sinRuta"] and r["f404"] == 0
+    assert ">Apagado</b>" in r["apagado"] and "no está en marcha (scripts/lab-vivo.ps1)" in r["apagado"] and "data-lv-acc" not in r["apagado"]
+    assert r["fApag"] == ["/api/lab_vivo"]
+    assert ">Parado</b>" in r["parado"] and "no da señales desde las 14:00" in r["parado"] and "Lo último que dijo: «Activo»" in r["parado"]
+    assert "data-lv-acc" not in r["parado"]
+    assert ">Parado</b>" in r["paradoWeb"] and "Sin latido desde hace más de 3 minutos" in r["paradoWeb"] and "data-lv-acc" not in r["paradoWeb"]
+    assert "Sin curva: el id de la hipótesis no es válido." in r["malo"] and r["fMalo"] == 0
+    _sin_null(r["sinRuta"], r["apagado"], r["parado"], r["paradoWeb"], r["rotas"], r["malo"], r["fin"])
+
+
+def test_ranking_y_laboratorio_en_la_demostracion_son_ejemplos_marcados():
+    """Sin bot, las dos pestañas enseñan datos de ejemplo incrustados (rankingData y labVivoData), rotulados como tales:
+    el ranking en su orden, sin las que pierden, con la estrategia del motor simulado («6 diarias v2») aparte y fuera
+    del ranking; el laboratorio con su cabecera, sus mejores, su detalle con curva y sus comprobaciones. Nada se envía."""
+    page = HTML.read_text(encoding="utf-8")
+    blob = lambda i: page.split(f'<script type="application/json" id="{i}">', 1)[1].split("</script>", 1)[0]
+    rkd, lvd = json.loads(blob("rankingData")), json.loads(blob("labVivoData"))
+    assert rkd["ejemplo"] is True and lvd["ejemplo"] is True and len(blob("rankingData")) + len(blob("labVivoData")) < 40_000
+    assert all(re.fullmatch(r"h-\d{8}-\d{4}-[a-z0-9_-]{3,60}", h) for h in lvd["hipotesis"])
+    assert "Ordenado por beneficio fuera de muestra con costes; lo de arriba con poca muestra o frágil suele ser suerte." in page
+    # el texto tal cual de cada bloque, como lo daría el navegador (textContent): se lee por el camino de siempre
+    bloques = json.dumps({i: blob(i) for i in ("rankingData", "labVivoData")}, ensure_ascii=False)
+    r = run(f"const B = {bloques};\n" + """document.getElementById = id => id in B ? {textContent: B[id]} : null;
+      demoRanking(); demoLab();
+      H.fire("click", {"data-tab": "ranking"}); renderAll(true);
+      const rows = H.el("#rkRows").innerHTML, ids = ["curso-ej", "lv-ruptura-canal-48h", "e2_impulso_7d", "ruptura3", "lab2000:ap_mom:15:0,2|rvol:1,5|todos|a_favor|todas|todas|todos|t:30|3|3|sig"].map(i => rows.indexOf(`data-rk-sel="${i}"`));
+      const rk = {note: H.el("#rkDemoNote").innerHTML, noteH: H.el("#rkDemoNote").hidden, demo: H.el("#v-ranking").classList.contains("demo"), rows, ids,
+                  live: H.el("#rkLive").innerHTML, badge: H.el("#rkBadge").hidden, foot: H.el("#rkFoot").innerHTML};
+      H.fire("click", {"data-rk-sort": "op_dia"}); H.fire("click", {"data-rk-t": "fragiles"}); renderAll(true); rk.filtrada = H.el("#rkRows").innerHTML;
+      S.tab = "mando"; renderAll(true); rk.md = H.el("#mdRk").innerHTML; rk.mdSub = H.el("#mdRkSub").textContent;
+      H.fire("click", {"data-tab": "lab"}); renderAll(true);
+      const lv = {note: H.el("#lvDemoNote").innerHTML, noteH: H.el("#lvDemoNote").hidden, demo: H.el("#v-lab").classList.contains("demo"), todo: lvHtml_()};
+      H.fire("click", {"data-lv-acc": "pausar"}); lv.toast = H.el("#toast").textContent;
+      H.fire("click", {"data-lv-sel": "h-20261020-0900-ruptura_canal_48h:V2"}); renderAll(true); lv.det = H.el("#lvDet").innerHTML;
+      return {rk, lv, sockets: H.sockets.length, fetches: H.fetches.filter(u => u.includes("ranking") || u.includes("lab_vivo")).length};
+      function lvHtml_(){ return ["#lvHead", "#lvCtl", "#lvMeta", "#lvFunnel", "#lvBest", "#lvAvance", "#lvDiario", "#lvCola"].map(i => H.el(i).innerHTML).join("\\n"); }""", live=False)
+    k, v = r["rk"], r["lv"]
+    assert k["noteH"] is False and "EJEMPLO" in k["note"] and k["demo"] is True and k["badge"] is True
+    assert all(x >= 0 for x in k["ids"]) and k["ids"] == sorted(k["ids"])
+    assert all(f'data-rk-sel="{i}"' not in k["rows"] for i in ("seis", "seis2", "fibo-ej"))   # las que pierden no entran
+    assert "6 diarias v2" in k["live"] and "Fuera del ranking: pierde" in k["live"] and "Descartada por ti" in k["rows"]
+    assert "frágil</span>" not in k["filtrada"] and 'data-rk-sel="lv-ruptura-canal-48h"' in k["filtrada"]
+    assert "6 diarias v2 · fuera del ranking: pierde" in k["md"] and "(ejemplo)" in k["mdSub"]
+    # las filas reales son las del bot: E2 con 7 días, frágil y sin corregir; Ruptura V3 con su Holm; cada una con sus costes
+    assert ">sin corregir</span>" in k["rows"] and ">corregida Holm 1,00 ✗</span>" in k["rows"] and "costes del backtest" in k["rows"]
+    assert "costes del laboratorio (sin funding)" in k["rows"] and "No hay un perfil de costes común" in k["foot"]
+    assert "descartada por ti" in k["md"] and "frágil" in k["md"] and "cada una con los costes de su estudio" in k["note"]
+    assert v["noteH"] is False and "DEMOSTRACIÓN" in v["note"] and v["demo"] is True
+    assert "Activo" in v["todo"] and "Próxima pausa: apertura de Europa" in v["todo"] and "Todo es virtual: nada opera." in v["todo"]
+    assert "Ruptura del canal de 48 h con la tendencia diaria a favor" in v["todo"] and "28 operaciones y 19 días" in v["todo"]
+    assert v["toast"] == "Ejemplo: en la demostración no se envía nada al bot."
+    assert "<svg" in v["det"] and "Fuera de muestra (backtest, 200 op.)" in v["det"] and "✓ B8 · Sharpe deflactado ≥ 0,95" in v["det"]
+    assert r["sockets"] == 0 and r["fetches"] == 0   # nada que pedir sin bot
+    _sin_null(*[x for x in (*k.values(), *v.values()) if isinstance(x, str)])

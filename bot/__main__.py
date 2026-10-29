@@ -11,7 +11,11 @@ Modo real con OKX EU (docs/06): el conector (RealBroker) se construye siempre y 
 (secretos/okx.env): no hace ninguna petición privada. Los tickets van al paper (BOT_BROKER=paper, por defecto); con
 BOT_BROKER=real irían al conector, que además necesita las claves, BOT_MODO_REAL=1 y la confirmación escrita en la web.
 Comisiones (bot/comisiones.py): el perfil de OKX EU en uso; si el conector lee la comisión real de la cuenta (solo
-lectura), manda esa. La gráfica de cada operación usa las velas públicas de OKX EU del par (bot/velas_okx.py)."""
+lectura), manda esa. La gráfica de cada operación usa las velas públicas de OKX EU del par (bot/velas_okx.py).
+Ranking de estrategias (bot/ranking.py): las filas de BACKTEST_DIR/ranking, las tarjetas del laboratorio vivo y lo que
+opera en el paper o en la prueba en avance, ordenadas por beneficio fuera de muestra con costes (mensaje «ranking»).
+Laboratorio vivo (docs/07): va en un proceso aparte (scripts/lab-vivo.ps1); el bot solo lee sus archivos
+(bot/lab_vivo_lectura.py, mensaje «lab_vivo») y nunca importa bot.lab_vivo."""
 import asyncio
 import logging
 import os
@@ -38,6 +42,7 @@ from .feeds import FeedPoller, load_registry
 from .fiables import ENABLED as FIABLES, Fiables
 from .fuentes_vivas import FuentesVivas
 from .hunters import SOURCES, SourceState, run_source
+from .lab_vivo_lectura import LabVivoLectura
 from .local_ai import LocalAI
 from .market import Market
 from .models import now_ms
@@ -45,6 +50,7 @@ from .okx_firma import FiltroSecretos
 from .okx_real import RealBroker
 from .paper import PaperBroker
 from .predict import Predictor, results_getter
+from .ranking import Ranking
 from .reaccion import Reaccion
 from .reflejo import Reflejo
 from .server import Services, make_app, velas_de
@@ -225,6 +231,11 @@ async def main() -> None:
                 optional("El enlace evolución–aprendizaje", lambda: evo.conectar_aprendizaje(learn))
             # El cambio del filtro de noticias (28-10-2026) entra con este reinicio: queda apuntado una sola vez.
             optional("El apunte de los cambios del código", evo.apuntar_cambios_codigo)
+        # Laboratorio vivo (proceso aparte, docs/07): solo se leen sus archivos (GET /api/lab_vivo…, mensaje «lab_vivo»)
+        # y su único mando, pausar o reanudar, crea o borra pausa_manual (con el origen estricto de la web).
+        labv = optional("La lectura del laboratorio vivo", lambda: LabVivoLectura(bus))
+        # Ranking de estrategias: estudios (BACKTEST_DIR/ranking), laboratorio vivo y lo de en vivo (paper y vigilancia).
+        rank = optional("El ranking de estrategias", lambda: Ranking(bus, get_resultados=broker.results, lab=labv))
 
         def health() -> dict:
             return {"phase": config.PHASE, "sources": [st.view() for st in states],
@@ -244,7 +255,7 @@ async def main() -> None:
                             reflejo=refl, fiables=fiab, entrada_noticias=entrada, decisiones=decs,
                             velas=velas_de(lambda c: vigil.bars.get(c),
                                            CacheBars(live=lambda c: vigil.bars.get(c), keep=8).get),
-                            velas_okx=VelasOKX(session), real=real)
+                            velas_okx=VelasOKX(session), real=real, ranking=rank, lab_vivo=labv)
         runner = web.AppRunner(make_app(bus, health, services))
         await runner.setup()
         await web.TCPSite(runner, config.HOST, config.PORT).start()
@@ -267,7 +278,7 @@ async def main() -> None:
                     bus.publish({"type": "sources", "sources": view})
                 await asyncio.sleep(3)
 
-        extra = [m.run() for m in (learn, vivas, evo, refl, react, fiab, entrada, real)
+        extra = [m.run() for m in (learn, vivas, evo, refl, react, fiab, entrada, real, labv, rank)
                  if m is not None]   # cada run() atrapa sus fallos (el del modo real, apagado, no pide nada a OKX)
         try:
             await asyncio.gather(*(run_source(st, session, desk) for st in states),
