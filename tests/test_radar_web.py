@@ -1773,13 +1773,14 @@ IMP_BT = {"generated": 1793150000000, "split": 1755295200000, "nota": "E2",
 
 def test_backtest_estrategia_en_marcha_seis_o_impulso():
     """Con p.preset «seis», la pestaña Backtest abre con «Estrategia en marcha: 6 diarias» (KPI, curva y avisos: fuera de
-    muestra pierde y está en la cartera por tu decisión) y E2 pasa a «Estrategia anterior». Con «impulso» o sin dato,
-    E2 sigue en marcha y «6 diarias» sale debajo como medida y no en marcha."""
+    muestra pierde y está en la cartera por tu decisión) y E2 pasa a «Estrategia anterior». Con «impulso» o, con el bot,
+    sin dato, E2 sigue en marcha y «6 diarias» sale debajo como medida y no en marcha. (En la demostración sin dato manda
+    la estrategia activa simulada: test_backtest_seis2_en_marcha_y_seis_como_anterior.)"""
     page = HTML.read_text(encoding="utf-8")
     r = run("const now = Date.now();" + FIAB + f"""S.btImp = {{impulso: {json.dumps(IMP_BT)}, lab: null, seis: {json.dumps(SEIS_BT)}}};
       const out = {{}};
       for (const [k, m] of [["seis", opn({{...SEIS_P, preset: "seis", nombre: "6 diarias"}})], ["impulso", opn({{preset: "impulso"}})], ["nada", null]]){{
-        S.openings = m; S.tab = "bt"; S.btSig = null; renderAll(true);
+        S.openings = m; S.live = k === "nada"; S.tab = "bt"; S.btSig = null; renderAll(true); S.live = false;
         out[k] = {{title: H.el("#btLiveTitle").textContent, sub: H.el("#btLiveSub").textContent, top: H.el("#btSeisTopP").hidden, alt: H.el("#btSeisAltP").hidden,
           seis: (k === "seis" ? H.el("#btSeisTop") : H.el("#btSeisAlt")).innerHTML + H.el("#btSeisKpis").innerHTML,
           e2: H.el("#btLive").innerHTML + H.el("#btLiveKpis").innerHTML}}; }}
@@ -1889,7 +1890,7 @@ def test_entrada_con_la_forma_del_backend_y_operacion_enlaza_la_noticia():
       return {trace, res, cl: H.el("#closedRows").innerHTML};""")
     assert "Espera hasta" in r["trace"] and "11:01:00 UTC" in r["trace"]
     assert "72 % en 9 noticias distintas (36 historias×moneda) · a 4 h desde el triaje, ajustado al mercado" in r["trace"]
-    assert "con «6 diarias», 6 entradas y 3 % de riesgo; con E2, el motor cuenta también estas entradas en su tope de 4 y 2 %" in r["trace"]
+    assert "con «6 diarias» y «6 diarias v2», 6 entradas y 3 % de riesgo; con E2, el motor cuenta también estas entradas en su tope de 4 y 2 %" in r["trace"]
     assert 'data-story="n1"' in r["res"] and 'data-story="nf-n1-btc"' not in r["res"]
     assert 'data-story="n1"' in r["cl"]
     _sin_null(r["trace"], r["res"], r["cl"])
@@ -2139,9 +2140,9 @@ def test_decisiones_entradas_por_noticia_aparte():
 
 
 def test_decisiones_demostracion_seis_diarias_marcada_como_ejemplo():
-    """Sin bot: decisiones de EJEMPLO de los 3 últimos días con la lógica de «6 diarias» (≤ 6 entradas al día, una
-    posición por moneda, exposición ≤ 100 %: como mucho 3 a la vez, stop 1,5 % y 3R), rotuladas como ejemplo, sin
-    estrategias que ya no existen y sin pedir nada al bot."""
+    """Sin bot: decisiones de EJEMPLO de los 3 últimos días con la lógica de la estrategia activa simulada, «6 diarias v2»
+    (≤ 6 entradas al día, una posición por moneda, exposición ≤ 100 %: como mucho 4 a la vez con stop 2 %; la mitad en
+    3R y el resto con cerrojo), rotuladas como ejemplo, sin estrategias que ya no existen y sin pedir nada al bot."""
     r = run("""const out = {};
       for (const [k, t] of [["noche", Date.UTC(2026, 9, 28, 21, 0)], ["midiendo", Date.UTC(2026, 9, 28, 0, 5)]]){
         S.vnow = t; S.decDemoK = null; S.tab = "market"; renderAll(true); const box = H.el("#decBox").innerHTML;
@@ -2157,19 +2158,379 @@ def test_decisiones_demostracion_seis_diarias_marcada_como_ejemplo():
           rech: [...new Set(rows.filter(x => x.decision === "rechazada").map(x => x.motivo_codigo))],
           no: [...new Set(rows.filter(x => x.decision === "no_entra").map(x => x.motivo_codigo))],
           decs: [...new Set(rows.map(x => x.decision))], tid: abiertas.every(x => /^t[0-9a-f]{12}$/.test(x.trade_id)),
-          plan: rows.filter(x => x.datos && x.datos.plan).every(x => x.datos.plan.stop_pct === 1.5 && x.datos.plan.objetivo_R === 3),
+          plan: rows.filter(x => x.datos && x.datos.plan).every(x => x.datos.plan.stop_pct === 2 && x.datos.plan.primer_objetivo_R === 3 && x.datos.plan.fraccion === 0.5),
+          parc: rows.filter(x => x.decision === "parcial").every(x => x.trade_id && rows.some(y => y.trade_id === x.trade_id && y.decision === "abierta" && y.ts < x.ts)),
           dias: [...new Set(rows.map(x => x.dia))].sort()}; }
       return {...out, fetches: H.fetches.length, sockets: H.sockets.length};""", live=False)
     a, b = r["noche"], r["midiendo"]
     assert a["demo"] is True and a["n"] > 40 and a["dias"] == ["2026-10-26", "2026-10-27", "2026-10-28"]
-    assert a["presets"] == ["seis"] and a["estr"] == ["6 diarias"] and a["tid"] and a["plan"]
-    assert all(v <= 6 for v in a["ab"].values()) and a["maxA"] <= 3 and a["dup"] is False
+    assert a["presets"] == ["seis2"] and a["estr"] == ["6 diarias v2"] and a["tid"] and a["plan"] and a["parc"]
+    assert all(v <= 6 for v in a["ab"].values()) and a["maxA"] <= 4 and a["dup"] is False
     assert set(a["rech"]) <= {"exposicion"} and set(a["no"]) <= {"impulso_nulo", "veto_noticia", "moneda_ocupada", "tope_dia"}
     assert {"entra", "abierta", "cerrada", "perdida"} <= set(a["decs"]) and "esperando" not in a["decs"]
+    assert set(a["decs"]) <= {"entra", "abierta", "parcial", "cerrada", "perdida", "no_entra", "rechazada"}
     box = a["box"]
-    assert "Ejemplo inventado" in box and "«6 diarias»" in box and "Perdida con el bot parado" in box and "Recuento de hoy (28/10" in box
+    assert "Ejemplo inventado" in box and "«6 diarias v2»" in box and "Perdida con el bot parado" in box and "Recuento de hoy (28/10" in box
+    assert "stop 2 %, la mitad en 3R y el resto corre" in box and "(1,5 %)" not in box
     assert "E2" not in box and "ruptura" not in box.lower() and "Operación paper de ejemplo" in box and 'data-tabgo="results"' not in box
     assert "Última apertura" in a["md"] and "Ejemplo" in a["md"] and "Nueva York:" in a["md"]
     assert "esperando" in b["decs"] and "Tokio: BTC, ETH, SOL y XRP esperan (midiendo el impulso)" in b["md"]
     assert r["fetches"] == 0 and r["sockets"] == 0
     _sin_null(a["box"], a["md"], b["box"], b["md"])
+
+
+# «6 diarias v2» (preset seis2 de bot/apertura.py, 29-10-2026): las entradas de «6 diarias» con la salida A (stop 2 %, la
+# mitad en 3R y el resto con cerrojo: a +3R su stop sube a +2R y lo sigue a 2R por detrás; 24 h sin activar, 7 días activada).
+SEIS2 = r"""
+const SEIS2_P = {...SEIS_P, sl_pct: 2, target_r: null, tp1_r: 3, tp1_frac: 0.5, lock_r: 3, floor_r: 2, trail_r: 2, trail_atr: null,
+  max_hold_h: 24, max_hold_active_h: 168, avg_hold_h: 16, preset: "seis2", nombre: "6 diarias v2"};
+const M = 60e3;
+const colsOf = html => Object.fromEntries(html.split('<div class="col">').slice(1).map(c => [c.split("</h3>")[0].split("<h3>")[1], c]));
+"""
+SEIS2_BT = {"generated": 1793230000000, "split": 1755295200000, "sl_pct": 2.0, "nota": "Réplica del motor, salida A <b>", "nombre": "6 diarias v2",
+            "params": {**SEIS_BT["params"], "sl_pct": 2.0, "target_r": None, "tp1_r": 3.0, "tp1_frac": 0.5, "lock_r": 3.0, "floor_r": 2.0,
+                       "trail_r": 2.0, "trail_atr": None, "max_hold_h": 24.0, "max_hold_active_h": 168.0},
+            "fuera": {"n": 1462, "mean_R": -0.0754, "win_rate": 0.3824, "max_R": 5.7, "paper_R_funding": -0.0749,
+                      "salidas": {"stop": 684, "tiempo": 601, "parcial": 177, "cerrojo": 150, "seguimiento": 25, "tiempo (activada)": 2},
+                      "horas_media": 17.1, "largos": {"n": 750, "mean_R": -0.15}, "cortos": {"n": 712, "mean_R": 0.004},
+                      "desde": 1755476100000, "hasta": 1792505400000, "curva_R": [[1755480600000, -1.12], [1792505400000, -110.2]]},
+            "dentro": {"n": 2354, "mean_R": -0.0543, "win_rate": 0.3785, "desde": 1698624900000, "hasta": 1755328500000,
+                       "curva_R": [[1698646140000, -1.12], [1755328500000, -127.8]]}}
+
+
+def test_tablero_programadas_y_pasando_controles_del_motor():
+    """«Estrategias y cartera» con el estado del motor: en Programadas, las aperturas que aún no han abierto (hora de
+    Madrid, estrategia activa y qué hará); en Pasando controles, las que miden o esperan la entrada con lo que va midiendo
+    cada moneda. Las terminadas no salen. Avisos de pausa y de tope del día; E2 con sus filtros; escapado y sin null."""
+    r = run(FIAB + SEIS2 + """H.open(); reset();
+      S.tab = "trades"; renderAll(true); const sin = colsOf(H.el("#kanban").innerHTML);
+      const T1 = now + 3*3600e3 + 20*M, T0 = now - 8*M;
+      const esp = why => ({signal: 0, strength: 0, state: "esperando_apertura", why, last_why: why, levels: null, tags: null, plan: null});
+      const wins = [
+        {id: "china-1", name: "Shanghái <b>", markets: [], open_utc: T1, state: "esperando_apertura", why: "", coins: {BTC: esp("A las 02:30 Madrid se mide"), ETH: esp(""), SOL: esp(""), XRP: esp("")}},
+        {id: "tokio-1", name: "Tokio y Seúl", markets: [], open_utc: T0, state: "midiendo_impulso", why: "", coins: {
+          BTC: {signal: 0, state: "midiendo_impulso", last_why: "Midiendo el impulso <i>", levels: {apertura: 100, impulso_pct: null, movimiento_pct: 0.12, minutos_medidos: 8}},
+          ETH: {signal: 0, state: "midiendo_impulso", last_why: null, why: null, levels: {movimiento_pct: -0.21, minutos_medidos: 8}},
+          SOL: {signal: 1, state: "esperando_entrada", step: "hora", last_why: "Impulso de +0,40 % en 15 min", levels: {impulso_pct: 0.4}, tags: {impulso_pct: 0.4}},
+          XRP: {signal: 0, state: "terminada", last_why: "Impulso de 0,00 %: sin dirección no se entra", levels: {impulso_pct: 0}}}},
+        {id: "europa-0", name: "Europa vieja", markets: [], open_utc: now - 20*3600e3, state: "terminada", why: "", coins: {BTC: {state: "terminada"}}},
+        null, {id: "rota", name: null, open_utc: "x", state: null, coins: null}];
+      H.recv(opn(SEIS2_P, {params_source: "usuario", windows: wins, day: {date: madDay(T1), entries: 2, risk_pct: 1, max_entries: 6, max_risk_pct: 3}}));
+      renderAll(true); const a = colsOf(H.el("#kanban").innerHTML), st = H.el("#tradesStrat").innerHTML;
+      H.recv(opn(SEIS2_P, {paused: true, windows: wins, day: {date: madDay(T1), entries: 6, risk_pct: 3, max_entries: 6, max_risk_pct: 3}}));
+      renderAll(true); const b = colsOf(H.el("#kanban").innerHTML);
+      H.recv(opn({...SEIS_P, preset: "impulso", min_move_pct: 0.2, rvol_min: 1.5, btc_filter: "a_favor", entry: "t:30", sl_pct: 3, target_r: 3}, {windows: [wins[0]]}));
+      renderAll(true); const e2 = colsOf(H.el("#kanban").innerHTML);
+      return {sin, a, b, e2, st, h1: madHM(T1), he1: madHM(T1 + 15*M), he0: madHM(T0 + 15*M), h0: madHM(T0), he2: madHM(T1 + 30*M)};""")
+    assert "aún no ha publicado su estado" in r["sin"]["Programadas"]
+    p, c = r["a"]["Programadas"], r["a"]["Pasando controles"]
+    assert '<span class="n">1</span>' in p and '<span class="n">1</span>' in c   # Shanghái (la rota, sin hora ni estado, no); Tokio midiendo
+    assert "Shanghái &lt;b&gt;" in p and "Shanghái <b>" not in p and f"{r['h1']} Madrid · en 3 h" in p and 'data-tabgo="market"' in p
+    assert (f"Medirá el impulso de los 15 primeros min de BTC, ETH, SOL y XRP y entrará a las {r['he1']} en el sentido del impulso; "
+            "stop 2 %, la mitad en 3R y el resto corre") in p and "6 diarias v2 · paper" in p
+    assert "Tokio y Seúl" in c and f"abrió a las {r['h0']} Madrid" in c and f"midiendo el impulso de los 15 primeros min; entrará a las {r['he0']}" in c
+    assert "+0,12 %</b> <span class=\"note\">en 8 min" in c and "Midiendo el impulso &lt;i&gt;" in c and "-0,21 %" in c
+    assert '<span class="pos">▲</span> <b class="mono pos">+0,40 %</b>' in c and "Esperando la entrada · Impulso de +0,40 % en 15 min" in c
+    assert "Terminada · Impulso de 0,00 %" in c and "Europa vieja" not in p + c
+    assert "6 diarias v2" in r["st"] and "preset 6 diarias v2" in r["st"] and "Puesta por tu decisión" in r["st"]
+    pb = r["b"]["Programadas"] + r["b"]["Pasando controles"]
+    assert "Motor pausado: no abrirá entradas" in pb and "Tope de entradas del día alcanzado" in r["b"]["Programadas"]
+    assert (f"entrará a las {r['he2']} en el sentido del impulso si pasa de ±0,20 % con volumen relativo ≥ 1,5 con BTC a favor; "
+            "stop 3 % y objetivo 3R") in r["e2"]["Programadas"]
+    _sin_null(*r["sin"].values(), *r["a"].values(), *r["b"].values(), *r["e2"].values(), r["st"])
+
+
+def test_tablero_posiciones_y_cerradas_sin_expediente():
+    """Tras conectar (o tras un reinicio) el paper puede tener posiciones y operaciones cerradas sin su expediente en la
+    web: el tablero también las enseña (En posición y Cerradas), con su R y el enlace a la noticia si es por noticia fiable."""
+    r = run(FIAB + SEIS2 + """H.open(); reset();
+      H.recv(pf({positions: [{story: "a-x-btc-1", coin: "BTC", side: "long", qty: 1, entry: 100, sl: 98, riskUsd: 0.5, notional: 25, upnl: 0.3,
+                 headline: "Apertura Tokio · Compra BTC <i>", strategy: "impulso-largo"}],
+               closed: [{story: "a-y-eth-1", id: "t1", coin: "ETH", side: "short", entry: 100, exit: 102, pnl: -0.56, R: -1.12, reason: "Stop de pérdida",
+                         closed: now - 3600e3, headline: "Venta ETH"},
+                        {story: "nf-n1-sol", id: "t2", coin: "SOL", side: "long", entry: 100, exit: 104.5, pnl: 1.5, R: 3, reason: "Objetivo",
+                         closed: now - 7200e3, headline: "Titular", tags: {origen: "noticia_fiable", story: "n1"}}]}));
+      S.tab = "trades"; renderAll(true); return colsOf(H.el("#kanban").innerHTML);""")
+    pos, cer = r["En posición"], r["Cerradas o descartadas"]
+    assert '<span class="n">1</span>' in pos and "Apertura Tokio · Compra BTC &lt;i&gt;" in pos and "+0,30 USDC · 0,60 R" in pos and 'data-story="a-x-btc-1"' in pos
+    assert '<span class="n">2</span>' in cer and "-1,12 R · Stop de pérdida" in cer and "+3,00 R · Objetivo" in cer
+    assert 'data-story="n1"' in cer and ">Noticia fiable</span>" in cer and cer.index("ETH") < cer.index("SOL")
+    _sin_null(pos, cer)
+
+
+def test_tablero_en_la_demostracion_con_la_estrategia_activa_simulada():
+    """Sin bot, el tablero y el motor de Mercado usan el motor SIMULADO con la estrategia activa («6 diarias v2»):
+    aperturas reales de las próximas 24 h en Programadas y, si una está midiendo, en Pasando controles; rotulado como
+    ejemplo, con los mismos impulsos que «Por qué entra o no» y sin pedir nada al bot."""
+    r = run("""const colsOf = html => Object.fromEntries(html.split('<div class="col">').slice(1).map(c => [c.split("</h3>")[0].split("<h3>")[1], c]));
+      const out = {};
+      for (const [k, t] of [["midiendo", Date.UTC(2026, 9, 28, 0, 8)], ["noche", Date.UTC(2026, 9, 28, 21, 0)]]){
+        S.vnow = t; S.decDemoK = null; S.demoMotor = null; S.tab = "trades"; renderAll(true);
+        const kb = colsOf(H.el("#kanban").innerHTML), st = H.el("#tradesStrat").innerHTML;
+        S.tab = "market"; renderAll(true);
+        const O = motorO(), tok = O.windows.find(w => w.open_utc === Date.UTC(2026, 9, 28, 0, 0));
+        out[k] = {kb, st, mk: H.el("#openings").innerHTML, sub: H.el("#openSub").textContent, pre: motorPreset().preset, demo: O.demo,
+          n: O.windows.length, tok: tok ? Object.fromEntries(Object.entries(tok.coins).map(([c, x]) => [c, [x.state, x.levels && x.levels.impulso_pct]])) : null}; }
+      // el impulso que mide el tablero acaba siendo el de la decisión de ejemplo
+      S.vnow = Date.UTC(2026, 9, 28, 0, 15, 30); S.demoMotor = null; S.decDemoK = null;
+      const fin = Object.fromEntries(Object.entries(motorO().windows.find(w => w.open_utc === Date.UTC(2026, 9, 28, 0, 0)).coins).map(([c, x]) => [c, x.levels.impulso_pct]));
+      S.vnow = Date.UTC(2026, 9, 28, 1, 0); S.decDemoK = null; demoDecRefresh();
+      const dec = Object.fromEntries(S.dec.filter(x => x.ventana === "tokio-seul" && x.dia === "2026-10-28" && x.fase === "medida").map(x => [x.coin, x.impulso_pct]));
+      return {...out, fin, dec, fetches: H.fetches.length, sockets: H.sockets.length};""", live=False)
+    a, b = r["midiendo"], r["noche"]
+    assert a["pre"] == "seis2" and a["demo"] is True and r["fetches"] == 0 and r["sockets"] == 0
+    pa, ca = a["kb"]["Programadas"], a["kb"]["Pasando controles"]
+    assert "Tokio y Seúl" in ca and "Midiendo el impulso" in ca and "en 8 de 15 min" in ca and ">Ejemplo</span>" in ca
+    assert "entrará a las 01:15 en el sentido del impulso" in ca and all(v[0] == "midiendo_impulso" for v in a["tok"].values())
+    assert "Shanghái y Hong Kong" in pa and "02:30 Madrid" in pa and ("Medirá el impulso de los 15 primeros min de BTC, ETH, SOL y XRP y "
+                                                                     "entrará a las 02:45 en el sentido del impulso; stop 2 %, la mitad en 3R y el resto corre") in pa
+    for w in ("Europa", "São Paulo", "Nueva York"):
+        assert w in pa, w
+    assert "6 diarias v2" in a["st"] and ">Ejemplo</span>" in a["st"]
+    assert "Ejemplo inventado" in a["mk"] and "Midiendo el impulso" in a["mk"] and a["sub"].startswith("Modo impulso «6 diarias v2»")
+    pb, cb = b["kb"]["Programadas"], b["kb"]["Pasando controles"]
+    assert "Ninguna apertura midiendo ahora." in cb and "01:00 Madrid" in pb and "Tokio y Seúl" in pb and b["n"] == 5
+    assert r["fin"] == r["dec"] and len(r["dec"]) == 4
+    _sin_null(*a["kb"].values(), *b["kb"].values(), a["mk"], b["mk"], a["st"], b["st"])
+
+
+def test_preset_seis2_en_mercado_y_cartera():
+    """Con p.preset «seis2» la web la nombra «6 diarias v2», explica su salida en llano (la mitad en 3R, el resto con
+    cerrojo a +2R desde +3R y seguimiento a 2R; sin break-even antes de +3R; 24 h o 7 días) y la marca como tu decisión."""
+    r = run(FIAB + SEIS2 + """H.open(); reset();
+      H.recv(opn(SEIS2_P, {params_source: "usuario"}));
+      S.btImp = {seis2: {fuera: {n: 1462, mean_R: -0.0754}}};
+      S.tab = "market"; renderAll(true); const mk = H.el("#openings").innerHTML, sub = H.el("#openSub").textContent;
+      S.tab = "trades"; renderAll(true); const st = H.el("#tradesStrat").innerHTML;
+      S.tab = "results"; renderAll(true);
+      return {mk, sub, st, res: H.el("#resStrat").innerHTML};""")
+    assert r["sub"].startswith("Modo impulso «6 diarias v2» (paper, por tu decisión)")
+    assert ("con stop 2 %; la mitad sale en 3R (+6 %) y la otra mitad corre: al llegar a +3R su stop sube a +2R y lo sigue a 2R por "
+            "detrás. Sin break-even: antes de +3R el stop no se mueve; como mucho 24 h si no llega a +3R y 7 días si llega.") in r["sub"]
+    for t in ("stop 2,00 %", "la mitad sale en 3R (+6 %)", "la otra mitad corre: al llegar a +3R su stop sube a +2R y lo sigue a 2R por detrás",
+              "como mucho 24 h si no llega a +3R y 7 días si llega", "sin break-even: antes de +3R el stop no se mueve", "Tu decisión"):
+        assert t in r["mk"], t
+    assert "sin break-even ni stop dinámico" not in r["mk"] and "objetivo" not in r["mk"].split("Parámetros")[1].split("</p>")[0]
+    for h in (r["st"], r["res"]):
+        assert "6 diarias v2" in h and "preset 6 diarias v2" in h and "Puesta por tu decisión" in h
+        assert "stop 2 %, la mitad en 3R y el resto corre" in h and "-0,08 R por operación fuera de muestra" in h
+    _sin_null(r["mk"], r["sub"], r["st"], r["res"])
+
+
+def test_backtest_seis2_en_marcha_y_seis_como_anterior():
+    """Con «6 diarias v2» en marcha, la pestaña Backtest la abre arriba (pierde menos que «6 diarias», pero pierde, y tu
+    regla se mantiene) y «6 diarias» y E2 pasan a anteriores. Con «seis» o «impulso», la v2 sale debajo como medida. En
+    la demostración sin dato manda la simulada (v2); sin resumen se avisa. El incrustado real (seis2Data) se pinta igual."""
+    page = HTML.read_text(encoding="utf-8")
+    r = run("const now = Date.now();" + FIAB + SEIS2 + f"""S.btImp = {{impulso: {json.dumps(IMP_BT)}, lab: null, seis: {json.dumps(SEIS_BT)}, seis2: {json.dumps(SEIS2_BT)}}};
+      const out = {{}};
+      for (const [k, m] of [["seis2", opn(SEIS2_P)], ["seis", opn({{...SEIS_P, preset: "seis"}})], ["impulso", opn({{preset: "impulso"}})], ["demo", null]]){{
+        S.openings = m; S.tab = "bt"; S.btSig = null; renderAll(true);
+        const t2 = !H.el("#btSeis2TopP").hidden, t1 = !H.el("#btSeisTopP").hidden;
+        out[k] = {{title: H.el("#btLiveTitle").textContent, sub: H.el("#btLiveSub").textContent, top2: t2, alt2: !H.el("#btSeis2AltP").hidden,
+          top1: t1, alt1: !H.el("#btSeisAltP").hidden, altTitle: H.el("#btSeisAltTitle").textContent,
+          s2: (t2 ? H.el("#btSeis2Top") : H.el("#btSeis2Alt")).innerHTML + H.el("#btSeis2Kpis").innerHTML, s1: (t1 ? H.el("#btSeisTop") : H.el("#btSeisAlt")).innerHTML}}; }}
+      S.btImp = {{impulso: null, lab: null, seis: null, seis2: null}}; S.openings = opn(SEIS2_P); S.btSig = null; renderAll(true);
+      out.vacio = {{top2: !H.el("#btSeis2TopP").hidden, html: H.el("#btSeis2Top").innerHTML, alt1: !H.el("#btSeisAltP").hidden}};
+      return out;""", live=False)
+    v2, s, i, d = r["seis2"], r["seis"], r["impulso"], r["demo"]
+    assert v2["top2"] and not v2["alt2"] and not v2["top1"] and v2["alt1"] and v2["altTitle"] == "Estrategia anterior: 6 diarias"
+    assert v2["title"].startswith("Estrategia anterior (E2)") and "«6 diarias v2»" in v2["sub"]
+    assert "Estuvo en tu cartera paper por tu decisión desde el 28-10-2026 hasta que pasaste a «6 diarias v2»" in v2["s1"]
+    h = v2["s2"]
+    for t in ("Fuera de muestra pierde", "-0,08 R por operación en 1462 operaciones", "(dentro de muestra -0,05 R)", "por jornada de lunes a viernes",
+              "Con las mismas entradas, «6 diarias» da -0,12 R por operación fuera de muestra", "pierde menos (+0,04 R), pero sigue perdiendo",
+              "la mayoría de las operaciones no llega a +3R", "mitad en el primer objetivo 177", "cerrojo 150", "Tu regla se mantiene",
+              "sin break-even: antes de +3R el stop no se mueve", "La mitad sale en 3R (+6 %)", "esa mitad gana como poco +2R (+4 % bruto)",
+              "La mejor operación fuera de muestra da +5,70 R", "Está en tu cartera paper por tu decisión", "Réplica del motor, salida A &lt;b&gt;",
+              "<small>Fuera de muestra</small>", "mejor +5,70 R", "con funding -0,07 R", "-110,20 R"):
+        assert t in h, t
+    assert s["top1"] and not s["top2"] and s["alt2"] and "Si la activas, será por tu decisión" in s["s2"] and "«6 diarias»" in s["sub"]
+    assert i["title"].startswith("Estrategia en marcha") and i["alt1"] and i["alt2"] and i["altTitle"].startswith("Medida en backtest")
+    assert d["top2"] and d["title"].startswith("Estrategia anterior (E2)")   # la demostración opera la simulada (v2)
+    assert r["vacio"]["top2"] and "no trae el backtest de «6 diarias v2»" in r["vacio"]["html"] and not r["vacio"]["alt1"]
+    _sin_null(h, v2["s1"], s["s2"], r["vacio"]["html"])
+    if 'id="seis2Data"' in page:   # el resumen real incrustado (scripts/incrustar_backtest.py) también se pinta sin huecos
+        blob = page.split('<script type="application/json" id="seis2Data">', 1)[1].split("</script>", 1)[0]
+        r2 = run("const now = Date.now();" + FIAB + SEIS2 + f"""S.btImp = {{impulso: null, lab: null, seis: null, seis2: {blob}}}; S.openings = opn(SEIS2_P); S.tab = "bt"; S.btSig = null; renderAll(true);
+          return H.el("#btSeis2Top").innerHTML + H.el("#btSeis2Kpis").innerHTML;""", live=False)
+        assert "Fuera de muestra" in r2 and "por tu decisión" in r2
+        _sin_null(r2)
+
+
+def test_posicion_a_medias_en_cartera_resultados_y_expediente():
+    """Una posición con la mitad ya cerrada en 3R y el resto con el stop del cerrojo se ve así en el tablero, en
+    «Abiertas ahora» de Resultados, en Mando y en el expediente (con el R total, nunca como «break-even»); una cerrada con
+    parcial enseña el precio medio, la parte y el resto, y el R de cada una."""
+    r = run(FIAB + SEIS2 + """H.open(); reset();
+      H.recv(opn(SEIS2_P));
+      const pos = {story: "a-tok-btc-1", id: "tp1", coin: "BTC", side: "long", qty: 0.5, entry: 100, sl: 104, sl_initial: 98, trail_pct: null, high_water: 107,
+        opened: now - 5*3600e3, riskUsd: 0.5, notional: 25, upnl: 1.73, headline: "Apertura Tokio · Compra BTC <b>", strategy: "impulso-largo-sin-noticia",
+        window: "Tokio y Seúl", price: 106.5, R: 3.46, tp2: null, be: true, hold_until: now + 6*864e5, tp1: 106, tp1_frac: 0.5, tp1_done: true, realized: 0.72,
+        be_r: null, trail_start_r: null, instrument: "spot", funding: 0, tags: {origen: "motor_aperturas", preset: "seis2"},
+        lock_r: 3, floor_r: 2, lock_trail_r: 2, locked: true, floor: 104, hold_active: now + 6*864e5, sl_kind: "cerrojo"};
+      const pos2 = {...pos, story: "a-tok-eth-1", id: "tp2", coin: "ETH", qty: 1, sl: 98, tp1_done: false, realized: 0, upnl: -0.1, locked: false,
+        sl_kind: "inicial", price: 99.8, headline: "Compra ETH", hold_until: now + 864e5};
+      const tr = {id: "t9", story: "a-eu-sol-1", strategy: "impulso-corto", window: "Europa", market: "", coin: "SOL", side: "short", qty: 1, entry: 100, exit: 95,
+        sl_initial: 102, opened: now - 30*3600e3, closed: now - 3600e3, reason: "Stop del cerrojo tras salida parcial", pnl: 1.17, pnl_pct: 4.68, R: 2.34, fees: 0.06,
+        riskUsd: 0.5, notional: 25, headline: "Venta SOL", instrument: "perp", funding: 0, commissions: 0.06, exit_last: 96,
+        partials: [{qty: 0.5, px: 94, at: now - 20*3600e3, pnl: 0.74, fee: 0.02, why: "Objetivo parcial (3,0 R)"}],
+        tags: {origen: "motor_aperturas", preset: "seis2"}, lock_r: 3, floor_r: 2, locked: true};
+      H.recv(pf({positions: [pos, pos2], closed: [{...tr, closedAt: tr.closed}]}));
+      S.results = {start_equity: 111.37, equity: 112.5, trades: [tr], by_strategy: [], by_window: [], by_coin: [],
+                   equity_curve: [[now - 7200e3, 111.37], [now, 112.5]], daily: []};
+      H.recv(ev("strategy", "a-tok-btc-1", {headline: "Apertura Tokio · Compra BTC <b>", src: "Motor de aperturas", tier: "Plan", t0: now - 5*3600e3, coins: ["BTC"],
+               strat: strat("BTC", "long", {stopPct: 2, tp1R: 3, tp2R: null, tp1Frac: 0.5, beR: null, trailPct: null, trailStartR: null, lockR: 3, lockFloorR: 2,
+                                            lockTrailR: 2, tags: {origen: "motor_aperturas", preset: "seis2"}})}),
+             ev("riskok", "a-tok-btc-1", {risk: {checks: [], ok: true}}), ev("humanok", "a-tok-btc-1", {human: {mode: "auto", by: "Automático (paper)", at: now}}),
+             ev("filled", "a-tok-btc-1", {exec: {px: 100, slip: 1, ms: 200, notional: 25, sl: 98, tp1: 106, tp2: null, tp1Frac: 0.5}}));
+      S.tab = "trades"; renderAll(true); const kb = H.el("#kanban").innerHTML, cl = H.el("#closedRows").innerHTML;
+      S.tab = "results"; renderAll(true); const op = H.el("#resOpen").innerHTML, rows = H.el("#resRows").innerHTML;
+      S.sel = "a-tok-btc-1"; renderTrace(); const trace = H.el("#trace").innerHTML;
+      S.tab = "mando"; renderAll(true);
+      const empty = (() => { H.recv(pf({positions: []})); renderResOpen(); return H.el("#resOpen").innerHTML; })();
+      return {kb, cl, op, rows, trace, md: H.el("#mdBook").innerHTML, empty};""")
+    kb, op, tr = r["kb"], r["op"], r["trace"]
+    assert ("+1,73 USDC · R total 3,46 R<br>La mitad cerrada en 3R (+0,72 USDC) · el resto corre con stop 104,00 (cerrojo: +2R desde la "
+            "entrada; asegura ≈ +2,44 R en total)") in kb
+    assert "R total -0,20 R<br>La mitad saldrá en 106,00 (3R) · stop 98,00" in kb and "break-even" not in kb
+    assert "La mitad a 106,00 (3R): <b class=\"mono pos\">+0,72 USDC</b>" in op
+    assert "La otra mitad con stop 104,00 (cerrojo activado: +2R desde la entrada; asegura ≈ +2,44 R en total) · sin objetivo: corre" in op
+    assert "cierra como tarde el" in op and "+3,46 R" in op
+    assert "Pendiente: la mitad saldrá en 106,00 (3R)" in op and "-0,20 R" in op and op.count("<tr ") == 2
+    assert "Ninguna posición abierta ahora." in r["empty"]
+    for h in (r["rows"], r["cl"]):
+        assert "media: la mitad a 94,00 · resto a 96,00" in h and "parcial +1,48 · resto +0,86" in h
+    assert "+2,34<br>" in r["cl"] and "Stop del cerrojo tras salida parcial" in r["rows"]
+    for t in ("La mitad sale en 3R (+6 %)", "La otra mitad corre: al llegar a +3R su stop sube a +2R y lo sigue a 2R por detrás",
+              "Sin break-even: antes de +3R el stop no se mueve", "106,00 (la mitad, 3R) · el resto corre con su cerrojo desde +3R",
+              "(R total 3,46 R) · la mitad cerrada en 3R (+0,72 USDC)"):
+        assert t in tr, t
+    assert "stop ya en break-even" not in tr and "Horquilla pura" not in tr and "sin tope: stop dinámico" not in tr
+    assert "La mitad ya cobrada · R total +3,46 R · Apertura Tokio · Compra BTC &lt;b&gt;" in r["md"]
+    _sin_null(kb, r["cl"], op, r["rows"], tr, r["md"], r["empty"])
+
+
+def test_decisiones_salida_parcial_y_cierre_con_cerrojo():
+    """«Por qué entra o no» con la salida de «6 diarias v2»: la fila de la salida parcial como la escribe bot/decisiones.py
+    (fase «cierre», decisión «parcial», motivo «objetivo»: sigue abierta, con su R) y los cierres por el cerrojo (o el
+    seguimiento) con su nombre corto y su R; cuentan como entradas y salen en Mando."""
+    r = run(DEC + """H.open(); reset();
+      const B = Date.parse(dia(now) + "T10:00:00Z");
+      H.recv(dec({ventana: "europa", apertura_ms: B, coin: "BTC", fase: "paper", decision: "abierta", motivo_codigo: "entra", trade_id: "tq1", ts: B + M15 + 3000}));
+      H.recv(dec({ventana: "europa", apertura_ms: B, coin: "BTC", fase: "cierre", decision: "parcial", motivo_codigo: "objetivo", motivo: null, trade_id: "tq1",
+                  datos: {R: 1.44, fraccion: 0.5, cerrojo: true}, ts: B + 3*3600e3}),
+             dec({ventana: "europa", apertura_ms: B, coin: "ETH", fase: "cierre", decision: "cerrada", motivo_codigo: "cerrojo", motivo: null, trade_id: "tq2",
+                  datos: {R: 2.45}, ts: B + 9*3600e3}),
+             dec({ventana: "europa", apertura_ms: B, coin: "SOL", fase: "cierre", decision: "cerrada", motivo_codigo: "seguimiento", motivo: null,
+                  datos: {R: 3.1}, ts: B + 10*3600e3}));
+      S.tab = "market"; renderAll(true); const box = decHtml();
+      S.tab = "mando"; renderAll(true);
+      return {box, md: H.el("#mdDec").innerHTML};""")
+    box, md = r["box"], r["md"]
+    assert "Salida parcial · +1,44 R · sigue abierta" in box and "Cerrada: cerrojo · +2,45 R" in box and "Cerrada: seguimiento · +3,10 R" in box
+    assert "Salió una parte en el primer objetivo" in box and "Llegó al objetivo." not in box
+    assert "stop del cerrojo" in box and "stop que seguía al precio" in box and "Cierre: salida parcial" in box
+    assert '<span class="pill good">Entran 3</span>1 abierta · 2 cerradas' in box
+    assert "BTC a medias (la mitad cobrada)" in md and "ETH cerrada (cerrojo +2,45 R)" in md and "SOL cerrada (seguimiento +3,10 R)" in md
+    _sin_null(box, md)
+
+
+# ---------------------------------------------------------------- remate de «6 diarias v2»: lo que encontró la revisión de la web
+
+_LBL = re.compile(r'<text x="([\d.]+)" y="[-\d.]+" text-anchor="end"[^>]*>([^<]*)</text>')
+
+
+def test_backtest_seis2_dice_que_el_cierre_por_tiempo_no_sigue_la_regla_y_el_eje_no_corta_el_menos():
+    """La viñeta de la regla no afirma que cada parte que gana lo haga con ≥ 2R: el cierre de las 24 h sale con lo que
+    haya, y se dice con las cuentas del resumen (424 de 567 ganadoras por debajo de 2R). «6 diarias» lo dice igual. Las
+    etiquetas del eje de la curva caben enteras (el «-» de «-252,86 R» no se corta)."""
+    bt2 = {**SEIS2_BT, "fuera": {**SEIS2_BT["fuera"], "ganadoras_n": 567, "ganadoras_bajo_2R": 424, "ganadoras_bajo_1R": 285,
+                                 "curva_R": [[1755480600000, 13.78], [1770000000000, -119.54], [1792505400000, -252.86]]}}
+    bt1 = {**SEIS_BT, "fuera": {**SEIS_BT["fuera"], "ganadoras_n": 542, "ganadoras_bajo_2R": 325, "ganadoras_bajo_1R": 220}}
+    r = run("const now = Date.now();" + FIAB + SEIS2 + f"""S.btImp = {{impulso: null, lab: null, seis: {json.dumps(bt1)}, seis2: {json.dumps(bt2)}}};
+      S.openings = opn(SEIS2_P); S.tab = "bt"; S.btSig = null; renderAll(true);
+      const out = {{s2: H.el("#btSeis2Top").innerHTML, s1: H.el("#btSeisAlt").innerHTML, c2: H.el("#btSeis2Curve").innerHTML, c1: H.el("#btSeisCurve").innerHTML}};
+      S.btImp = {{impulso: null, lab: null, seis: null, seis2: {json.dumps(SEIS2_BT)}}}; S.btSig = null; renderAll(true);
+      out.sin = H.el("#btSeis2Top").innerHTML;
+      return out;""", live=False)
+    s2 = r["s2"]
+    assert "Tu regla se mantiene en el stop, la parcial y el cerrojo" in s2 and "cada parte que gana lo hace con" not in s2
+    assert ("<b>Pero no en el cierre por tiempo:</b> si no llega a +3R, a las 24 h se cierra a mercado con lo que haya, gane o "
+            "pierda: fuera de muestra, 424 de las 567 ganadoras (75 %) ganaron menos de 2R (285 menos de 1R).") in s2
+    assert "El tope de 24 h no sigue tu regla" in r["s1"] and "325 de las 542 ganadoras (60 %) ganaron menos de 2R" in r["s1"]
+    assert ("Pero no en el cierre por tiempo:</b> si no llega a +3R, a las 24 h se cierra a mercado con lo que haya, gane o "
+            "pierda.</span>") in r["sin"]
+    for svg in (r["c2"], r["c1"]):
+        labels = _LBL.findall(svg)
+        assert len(labels) == 3 and any(t.startswith("-") for _, t in labels), labels
+        for x, t in labels:   # 11 px de IBM Plex Mono: ≈ 6,6 px por carácter, anclado a la derecha en x
+            assert float(x) - 6.6 * len(t) >= 0, (x, t)
+    _sin_null(s2, r["s1"], r["sin"])
+
+
+def test_tablero_usa_lo_que_publica_el_motor_hara_hora_y_entrada():
+    """Programadas y Pasando controles cuentan lo que dice el motor (hara, hora_madrid, entrada_ms, estrategia), no un
+    texto rehecho en la web: así no se separan con el primer ajuste. Sin esos campos (motor viejo), el de la web."""
+    r = run(FIAB + SEIS2 + """H.open(); reset();
+      const T1 = now + 2*3600e3, esp = {signal: 0, state: "esperando_apertura", why: "", last_why: ""};
+      const w = {id: "china-1", name: "Shanghái", markets: [], open_utc: T1, state: "esperando_apertura", why: "", coins: {BTC: esp},
+        hara: "medirá el impulso de los 15 primeros min de BTC si la volatilidad no es baja y entrará a las 23:59 <b>",
+        hora_madrid: "09:41", estrategia: "Mi estrategia", entrada_ms: T1 + 20*M, medida_hasta: T1 + 15*M};
+      H.recv(opn({...SEIS2_P, nombre: null, preset: null}, {windows: [w]}));
+      S.tab = "trades"; renderAll(true); const a = colsOf(H.el("#kanban").innerHTML)["Programadas"];
+      const w2 = {...w, open_utc: now - 5*M, state: "midiendo_impulso", entrada_ms: now + 15*M,
+        coins: {BTC: {signal: 0, state: "midiendo_impulso", levels: {movimiento_pct: 0.1, minutos_medidos: 5}}}};
+      H.recv(opn({...SEIS2_P, nombre: null, preset: null}, {windows: [w2]}));
+      renderAll(true); const b = colsOf(H.el("#kanban").innerHTML)["Pasando controles"];
+      H.recv(opn(SEIS2_P, {windows: [{...w, hara: null, hora_madrid: null, estrategia: null, entrada_ms: null}]}));
+      renderAll(true); const c = colsOf(H.el("#kanban").innerHTML)["Programadas"];
+      return {a, b, c, he: madHM(now + 15*M), he1: madHM(T1 + 15*M), h1: madHM(T1)};""")
+    assert "Medirá el impulso de los 15 primeros min de BTC si la volatilidad no es baja y entrará a las 23:59 &lt;b&gt;" in r["a"]
+    assert "09:41 Madrid · en " in r["a"] and "Mi estrategia · paper" in r["a"] and "la mitad en 3R" not in r["a"]
+    assert f"entrará a las {r['he']} en el sentido del impulso" in r["b"] and "abrió a las 09:41 Madrid" in r["b"]
+    assert (f"Medirá el impulso de los 15 primeros min de BTC y entrará a las {r['he1']} en el sentido del impulso; stop 2 %, "
+            "la mitad en 3R y el resto corre") in r["c"] and f"{r['h1']} Madrid" in r["c"]
+    _sin_null(r["a"], r["b"], r["c"])
+
+
+def test_plan_de_seis2_dice_la_peor_parte_que_gana_y_cada_parte():
+    """Con parcial y cerrojo, las cifras del plan son las de la peor parte que gana (el suelo del cerrojo), no un
+    objetivo: se rotula así, se lista cada parte con su neto y no se escribe un «R:R 2,00» que parezca el objetivo."""
+    r = run(FIAB + SEIS2 + """H.open(); reset();
+      const plan = {stopPct: 2, tp2R: null, rr: 2, ok: true, why: "Desde 100 (contado)", instrument: "perp", gross_pct: 4, cost_pct: 0.24,
+        funding_pct: 0.02, net_pct: 3.55, tp1R: 3, tp1Frac: 0.5, lockR: 3, lockFloorR: 2, lockTrailR: 2,
+        partes: [{que: "parcial", R: 3, precio: 94, frac: 0.5, bruto_pct: 6, neto_pct: 5.74, funding_pct: 0.02, funding_h: 16},
+                 {que: "suelo", R: 2, precio: 96, frac: null, bruto_pct: 4, neto_pct: 3.55, funding_pct: 0.21, funding_h: 168}],
+        entry: 100, stop: 102, target: null, parcial: 94, suelo: 96};
+      const w = {id: "tokio-1", name: "Tokio y Seúl", markets: [], open_utc: now - 30*M, state: "en_posicion", why: "",
+        coins: {BTC: {signal: -1, state: "en_posicion", entries: 1, instrument: "perp", levels: {impulso_pct: -0.3},
+                      tags: {impulso_pct: -0.3, lado: "corto", instrumento: "perp"}, plan}}};
+      H.recv(opn(SEIS2_P, {windows: [w]}));
+      S.tab = "market"; renderAll(true);
+      return {mk: H.el("#openings").innerHTML, pt: planTxt(plan), pt1: planTxt({stopPct: 1.5, tp2R: 3, rr: 3, ok: true})};""")
+    mk = r["mk"]
+    assert "En posición (paper): peor parte que gana (suelo del cerrojo, 2R): neto 3,55 % (mínimo 3,0 %)" in mk
+    assert ("Partes que ganan: la mitad: salida parcial en 3R, +6,00 % bruto y 5,74 % neto (funding en 16 h: −0,02 %) · "
+            "suelo del cerrojo en 2R, +4,00 % bruto y 3,55 % neto (funding en 168 h: −0,21 %).") in mk
+    assert "mínimo 2R por parte" in mk and "R:R 2,00" not in mk and "bruto +4,00 %" not in mk
+    assert r["pt"] == "stop 2,00 % · la mitad en 3R y el resto corre · mínimo 2R por parte" and r["pt1"] == "stop 1,50 % · R:R 3,00"
+    _sin_null(mk)
+
+
+def test_demostracion_posiciones_y_cerradas_del_motor_simulado():
+    """En la demostración, En posición y Cerradas traen las operaciones del motor simulado («6 diarias v2»), sacadas de
+    las mismas filas de «Por qué entra o no» (abiertas, a medias y cerradas con su R), y una nota separa lo de las noticias."""
+    r = run("""const colsOf = html => Object.fromEntries(html.split('<div class="col">').slice(1).map(c => [c.split("</h3>")[0].split("<h3>")[1], c]));
+      S.vnow = Date.UTC(2026, 9, 28, 21, 0); S.decDemoK = null; S.demoMotor = null; S.tab = "trades"; renderAll(true);
+      const kb = colsOf(H.el("#kanban").innerHTML), st = H.el("#tradesStrat").innerHTML, g = new Map();
+      for (const x of S.dec) if (x.trade_id){ const s = g.get(x.trade_id) || new Set(); s.add(x.decision); g.set(x.trade_id, s); }
+      const v = [...g.values()];
+      return {kb, st, abiertas: v.filter(s => s.has("abierta") && !s.has("cerrada")).length, cerradas: v.filter(s => s.has("cerrada")).length,
+        medias: v.filter(s => s.has("parcial") && !s.has("cerrada")).length};""", live=False)
+    pos, cer = r["kb"]["En posición"], r["kb"]["Cerradas o descartadas"]
+    assert r["abiertas"] > 0 and r["cerradas"] > 0
+    assert pos.count("Motor «6 diarias v2»") == r["abiertas"] and pos.count("La mitad ya salió en 3R") == r["medias"]
+    assert "Motor «6 diarias v2»" in cer and re.search(r"[-+]\d+,\d\d R · ", cer)
+    assert ">Ejemplo</span>" in pos and "Ejemplo inventado: las tarjetas del motor" in r["st"]
+    _sin_null(pos, cer, r["st"])

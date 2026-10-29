@@ -620,3 +620,120 @@ la horquilla: para cobrar 3R el precio tiene que recorrer +4,5 % antes que −1,
 - La cartera de prueba de 100 € (111,37 USDC, 0 operaciones al reiniciar) mezcla regímenes desde este reinicio: lo dice
   el historial (`codigo-entrada-noticias-2026-10-28`). Para medirla limpia, empezar otra con
   `scripts/nueva_cartera_paper.py`.
+
+## 21. 6 diarias v2: dejar correr la mitad (28-10-2026)
+
+**Qué pidió el usuario.** El 2:1 es un mínimo, no un techo: dejar correr la ganancia en los días de grandes recorridos,
+sin romper «o gano más de 2 o pierdo 1». De las salidas medidas eligió la «A»: «obviamente es la A».
+
+**La salida A (preset `apertura.SEIS2`, «6 diarias v2»).** Las entradas y los límites de «6 diarias» (impulso de los 15
+primeros min sin filtros, entrada a +15 min, ≤ 6 entradas y 3 % de riesgo al día, veto de noticias fiables) con otra
+salida:
+- Stop inicial del 2 %. Antes de +3R el stop **no se mueve**: nada de break-even.
+- La mitad sale en 3R (+6 %, 5,76 % neto; orden límite).
+- La otra mitad, al llegar a +3R, sube su stop a un suelo de +2R (+4 %, 3,76 % neto) y desde ahí lo sigue a 2R por detrás
+  del mejor precio (nunca baja). Es el **cerrojo**.
+- Sin activar el cerrojo, cierre a las 24 h; activado, hasta 7 días desde la entrada.
+- Lo que sale por la parcial o por el cerrojo gana ≥ 2R y ≥ 3 % neto. **Pero el cierre por tiempo no**: si a las 24 h no
+  ha llegado a +3R, sale a mercado con lo que haya, gane o pierda. Fuera de muestra, 424 de las 567 ganadoras (75 %)
+  ganaron menos de 2R por ese cierre (285 menos de 1R); dentro, 570 de 893. Es la misma excepción que ya tenía
+  «6 diarias» con su tope de 24 h: «o gano más de 2 o pierdo 1» vale para el stop, la parcial y el cerrojo, no para el
+  reloj. Las cuentas salen de la curva completa (`resumen_backtest.impulso_summary`: `ganadoras_n`,
+  `ganadoras_bajo_2R`, `ganadoras_bajo_1R`, `max_R`) y la web las enseña.
+
+**La regla del usuario, actualizada** (`config.USER_RULES`, `paper.exit_rules`, `evolucion.cumple_reglas`):
+- Se permite: objetivo fijo ≥ 2R; salida parcial con objetivo ≥ 2R y ≥ 3 % neto; cerrojo con suelo ≥ 2R y ≥ 3 % neto, y
+  seguimiento solo por encima del suelo.
+- Sigue prohibido: el break-even y cualquier movimiento del stop antes del cerrojo (el stop dinámico de siempre o un
+  seguimiento sin cerrojo).
+- El paper apaga la parcial o el cerrojo que no cumplan (y lo dice al abrir: «… descartada por tu regla») y rechaza el
+  ticket que se queda sin objetivo ni cerrojo válidos, o con un objetivo final que deja < 3 % neto. La evolución nunca
+  aplica unos parámetros que las rompan; un valor infinito tampoco pasa.
+
+**Cifras** (réplica del motor con las velas de 3 años, `BACKTEST_DIR/seis2_resumen.json`; mismas entradas, una posición
+por moneda —también a medias—, controles del paper y funding real; corte el 16-08-2025, como `impulso_7d.json`):
+
+| | «6 diarias» (ahora) | «6 diarias v2» (A) |
+|---|---|---|
+| Operaciones fuera de muestra | 1.538 (5,0 por jornada) | 1.464 (4,8 por jornada) |
+| R medio fuera (con funding) | **−0,120** (−0,119) | **−0,075** (−0,074) |
+| R medio dentro (con funding) | −0,111 (−0,108) | −0,057 (−0,054) |
+| Ganadoras fuera | 35 % | 39 % |
+| Salidas fuera | 865 stop, 482 tiempo, 191 objetivo | 675 stop, 670 tiempo, 62 seguimiento, 57 cerrojo |
+| La mitad en 3R (fuera) | — | 119 (8 % de las operaciones) |
+| Mejor operación fuera | +2,9R | +5,7R |
+| Caída máxima fuera | 234R | 139R |
+| Cuenta fuera, 0,5 % de riesgo | −0,30 %/jornada; −57 % en 306 días | −0,18 %/jornada; −42 % en 306 días |
+| Grandes recorridos (≥ 8 % en 24 h) fuera: captura media | 4,9 % | 16,7 % |
+
+- Pierde menos que «6 diarias», pero **pierde**: dentro y fuera de muestra. Gana más a menudo (39 % de ganadoras), pero
+  siguen siendo más las perdidas que las ganadas.
+- Ninguna de las 104 salidas medidas que llegan a 5 operaciones por jornada gana fuera de muestra. La A es la 3.ª por
+  R medio dentro de muestra entre ellas (la que elige el criterio fijado, F1 con stop 2 % y 6 × ATR, da −0,104 R
+  fuera). Se eligió viendo los datos: **no es una ventaja demostrada**. Se mide en paper tal cual.
+
+**Comprobaciones.**
+- Tres simuladores escritos por separado coinciden en la A (`controles/salidas_motor.py`, `salidas_independiente.py` y
+  `salidas_verificador.py`): 2.389 operaciones dentro y 1.464 fuera; −0,057 a −0,058 R dentro y −0,075 R fuera.
+- La simulación del propio motor con el preset SEIS2 (`apertura.impulse_plan` + `apertura.simulate_plan`, la misma
+  gestión que el paper, con la parcial y el cerrojo) la reproduce **operación a operación**: 14.984 entradas candidatas y
+  0 diferencias en la salida (hora, motivo y resultado). El plan de SEIS2 (parcial y suelo ≥ 3 % neto con el funding
+  esperado en 16 h) decide igual en las 14.984. Con la reserva del paper salen exactamente las cifras de la tabla.
+- Después de medir (29-10-2026), el suelo del cerrojo cuenta el funding esperado hasta el tope activado (168 h), no en
+  16 h: solo se cobra en las que activan el cerrojo, que pueden durar 7 días. Un corto en perpetuo con funding de
+  −0,036 %/8 h o menos ya no entra (el suelo dejaría < 3 % neto). En los 3 años pasó en 22 de 13.136 liquidaciones
+  (20 de SOL), así que las cifras de la tabla apenas cambian; la réplica no se ha vuelto a pasar con esto.
+- La salida de siempre sigue igual: «6 diarias» (3R/24 h) con el `simulate_plan` nuevo da 0 diferencias en las 14.984.
+- Orden dentro de la vela de 1 min, como `salidas_motor.py`: primero el stop vigente, luego la mitad en 3R, luego el
+  tiempo y, con el extremo de la vela, el cerrojo, que vale desde la vela siguiente. En vivo, con precios cada segundo,
+  el paper lo aplica al momento.
+
+**En el bot.**
+- Paper (`bot/paper.py`): ticket con `tp1R`, `tp1Frac`, `lockR`, `lockFloorR`, `lockTrailR`, `winEndActive` y
+  `holdActiveLabel` (docs/04, 2.6). Eventos «cerrojo a +2,0 R», «salida parcial» y «stop de seguimiento». Motivos de
+  cierre «Stop del cerrojo» y «Stop de seguimiento». La posición a medias sigue ocupando su moneda y sobrevive a un
+  reinicio con el cerrojo activado.
+- Motor (`bot/apertura.py`): «Programadas» y «Pasando controles» en el estado `openings` (`hara`, `hora_madrid`,
+  `entrada_ms`, `levels.movimiento_pct`; docs/04, 2.9).
+- Decisiones (`bot/decisiones.py`): fila `cierre/parcial` con su R y el cierre con el R de toda la operación (código
+  `cerrojo` si sale por el cerrojo).
+- Se activa con el bot parado: `scripts/activar_estrategia.py --preset seis2`. Con `--preset seis` se vuelve a
+  «6 diarias».
+
+## 22. ¿Qué fuentes aciertan? Sentido puesto por Claude y medios antes de los movimientos bruscos (29-10-2026)
+
+El usuario pidió discriminar las fuentes que aciertan al menos el 60 %, y contrastar las gráficas con noticias antiguas
+fijándose en los movimientos bruscos. Se hizo de dos formas, con criterios fijados antes de ver nada, azar de referencia,
+fuera de muestra y verificación independiente (scripts y resultados en `BACKTEST_DIR/controles/fuentes/` y
+`controles/bruscos/`; titulares en `M:\BotFundamental-datos\historia_noticias\`).
+
+**1. 22 medios de cripto en 91 días (29-07 a 27-10-2026), sentido puesto por Claude a ciegas.** 3.484 titulares (hasta
+165 por medio, con la hora `date_gmt` de WordPress, comprobada); Claude dio sentido a 787 (el resto, «sin efecto claro»).
+- Acierto a 4 h desde la publicación: ajustado al mercado 48,0 %, bruto 53,1 % (el bruto es la tendencia del día: con el
+  sentido de otra hora del mismo día sale lo mismo). A 1 h 48,1 %; a 24 h 44,4 %. Con el léxico de antes: 51,3 %.
+- Ningún medio pasa el criterio (≥ 30 predicciones, ≥ 5 semanas, ≥ 60 % ajustado, Wilson ≥ 50 % y ≥ 55 % fuera). Por
+  azar pasarían 0,24-0,36. Los dos que pasaban dentro (cryptotimes, cryptopotato) se hunden fuera (43 % y 26 %).
+- Más confianza no acierta más (1 → 49,7 %, 2 → 45,6 %, 3 → 45,0 %). Las etiquetas siguen el pasado: el 64 % coincide con
+  el movimiento de las 24 h previas.
+- Única pista, sin validar (vista después de mirar 11 tipos): las noticias de **regulación**, sobre todo alcistas,
+  64-68 % bruto también fuera de muestra, ~0,7 al día. Merece medirse en vivo aparte.
+
+**2. Medios antes de los movimientos bruscos (3 años).** 2.359 episodios (≥ 3 % en 1 h o ≥ 5 % en 4 h) desde el
+28-10-2023; se midieron 54 de los 160 mayores (los 30 mayores incluidos) con 107 ventanas tranquilas de control; 80.096
+titulares de 24 medios descargados por fechas; 2.000 etiquetados a ciegas.
+- Ningún medio avisa de verdad (por azar pasarían 0,62). Todos juntos: precisión 0,147 frente a 0,183 del azar (p = 0,98).
+- Antes del 61 % de los movimientos había algún titular con el sentido correcto, pero en el 71 % de las horas tranquilas
+  también había titulares con sentido, y antes del 63 % de los movimientos había otros con el sentido contrario.
+- El consenso de los medios acierta el sentido el 46,5 %. El 73 % de las predicciones sigue el movimiento de las 12 h
+  previas, y solo el 31 % de los episodios lo continúa: la mayoría son giros (XRP +74 % el 10-10-2025 tras −50 %).
+- Los titulares de «precio» abundan antes de los movimientos porque el precio ya se mueve: anuncian volatilidad, no
+  dirección (llevan el sentido contrario en 31 de 45).
+
+**Conclusión.** El sentido no lo ponía mal la IA local: estos medios de cripto no anticipan el precio a 4 h; lo cuentan
+cuando ya ha empezado. Quedan por probar otras fuentes: oficiales (SEC, bancos centrales, anuncios de exchanges, que el bot
+ya capta) y de datos (liquidaciones, funding, flujos de ETF).
+
+**3. El 1:1 dejando correr («2:2») que propuso el usuario** (`controles/salidas_1a1.*`, mismas entradas de «6 diarias»).
+La mejor elegida dentro (stop 3 %, todo sale en 1,5R, 24 h) gana el 44 % y pierde el 56 % (0,79 ganadas por perdida),
+−0,059 R fuera de muestra, −0,13 % de la cuenta por jornada. Ninguna variante da más ganadas que perdidas. La A
+(sección 21) gana el 39 % y da −0,075 R fuera.

@@ -2,16 +2,19 @@
 
 Uso (con el bot PARADO y también su vigilante: scripts/vigilante-bot.ps1 relanza el bot unos 2 min después de que caiga;
 antes de pararlo, crear el archivo DATA_DIR\\parar-vigilante y borrarlo después de volver a arrancar):
+    M:\\BotFundamental-runtime\\venv\\Scripts\\python.exe -X utf8 scripts\\activar_estrategia.py --preset seis2
     M:\\BotFundamental-runtime\\venv\\Scripts\\python.exe -X utf8 scripts\\activar_estrategia.py --preset seis
     M:\\BotFundamental-runtime\\venv\\Scripts\\python.exe -X utf8 scripts\\activar_estrategia.py --preset impulso
-«seis» activa la estrategia «6 diarias» (apertura.SEIS); «impulso» vuelve al preset de siempre (E2, apertura.IMPULSO).
+«seis2» activa «6 diarias v2» (apertura.SEIS2: las entradas de «6 diarias» con la mitad en 3R y el resto con el
+cerrojo); «seis» activa «6 diarias» (apertura.SEIS); «impulso» vuelve al preset de siempre (E2, apertura.IMPULSO).
 
 Qué hace:
 1. Se niega si el bot responde en /health (el historial se escribe en bot.db, que es del bot mientras está en marcha) o si
    DATA_DIR no tiene bot.db (un --datos equivocado no crea una base vacía ni escribe la estrategia donde no es).
 2. Escribe DATA_DIR/estrategia_activa.json (escritura atómica) con la firma que exige la evolución
-   (evolucion.validar_activa: estrategia «impulso», params, solo paper y las reglas del usuario: stop ≥ 1,5 %, ≥ 2R,
-   ≥ 3 % neto de costes, sin break-even ni stop dinámico). Si no las cumple, no escribe nada.
+   (evolucion.validar_activa: estrategia «impulso», params, solo paper y las reglas del usuario: stop ≥ 1,5 %; toda
+   parte que gana —objetivo, salida parcial o suelo del cerrojo— ≥ 2R y ≥ 3 % neto de costes; sin break-even ni stop
+   dinámico antes del cerrojo). Si no las cumple, no escribe nada.
 3. Apunta el cambio en el historial de la evolución (evolution_log, tipo «estrategia_cambiada», origen «usuario»): «Estrategia
    cambiada por decisión del usuario el DD-MM-AAAA: 6 diarias (…)», con la estrategia entera antes y después (se puede
    revertir desde la pestaña Evolución) y las cifras del backtest si están. También marca el último cambio de
@@ -33,10 +36,10 @@ from zoneinfo import ZoneInfo
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from bot import apertura, config, evolucion  # noqa: E402
-from bot.resumen_backtest import SEIS_FILE  # noqa: E402
+from bot.resumen_backtest import SEIS2_FILE, SEIS_FILE  # noqa: E402
 
 MAD = ZoneInfo("Europe/Madrid")
-BACKTEST = {"seis": SEIS_FILE, "impulso": "impulso_7d.json"}
+BACKTEST = {"seis2": SEIS2_FILE, "seis": SEIS_FILE, "impulso": "impulso_7d.json"}
 
 
 def bot_en_marcha(url: str, timeout: float = 2.0) -> bool:
@@ -148,7 +151,8 @@ def activar(preset: str, datos: Path, ahora: int | None = None, extra: str | Non
 def main(argv: list[str] | None = None, ahora: int | None = None) -> int:
     ap = argparse.ArgumentParser(description="Cambia la estrategia del motor de aperturas (solo paper).")
     ap.add_argument("--preset", required=True, choices=sorted(apertura.PRESETS),
-                    help="seis = «6 diarias»; impulso = volver a E2 (el preset de siempre)")
+                    help="seis2 = «6 diarias v2» (la mitad en 3R y el resto con el cerrojo); seis = «6 diarias»; "
+                         "impulso = volver a E2 (el preset de siempre)")
     ap.add_argument("--datos", type=Path, default=config.DATA_DIR, help="carpeta de datos (por defecto DATA_DIR)")
     ap.add_argument("--url", default=f"http://{config.HOST}:{config.PORT}/health",
                     help="dirección de /health del bot (si responde, no se cambia nada)")

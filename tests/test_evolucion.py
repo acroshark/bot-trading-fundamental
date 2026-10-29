@@ -1233,3 +1233,74 @@ def test_activar_es_todo_o_nada(env):
     res = m.activar("seis", path.parent, ahora=ms(2026, 10, 28, 21))
     assert not res["ok"] and not path.exists()
     assert store.db.execute("SELECT COUNT(*) FROM evolution_state WHERE clave='ultimo_cambio'").fetchone()[0] == 0
+
+
+# ---------------------------------------------------------------- «6 diarias v2»: lo que la regla permite y lo que no
+
+def test_reglas_permiten_la_parcial_y_el_cerrojo_que_cumplen(monkeypatch):
+    from bot import apertura as ap
+    monkeypatch.setattr(config, "USER_RULES", False)   # no dependen de BOT_USER_RULES
+    s2 = {k: v for k, v in ap.SEIS2.items() if k not in ("estrategia", "lab")}
+    assert E.cumple_reglas(s2) == (True, [])
+    casos = {   # lo que rompe «o gano más de 2 o pierdo 1», con el motivo
+        "parcial < 2R": ({**s2, "tp1_r": 1.5}, "salida parcial en 1,50R (mínimo 2,00R)"),
+        "parcial < 3 % neto": ({**s2, "sl_pct": 1.5, "tp1_r": 2.0}, "la salida parcial en 2,00R deja 2,76 %"),
+        "suelo < 2R": ({**s2, "floor_r": 1.5}, "suelo del cerrojo en 1,50R (mínimo 2,00R)"),
+        "suelo < 3 % neto": ({**s2, "sl_pct": 1.5}, "el suelo del cerrojo en 2,00R deja 2,76 %"),
+        "se activa por debajo del suelo": ({**s2, "lock_r": 1.5}, "por debajo de su suelo"),
+        "cerrojo sin suelo": ({**s2, "floor_r": None}, "suelo del cerrojo en –R"),
+        "sin objetivo ni cerrojo": ({**s2, "lock_r": None, "trail_r": None}, "sin objetivo final ni cerrojo"),
+        "seguimiento antes del cerrojo": ({"trail_r": 2.0}, "seguimiento sin cerrojo"),
+        "seguimiento por ATR sin cerrojo": ({"trail_atr": 3.0}, "seguimiento sin cerrojo"),
+        "stop dinámico de siempre": ({**s2, "trail_start_r": 1.0}, "stop dinámico (prohibido antes del cerrojo)"),
+        "break-even": ({**s2, "be_r": 1.0}, "break-even (prohibido"),
+        "parcial de más del 100 %": ({**s2, "tp1_frac": 1.5}, "entre 0 y 100 %"),
+        "cerrojo infinito": ({**s2, "lock_r": float("inf")}, "lock_r = inf (tiene que ser un número finito)"),
+        "parcial infinita": ({**s2, "tp1_r": float("inf")}, "tp1_r = inf (tiene que ser un número finito)"),
+        "objetivo infinito": ({"target_r": float("inf")}, "target_r = inf (tiene que ser un número finito)"),
+        "suelo NaN": ({**s2, "floor_r": float("nan")}, "floor_r = nan (tiene que ser un número finito)"),
+    }
+    for caso, (params, motivo) in casos.items():
+        ok, fallos = E.cumple_reglas(params)
+        assert not ok and any(motivo in f for f in fallos), (caso, fallos)
+    assert E.cumple_reglas({**s2, "trail_r": None, "trail_atr": 3.0})[0]   # seguimiento por ATR con cerrojo: sí
+    assert E.cumple_reglas({**s2, "target_r": 5.0})[0]                      # cerrojo con objetivo final: sí
+    assert E.cumple_reglas({"tp1_r": 2.0, "tp1_frac": 0.5})[0]              # parcial en 2R (6 % con stop 3 %): sí
+    ok, why = E.validar_activa({"estrategia": "impulso", "params": {**s2, "floor_r": 1.5}})
+    assert not ok and "suelo del cerrojo" in why
+    pre = {**ap.IMPULSO}
+    assert E.firma_motor(pre) == E.firma_motor({**pre, "tp1_frac": 0.0, "lock_r": None})   # firmas de siempre
+
+
+async def test_activar_seis2_por_decision_del_usuario(env, monkeypatch):
+    from bot import apertura as ap
+    store, bus, path = env
+    m = _script()
+    monkeypatch.setattr(m, "bot_en_marcha", lambda url, timeout=2.0: False)
+    ahora = ms(2026, 10, 29, 3, 0)
+    datos = ["--datos", str(path.parent), "--url", _url_cerrada()]
+    bt = path.parent / "backtest"
+    bt.mkdir(exist_ok=True)
+    (bt / "seis2_resumen.json").write_text(json.dumps({"fuera": {"n": 1464, "mean_R": -0.075, "win_rate": 0.38},
+                                                       "dentro": {"n": 2389, "mean_R": -0.0569}}), encoding="utf-8")
+    assert m.main(["--preset", "seis", *datos], ahora=ahora) == 0          # la de ahora: «6 diarias»
+    assert m.main(["--preset", "seis2", *datos], ahora=ahora + 1000) == 0
+    act = E.leer_estrategia_activa(path)
+    assert act["preset"] == "seis2" and act["nombre"] == "6 diarias v2" and act["fuente"] == "usuario"
+    assert E.validar_activa(act) == (True, None) and act["firma"] == E.firma_estrategia(act)
+    assert act["params"]["target_r"] is None and act["params"]["lock_r"] == 3.0 and act["params"]["tp1_frac"] == 0.5
+    p = ap.impulse_params(E.params_motor(act))[0]
+    assert ap.preset_of(p) == "seis2" and E.firma_motor(p) == act["firma"]
+    e = E.leer(store, tipo="estrategia_cambiada")[0]
+    assert "6 diarias v2" in e["motivo"] and "R medio -0,07 en 1464 operaciones (no es una ventaja)" in e["motivo"]
+    assert e["antes"]["preset"] == "seis" and e["despues"]["preset"] == "seis2"
+    assert e["evidencia"]["backtest"]["archivo"] == "seis2_resumen.json"
+    monkeypatch.setenv("BOT_APERTURAS_ESTRATEGIA", "impulso")
+    monkeypatch.delenv("BOT_IMPULSO_PARAMS", raising=False)
+    eng = ap.OpeningEngine(bus, None, lambda c, w: {"dir": 0}, lambda *a: True, lambda: {}, clock=lambda: ahora,
+                           activa_path=path)
+    st = eng.view()
+    assert eng.firma == act["firma"] and st["params"]["preset"] == "seis2" and st["params"]["nombre"] == "6 diarias v2"
+    assert st["salida_corta"] == "stop 2 %, la mitad en 3R y el resto corre" and st["day"]["max_entries"] == 6
+    assert m.main(["--preset", "seis", *datos], ahora=ahora + 2000) == 0   # y se puede volver a «6 diarias»
+    assert E.leer_estrategia_activa(path)["preset"] == "seis"

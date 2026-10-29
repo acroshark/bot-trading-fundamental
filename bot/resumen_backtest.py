@@ -3,9 +3,12 @@
 - `lab_summary`: lo justo de laboratorio.json (periodo, recuento, prometedoras y robustas con sus cifras dentro y fuera de
   muestra y la cuenta honesta en avance), unos pocos KB.
 - `impulso_summary`: impulso_7d.json, que escribe BACKTEST_DIR/controles/compara_impulso.py, con la curva de R acumulado
-  reducida a unos cientos de puntos. Es la variante de 7 días que opera el motor en vivo (E2, preset IMPULSO).
+  reducida a unos cientos de puntos y, si la curva trae un punto por operación, la mejor y la peor operación y cuántas
+  ganadoras ganan menos de 2R y de 1R (per_trade). Es la variante de 7 días que opera el motor en vivo (E2, preset IMPULSO).
 - `seis_summary`: seis_diarias_resumen.json (misma forma que impulso_7d.json más «nombre» y «params»): la réplica del
   motor con el preset SEIS («6 diarias», apertura.SEIS) en 3 años. Pierde fuera de muestra: se enseña tal cual.
+- «seis2» (con la misma seis_summary): seis2_resumen.json, la réplica del motor con el preset SEIS2 («6 diarias v2»:
+  las entradas de SEIS y la salida «A», la mitad en 3R y el resto con el cerrojo) en 3 años. También pierde: tal cual.
 
 Los usa /api/backtest/impulso (bot/server.py) y scripts/incrustar_backtest.py para la demostración.
 """
@@ -47,6 +50,21 @@ def _thin(curve: list, points: int) -> list:
     return [curve[int(i * step)] for i in range(points)] + [curve[-1]]
 
 
+def per_trade(curve: list, n) -> dict:
+    """Con un punto de la curva por operación (len == n), el R de cada una es la resta de dos puntos seguidos: la mejor
+    (max_R), la peor (min_R), cuántas ganan (ganadoras_n) y cuántas de ellas ganan menos de 2R y de 1R (el cierre por
+    tiempo sale con lo que haya: la regla «o gano más de 2 o pierdo 1» no vale para el reloj). Sin eso, {}."""
+    if not curve or not isinstance(n, int) or len(curve) != n:
+        return {}
+    rs, prev = [], 0.0
+    for _, v in curve:
+        rs.append(v - prev)
+        prev = v
+    win = [r for r in rs if r > 1e-9]
+    return {"max_R": round(max(rs), 3), "min_R": round(min(rs), 3), "ganadoras_n": len(win),
+            "ganadoras_bajo_2R": sum(1 for r in win if r < 2 - 1e-9), "ganadoras_bajo_1R": sum(1 for r in win if r < 1 - 1e-9)}
+
+
 def impulso_summary(d: dict, points: int = CURVE_POINTS) -> dict:
     out = {k: d.get(k) for k in ("generated", "split", "sl_pct", "nota")}
     for part in ("fuera", "dentro"):
@@ -58,6 +76,7 @@ def impulso_summary(d: dict, points: int = CURVE_POINTS) -> dict:
             dd = max(dd, peak - v)
         b["max_dd_R"] = round(dd, 2) if curve else None
         b["total_R"] = curve[-1][1] if curve else None
+        b.update(per_trade(curve, b.get("n")))   # también con la curva completa, antes de reducirla
         b["curva_R"] = _thin(curve, points)
         out[part] = b
     return out
@@ -79,13 +98,16 @@ def _read(path: Path) -> dict | None:
 
 
 SEIS_FILE = "seis_diarias_resumen.json"
+SEIS2_FILE = "seis2_resumen.json"
 
 
 def load() -> dict:
-    """{impulso, lab, seis} desde BACKTEST_DIR; lo que falte va como None."""
+    """{impulso, lab, seis, seis2} desde BACKTEST_DIR; lo que falte va como None."""
     imp = _read(config.BACKTEST_DIR / "impulso_7d.json")
     lab = _read(config.BACKTEST_DIR / "laboratorio.json")
     seis = _read(config.BACKTEST_DIR / SEIS_FILE)
+    seis2 = _read(config.BACKTEST_DIR / SEIS2_FILE)
     return {"impulso": impulso_summary(imp) if isinstance(imp, dict) else None,
             "lab": lab_summary(lab) if isinstance(lab, dict) else None,
-            "seis": seis_summary(seis) if isinstance(seis, dict) else None}
+            "seis": seis_summary(seis) if isinstance(seis, dict) else None,
+            "seis2": seis_summary(seis2) if isinstance(seis2, dict) else None}

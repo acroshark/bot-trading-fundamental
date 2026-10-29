@@ -1660,3 +1660,228 @@ async def test_motor_cuenta_las_entradas_de_la_noticia_en_el_tope_del_dia():
     assert not sent and "Tope diario de 1 entradas" in _rimp(eng, "BTC").end_why
     day = eng.view()["day"]
     assert day["entries"] == 1 and day["risk_pct"] == pytest.approx(0.5)   # la de ayer no cuenta
+
+
+# ---------------------------------------------------------------- «6 diarias v2» (SEIS2): la mitad en 3R y el resto corre
+
+def _seis2(**over):
+    return {**{k: v for k, v in ap.SEIS2.items() if k not in ("estrategia", "windows", "coins")}, **over}
+
+
+def test_preset_seis2_las_entradas_de_seis_y_la_salida_a(monkeypatch):
+    from bot import config, evolucion
+    monkeypatch.setattr(config, "USER_RULES", True)
+    p, notes = ap.impulse_params(ap.SEIS2)
+    assert not notes and p["lab"] is None and ap.preset_of(p) == "seis2"
+    for k in ("measure_min", "min_move_pct", "entry", "rvol_min", "vol_filter", "btc_filter", "news_mode", "windows",
+              "coins", "max_day_entries", "max_day_risk_pct", "risk_pct", "long_instrument", "short_instrument"):
+        assert p[k] == ap.impulse_params(ap.SEIS)[0][k], k   # las entradas y los límites de «6 diarias»
+    assert (p["sl_pct"], p["target_r"], p["tp1_r"], p["tp1_frac"]) == (2.0, None, 3.0, 0.5)
+    assert (p["lock_r"], p["floor_r"], p["trail_r"], p["trail_atr"]) == (3.0, 2.0, 2.0, None)
+    assert (p["max_hold_h"], p["max_hold_active_h"], p["be_r"], p["trail_start_r"]) == (24.0, 168.0, None, None)
+    info = ap.preset_info(p)
+    assert info["nombre"] == "6 diarias v2" and "la mitad sale en 3R" in info["descripcion"]
+    assert ap.preset_of(ap.impulse_params(ap.SEIS)[0]) == "seis"           # «6 diarias» se queda tal cual
+    assert ap.preset_of(ap.impulse_params(_seis2(trail_r=1.5))[0]) is None
+    assert ap.hold_text(p) == "como mucho 24 h sin activar el cerrojo y hasta 7 días activado"
+    assert ap.exit_text(p, corto=True) == "stop 2 %, la mitad en 3R y el resto corre"
+    assert ap.exit_text(p).startswith("stop 2 %, la mitad sale en 3R (+6 %) y el resto corre: al llegar a +3R su stop "
+                                      "sube a +2R (+4 %) y lo sigue a 2R por detrás; antes, el stop no se mueve")
+    assert ap.exit_text(ap.impulse_params(ap.SEIS)[0], corto=True) == "stop 1,5 % y objetivo 3R"
+    ok, fallos = evolucion.cumple_reglas({k: v for k, v in ap.SEIS2.items() if k not in ("estrategia", "lab")})
+    assert ok, fallos
+    f2 = evolucion.firma_motor(p)
+    assert f2 not in (evolucion.firma_motor(ap.impulse_params(ap.SEIS)[0]), evolucion.firma_motor(ap.impulse_params({})[0]))
+    assert evolucion.firma_motor(ap.impulse_params(_seis2(trail_r=1.5))[0]) != f2   # el cerrojo cuenta en la versión
+
+
+def test_plan_seis2_cada_parte_que_gana_cumple_la_regla(monkeypatch):
+    from bot import config
+    monkeypatch.setattr(config, "USER_RULES", True)
+    p = ap.impulse_params(ap.SEIS2)[0]
+    pl = ap.impulse_plan(1, 100.0, p)
+    assert pl["ok"] and pl["stop_px"] == pytest.approx(98.0) and pl["target_px"] is None and pl["tp2R"] is None
+    assert (pl["tp1R"], pl["tp1Frac"], pl["lockR"], pl["lockFloorR"], pl["lockTrailR"]) == (3.0, 0.5, 3.0, 2.0, 2.0)
+    assert pl["tp1_px"] == pytest.approx(106.0) and pl["floor_px"] == pytest.approx(104.0)
+    assert pl["rr"] == 2.0 and pl["net_pct"] == pytest.approx(3.76) and pl["gross_pct"] == pytest.approx(4.0)
+    assert [(x["que"], x["R"], x["neto_pct"]) for x in pl["partes"]] == [("parcial", 3.0, 5.76), ("suelo", 2.0, 3.76)]
+    assert "la mitad sale en 106,00" in pl["why"] and "sin break-even" in pl["why"]
+    corto = ap.impulse_plan(-1, 100.0, p, 0.01, "perp")    # el funding esperado (16 h) cuenta en cada parte
+    assert corto["ok"] and corto["floor_px"] == pytest.approx(96.0) and corto["funding_pct"] == 0.0
+    caro = ap.impulse_plan(1, 100.0, p, 0.4, "perp")       # 8,4 % de funding en 168 h: el suelo no deja el 3 % neto
+    assert not caro["ok"] and caro["why"].startswith("Regla del usuario: el suelo del cerrojo da +4,00 %")
+    assert ap.impulse_plan(1, 100.0, ap.impulse_params(ap.SEIS)[0])["partes"][0]["que"] == "objetivo"
+    paper_rules = ap.paper.exit_rules({**pl, "stopPct": pl["stopPct"]})   # el paper lo acepta tal cual
+    assert (paper_rules["lock_r"], paper_rules["floor_r"], paper_rules["tp1_frac"]) == (3.0, 2.0, 0.5)
+
+
+def test_plan_seis2_el_suelo_cuenta_el_funding_hasta_el_tope_activado(monkeypatch):
+    """El suelo del cerrojo solo se cobra con el cerrojo activado, que puede durar hasta max_hold_active_h (7 días): su
+    funding esperado va hasta ahí; la parcial, con la duración media (16 h)."""
+    from bot import config
+    monkeypatch.setattr(config, "USER_RULES", True)
+    p = ap.impulse_params(ap.SEIS2)[0]
+    ok = ap.impulse_plan(-1, 100.0, p, -0.03, "perp")      # el corto paga 0,03 %/8 h: 0,63 % en 168 h
+    assert ok["ok"] and ok["net_pct"] == pytest.approx(4 - 0.24 - 0.63)
+    assert [(x["que"], x["funding_h"], x["funding_pct"]) for x in ok["partes"]] == [("parcial", 16.0, 0.06),
+                                                                                     ("suelo", 168.0, 0.63)]
+    ko = ap.impulse_plan(-1, 100.0, p, -0.05, "perp")      # 1,05 % en 168 h: el suelo deja 2,71 % neto
+    assert not ko["ok"] and "el suelo del cerrojo da +4,00 %" in ko["why"] and "funding esperado en 168 h (1,050 %)" in ko["why"]
+    assert ko["funding_pct"] == pytest.approx(0.1)          # el de la duración media, como siempre
+    assert ap.impulse_plan(1, 100.0, p, -0.05, "perp")["ok"]                     # el largo lo cobraría: no cuenta
+    assert "funding_h" not in ap.impulse_plan(-1, 100.0, p, -0.05, "spot")["partes"][0]   # al contado no hay funding
+    seis = ap.impulse_plan(-1, 100.0, ap.impulse_params(ap.SEIS)[0], -0.05, "perp")   # sin cerrojo: la media de siempre
+    assert seis["ok"] and seis["partes"][0]["funding_h"] == 13.0
+
+
+@pytest.mark.parametrize("bad", [float("inf"), float("nan")])
+def test_parametros_no_finitos_vuelven_al_preset(monkeypatch, bad):
+    """Un objetivo, parcial, cerrojo, stop o plazo infinito (json.loads acepta «Infinity») no pasa: vuelve al preset."""
+    from bot import config
+    monkeypatch.setattr(config, "USER_RULES", True)
+    for k in ("lock_r", "floor_r", "tp1_r", "trail_r", "max_hold_active_h", "sl_pct", "max_hold_h", "avg_hold_h",
+              "min_move_pct", "max_day_risk_pct"):
+        p, notes = ap.impulse_params(_seis2(**{k: bad}))
+        assert all(v is None or isinstance(v, (str, list, bool)) or math.isfinite(v) for v in p.values()), k
+        assert any(k in n for n in notes), (k, notes)
+        pl = ap.impulse_plan(1, 100.0, p)
+        assert "inf" not in pl["why"] and "nan" not in pl["why"], k
+
+
+def test_parametros_del_cerrojo_se_validan(monkeypatch):
+    from bot import config
+    monkeypatch.setattr(config, "USER_RULES", True)
+    p, notes = ap.impulse_params(_seis2(lock_r=None))                      # sin cerrojo: ni suelo, ni seguimiento
+    assert p["lock_r"] is None and p["floor_r"] is None and p["trail_r"] is None and p["target_r"] == 3.0
+    assert any("cerrojo incompleto" in n for n in notes) and any("target_r" in n for n in notes)
+    p, notes = ap.impulse_params({"trail_r": 2.0, "max_hold_active_h": 168})   # seguimiento sin cerrojo: fuera
+    assert p["trail_r"] is None and p["max_hold_active_h"] is None and len(notes) == 2
+    p, notes = ap.impulse_params(_seis2(floor_r=1.0, lock_r=1.5, tp1_r=1.5))   # por debajo del mínimo: sube a 2R
+    assert (p["floor_r"], p["lock_r"], p["tp1_r"]) == (2.0, 2.0, 2.0) and len(notes) == 3
+    p, notes = ap.impulse_params(_seis2(max_hold_active_h=12, trail_atr=3.0))
+    assert p["max_hold_active_h"] == 24.0 and p["trail_atr"] is None and len(notes) == 2   # manda trail_r
+    p = ap.impulse_params(_seis2(trail_r=None, trail_atr=3.0))[0]
+    assert ap.lock_trail_r(p, 1.2) == pytest.approx(1.8) and ap.lock_trail_r(p) == pytest.approx(1.0)   # 3 × ATR / 2 %
+    p, notes = ap.impulse_params(_seis2(tp1_frac=1.5))
+    assert p["tp1_frac"] == 0.0 and "tp1_frac" in notes[0]
+    p, notes = ap.impulse_params({"tp1_frac": 0.5})                         # parcial sin tp1_r: sin parcial
+    assert p["tp1_frac"] == 0.0 and "sin salida parcial" in notes[0]
+
+
+def _a_bars(seq, t0=T0):
+    """Velas de 1 min (apertura, máximo, mínimo, cierre) desde t0."""
+    return [bar(t0 + k * MIN, o, h, l, c) for k, (o, h, l, c) in enumerate(seq)]
+
+
+def test_simulate_plan_salida_a(monkeypatch):
+    from bot import config
+    monkeypatch.setattr(config, "USER_RULES", True)
+    p = ap.impulse_params(ap.SEIS2)[0]
+    plan = ap.impulse_plan(1, 100.0, p)
+    fee = 0.001
+    end_s, end_l = T0 + 24 * ap.H, T0 + 168 * ap.H
+    # a +3R (la mitad sale en 106 y el stop sube a 104) y vuelta: sale en el suelo
+    r = ap.simulate_plan(_a_bars([(100, 101, 99.5, 100.5), (101, 106.2, 104.5, 105), (105, 105.5, 104.5, 105),
+                                  (104.2, 104.3, 103.5, 103.6)]), 0, 1, plan, end_s, fee, 0.0, end_l)
+    assert r["why"] == "cerrojo" and r["partial"] and r["locked"] and r["k"] == 3
+    assert r["ret"] == pytest.approx((0.5 * 0.06 + 0.5 * 0.04 - fee * (1 + 0.53 + 0.52)) * 100)
+    # la vela que llega a +3R no mira el suelo nuevo (como salidas_motor.py): sale en la siguiente
+    r = ap.simulate_plan(_a_bars([(100, 106.5, 103.0, 103.5), (103.5, 103.6, 103.0, 103.2)]), 0, 1, plan, end_s, fee,
+                         0.0, end_l)
+    assert r["why"] == "cerrojo" and r["k"] == 1 and r["partial_t"] == T0 + MIN
+    # a +5R el seguimiento lo sube a +3R; luego por tiempo a los 7 días
+    seq = [(100, 106.5, 99.9, 106), (106, 110.2, 108, 110)] + [(110, 110.1, 109.9, 110)] * 30
+    r = ap.simulate_plan(_a_bars(seq), 0, 1, plan, T0 + 10 * MIN, fee, 0.0, T0 + 20 * MIN)
+    assert r["why"] == "tiempo" and r["locked"] and r["t"] == T0 + 20 * MIN   # activada: la ventana larga
+    r = ap.simulate_plan(_a_bars(seq[:2] + [(109, 109, 106.1, 106.2), (106.2, 106.3, 105.9, 106)]), 0, 1, plan, end_s,
+                         fee, 0.0, end_l)
+    assert r["why"] == "seguimiento" and r["ret"] == pytest.approx((0.5 * 0.06 + 0.5 * 0.062 - fee * (1 + 0.53 + 0.531))
+                                                                   * 100)
+    # sin llegar a +3R: a las 24 h (10 min aquí) por tiempo; con el stop inicial, −1R
+    flat_up = [(100, 104, 99.9, 103)] * 20
+    r = ap.simulate_plan(_a_bars(flat_up), 0, 1, plan, T0 + 10 * MIN, fee, 0.0, T0 + 20 * MIN)
+    assert r["why"] == "tiempo" and not r["locked"] and not r["partial"] and r["t"] == T0 + 10 * MIN
+    r = ap.simulate_plan(_a_bars([(100, 105.9, 99, 99), (99, 99, 97.5, 97.8)]), 0, 1, plan, end_s, fee, 0.0, end_l)
+    assert r["why"] == "inicial" and r["first"] == "stop" and r["R"] == pytest.approx(-1.0 - fee * (1 + 0.98) / 0.02)
+
+
+async def test_motor_seis2_ticket_estado_y_programadas(monkeypatch):
+    from bot import config
+    monkeypatch.setattr(config, "USER_RULES", True)
+    now = [T0 - 30 * MIN]
+    full = ap.OpeningEngine(FakeBus(), None, lambda c, w: {"dir": 0}, lambda *a: True, lambda: {}, clock=lambda: now[0],
+                            params=dict(ap.SEIS2))
+    await full.step()                                  # antes de armar ninguna apertura: sin red
+    st = full.view()
+    assert st["params"]["preset"] == "seis2" and st["params"]["nombre"] == "6 diarias v2"
+    assert st["params"]["lock_r"] == 3.0 and st["params"]["tp1_frac"] == 0.5 and st["params"]["target_r"] is None
+    assert st["salida_corta"] == "stop 2 %, la mitad en 3R y el resto corre" and "cerrojo" in st["salida"]
+    prog = next(w for w in st["windows"] if w["id"].startswith("europa-"))   # «Programadas»
+    assert prog["state"] == "esperando_apertura" and prog["hora_madrid"] == "09:00"
+    assert prog["estrategia"] == "6 diarias v2" and prog["hara"] == (
+        "medirá el impulso de los 15 primeros min de BTC, ETH, SOL y XRP y entrará a las 09:15 en el sentido del "
+        "impulso; stop 2 %, la mitad en 3R y el resto corre")
+    eng, sent, _ = imp_engine(now, {"BTC": (1, 0.3)}, _seis2())
+    await eng.step()
+    w = _wimp(eng)
+    assert w["state"] == "esperando_apertura" and w["estrategia"] == "impulso"   # con solo Europa y BTC no es el preset
+    assert w["entrada_ms"] == T0 + 15 * MIN and w["medida_hasta"] == T0 + 15 * MIN
+    assert w["hara"] == ("medirá el impulso de los 15 primeros min de BTC y entrará a las 09:15 en el sentido del "
+                         "impulso; stop 2 %, la mitad en 3R y el resto corre")
+    now[0] = T0 + 7 * MIN + 3000                       # midiendo: lo que va midiendo
+    await eng.step()
+    lv = _wimp(eng)["coins"]["BTC"]["levels"]
+    assert _wimp(eng)["state"] == "midiendo_impulso" and lv["minutos_medidos"] == 7
+    assert lv["movimiento_pct"] == pytest.approx(0.3 * 7 / 15, abs=1e-3) and lv["impulso_pct"] is None
+    now[0] = T0 + 15 * MIN + 3000
+    await eng.step()
+    [(t, story, _hl, strat, _win)] = sent
+    assert story == "a-europa-2026-10-26-btc-1" and t["stopPct"] == 2.0 and t["tp2R"] is None
+    assert (t["tp1R"], t["tp1Frac"], t["lockR"], t["lockFloorR"], t["lockTrailR"]) == (3.0, 0.5, 3.0, 2.0, 2.0)
+    assert t["beR"] is None and t["trailPct"] is None and t["trailStartR"] is None
+    assert t["winEnd"] == now[0] + 24 * ap.H and t["holdLabel"] == "tope de 24 h"
+    assert t["winEndActive"] == now[0] + 168 * ap.H and t["holdActiveLabel"] == "7 días con el cerrojo"
+    assert "sin activar el cerrojo; activado, hasta" in t["valid"] and "suelo" in t["inval"]
+    assert t["tags"]["preset"] is None   # con ventanas y monedas cambiadas no es el preset entero
+    x = _wimp(eng)["coins"]["BTC"]
+    assert x["plan"]["lockR"] == 3.0 and x["plan"]["parcial"] == pytest.approx(x["plan"]["entry"] * 1.06)
+    assert "la mitad sale en" in x["why"] and "con el cerrojo" in x["why"]
+    assert x["levels"]["suelo"] == pytest.approx(x["plan"]["entry"] * 1.04) and x["levels"]["objetivo"] is None
+
+
+async def test_motor_seis2_con_el_paper_real_a_medias_y_reinicio(tmp_path, monkeypatch):
+    from bot import config, paper
+    from bot.bus import Bus
+    from bot.store import Store
+    for k, v in {"USER_RULES": True, "APPROVAL_MODE": "auto", "PAPER_EQUITY": 10000.0, "RISK_PER_TRADE_PCT": 0.5,
+                 "FEE_PCT": 0.10, "MAX_POSITIONS": 4, "MAX_DAILY_LOSS_PCT": 3.0}.items():
+        monkeypatch.setattr(config, k, v)
+    store = Store(tmp_path / "bot.db")
+    bus = Bus(store)
+    now = [T0 + 15 * MIN + 3000]
+    mkt = {"type": "market", "prices": {"ETH": 100.3}, "spread": {"ETH": 0.0}, "flow": {"ETH": {"funding": 0.01}}}
+    bus.publish(mkt)
+    broker = paper.PaperBroker(bus, store, lambda: bus.state.get("market"), clock=lambda: now[0], slip_bps=lambda: 0.0)
+    eng, _, _ = imp_engine(now, {"ETH": (1, 0.3)}, _seis2(), bus=bus, submit=broker.submit)
+    eng.get_portfolio = broker.portfolio
+    await eng.step()
+    [p] = broker.portfolio()["positions"]
+    e = p["entry"]
+    assert p["side"] == "long" and p["sl"] == pytest.approx(e * 0.98) and p["tp2"] is None and p["lock_r"] == 3.0
+    now[0] = T0 + 60 * MIN
+    bus.publish({**mkt, "prices": {"ETH": e * 1.06}})   # +3R: la mitad sale y el cerrojo se activa
+    broker.step()
+    pos = broker.positions[p["story"]]
+    assert pos["tp1_done"] and pos["locked"] and pos["sl"] == pytest.approx(e * 1.04)
+    await eng.step()
+    run = _rimp(eng, "ETH")
+    assert run.state == "en_posicion" and "la mitad ya salió" in run.last_why and "cerrojo activado" in run.last_why
+    # Reinicio del bot con la posición a medias: se recupera sin repetir la entrada
+    eng2, sent2, _ = imp_engine(now, {"ETH": (1, 0.3)}, _seis2(), bus=bus, submit=broker.submit)
+    eng2.get_portfolio = broker.portfolio
+    await eng2.step()
+    run2 = _rimp(eng2, "ETH")
+    assert run2.state == "en_posicion" and run2.entries == 1 and len(broker.positions) == 1 and not sent2
+    assert run2.floor_px == pytest.approx(e * 1.04) and "la mitad ya salió" in run2.last_why
+    assert broker.portfolio()["positions"][0]["qty"] == pytest.approx(p["qty"] / 2)
+    store.close()

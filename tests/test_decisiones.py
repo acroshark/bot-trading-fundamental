@@ -743,7 +743,9 @@ def test_catalogo_cerrado_sin_repetir_y_ts_en_orden(tmp_path):
     assert c["datos"] == {"x": None, "y": [1, None]} and c["dia"] == "2026-10-29"
     assert set(D.MOTIVOS) == {"entra", "impulso_nulo", "impulso_bajo", "tarde", "sin_velas", "veto_noticia", "tope_dia",
                               "riesgo_dia", "perdida_dia", "exposicion", "moneda_ocupada", "max_posiciones", "reglas",
-                              "aprobacion", "bot_parado", "objetivo", "stop", "tiempo", "otro"}
+                              "aprobacion", "bot_parado", "objetivo", "stop", "cerrojo", "tiempo", "otro"}
+    assert set(D.DECISIONES) == {"entra", "no_entra", "rechazada", "perdida", "abierta", "parcial", "cerrada",
+                                 "esperando"}   # «parcial»: la salida parcial, la posición sigue abierta a medias
     assert [r["id"] for r in filas(dec)] == [a["id"], b["id"], c["id"]]
     assert "decision_apertura" not in bus.state   # solo el cable: no va en el estado inicial
     dec.close()
@@ -968,3 +970,89 @@ def test_motivos_del_paper_con_sus_textos():
     assert m("Diferencial de BTC: 6,0 pb > 5 pb") == "otro" and m(None) == "otro"
     assert D.codigo_cierre("Objetivo (3,0 R)") == "objetivo" and D.codigo_cierre("Stop de pérdida") == "stop"
     assert D.codigo_cierre("Cierre por tiempo (tope de 24 h)") == "tiempo" and D.codigo_cierre("Cierre manual") == "otro"
+
+
+# ---------------------------------------------------------------- «6 diarias v2»: la salida parcial y el cierre con el cerrojo
+
+SEIS2 = {k: v for k, v in ap.SEIS2.items() if k != "estrategia"}
+
+
+def test_codigo_de_cierre_del_cerrojo():
+    assert D.codigo_cierre("Stop del cerrojo tras salida parcial") == "cerrojo"
+    assert D.codigo_cierre("Stop de seguimiento tras salida parcial") == "cerrojo"
+    assert D.codigo_cierre("Stop de pérdida") == "stop" and D.codigo_cierre("Cierre por tiempo (7 días con el cerrojo)") \
+        == "tiempo"
+
+
+async def test_seis2_parcial_cierre_con_su_r_y_reinicio(tmp_path, reglas):
+    now = [T - 10 * MIN]
+    px = {"BTC": 100.3}
+    store, bus, dec, broker = entorno(tmp_path, now, px)
+    eng = motor(now, {"BTC": (1, 0.3)}, bus, broker.submit, broker.portfolio, dec, params={**SEIS2, "coins": ["BTC"]})
+    await eng.step()
+    now[0] = T + 15 * MIN + 3000
+    await eng.step()
+    [p] = broker.portfolio()["positions"]
+    story, e = p["story"], p["entry"]
+    env_row = next(r for r in filas(dec, VID, "BTC") if r["fase"] == "entrada")
+    plan = env_row["datos"]["plan"]
+    assert plan["stop_pct"] == 2.0 and plan["objetivo_R"] is None and plan["parcial_R"] == 3.0
+    assert plan["parcial_frac"] == 0.5 and plan["cerrojo_R"] == 3.0 and plan["suelo_R"] == 2.0
+    assert plan["seguimiento_R"] == 2.0 and plan["tope_activado_h"] == 168 and plan["neto_pct"] == pytest.approx(3.76)
+    assert "la mitad sale en" in env_row["motivo"] and "con el cerrojo" in env_row["motivo"]
+    ab = next(r for r in filas(dec, VID, "BTC") if r["decision"] == "abierta")["datos"]   # el plan con que abrió el paper
+    assert ab["objetivo"] is None and ab["parcial"] == pytest.approx(e * 1.06) and ab["parcial_frac"] == 0.5
+    assert ab["suelo"] == pytest.approx(e * 1.04) and (ab["cerrojo_R"], ab["suelo_R"], ab["seguimiento_R"]) == (3.0, 2.0, 2.0)
+    assert ab["hasta_activado"] - ab["hasta"] == 144 * 60 * MIN and "descartado" not in ab
+    # +3R: la mitad sale (fila «parcial», con su R) y el resto sigue con el cerrojo
+    now[0] = T + 40 * MIN
+    bus.publish({**bus.state["market"], "prices": {"BTC": e * 1.06}})
+    broker.step()
+    rows = filas(dec, VID, "BTC")
+    par = rows[-1]
+    assert (par["fase"], par["decision"], par["motivo_codigo"]) == ("cierre", "parcial", "objetivo")
+    assert par["story"] == story and par["trade_id"] == p["id"] and par["datos"]["cerrojo"]
+    assert par["datos"]["R"] == pytest.approx(1.5 - 0.5 * 0.106 / 2, abs=0.01) and par["datos"]["fraccion"] == 0.5
+    assert par["datos"]["suelo"] == pytest.approx(e * 1.04) and "el resto sigue con el cerrojo" in par["motivo"]
+    n = len(rows)
+    for k in range(3):   # los demás «manage» (seguimiento, funding…) no son decisiones
+        now[0] += MIN
+        bus.publish({**bus.state["market"], "prices": {"BTC": e * (1.08 + 0.01 * k)}})
+        broker.step()
+    assert len(filas(dec, VID, "BTC")) == n
+    # Reinicio con la posición a medias: ni se vuelve a medir ni se repite la entrada
+    eng2 = motor(now, {"BTC": (1, 0.3)}, bus, broker.submit, broker.portfolio, dec, params={**SEIS2, "coins": ["BTC"]})
+    await eng2.step()
+    assert wrun(eng2, "BTC").state == "en_posicion" and len(broker.positions) == 1
+    assert "la mitad ya salió" in wcoin(eng2, "BTC")["why"]
+    # Vuelve al seguimiento (+5R − 2R = +3R): cierre «cerrojo» con el R de la operación entera
+    now[0] += MIN
+    bus.publish({**bus.state["market"], "prices": {"BTC": e * 1.059}})
+    broker.step()
+    tr = broker.closed[-1]
+    c = filas(dec, VID, "BTC")[-1]
+    assert (c["fase"], c["decision"], c["motivo_codigo"]) == ("cierre", "cerrada", "cerrojo")
+    assert c["datos"]["R"] == pytest.approx(tr["R"]) and tr["R"] > 2.8 and "Stop de seguimiento" in c["motivo"]
+    assert c["trade_id"] == p["id"]
+    await eng2.step()
+    assert wrun(eng2, "BTC").done
+    dec.close()
+    store.close()
+
+
+async def test_reinicio_con_la_ultima_fila_parcial_no_repite(tmp_path, reglas):
+    """La última fila es la parcial y el paper no enseña la posición (p. ej. otra base): la moneda se da por hecha."""
+    now = [T + 5 * MIN]
+    store, bus, dec, broker = entorno(tmp_path, now, {"BTC": 100.3})
+    dec.add(VID, "BTC", "medida", "entra", "entra", "Impulso", ts=T + 15 * MIN, lado="largo")
+    dec.add(VID, "BTC", "entrada", "entra", "entra", "Se envía", ts=T + 15 * MIN, story=f"a-{VID}-btc-1")
+    dec.add(VID, "BTC", "cierre", "parcial", "objetivo", "Salida parcial", ts=T + 40 * MIN, story=f"a-{VID}-btc-1")
+    now[0] = T + 50 * MIN
+    sent = []
+    eng = motor(now, {"BTC": (1, 0.3)}, bus, lambda *a: sent.append(a) or True, lambda: {}, dec,
+                params={**SEIS2, "coins": ["BTC"]})
+    await eng.step()
+    run = wrun(eng, "BTC")
+    assert run.done and not sent and run.end_why == "Salida parcial" and eng.windows[VID]["seq"]["BTC"] == 1
+    dec.close()
+    store.close()

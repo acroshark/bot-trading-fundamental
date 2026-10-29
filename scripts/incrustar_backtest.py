@@ -4,8 +4,8 @@ Uso: M:\\BotFundamental-runtime\\venv\\Scripts\\python.exe scripts\\incrustar_ba
 Con el bot en marcha la web no usa esto: pide /api/backtest.
 También incrusta un resumen ligero del laboratorio (labData): el ejemplo de la pestaña Evolución lo usa para poner los
 nombres y las cifras fuera de muestra reales de sus estrategias prometedoras (todo lo demás del ejemplo es inventado).
-Y el backtest del motor en vivo (impulsoData, E2) y el de la estrategia «6 diarias» (seisData, de
-seis_diarias_resumen.json), con la curva de R reducida.
+Y el backtest del motor en vivo (impulsoData, E2) y los de las estrategias «6 diarias» (seisData, de
+seis_diarias_resumen.json) y «6 diarias v2» (seis2Data, de seis2_resumen.json), con la curva de R reducida.
 """
 import json
 import re
@@ -15,8 +15,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from bot import config  # noqa: E402
-from bot.resumen_backtest import (SEIS_FILE, impulso_summary, lab_summary,  # noqa: E402,F401  (lab_summary: pruebas)
-                                  seis_summary)
+from bot.resumen_backtest import (SEIS2_FILE, SEIS_FILE, impulso_summary,  # noqa: E402
+                                  lab_summary, seis_summary)
 
 PAGE = ROOT / "dashboard" / "radar.html"
 BLOCK = re.compile(r'<script type="application/json" id="btData">.*?</script>', re.S)
@@ -24,6 +24,7 @@ BLOCK_OPEN = re.compile(r'<script type="application/json" id="btOpenData">.*?</s
 BLOCK_LAB = re.compile(r'<script type="application/json" id="labData">.*?</script>', re.S)
 BLOCK_IMP = re.compile(r'<script type="application/json" id="impulsoData">.*?</script>', re.S)
 BLOCK_SEIS = re.compile(r'<script type="application/json" id="seisData">.*?</script>', re.S)
+BLOCK_SEIS2 = re.compile(r'<script type="application/json" id="seis2Data">.*?</script>', re.S)
 POINTS = 40
 
 
@@ -97,6 +98,16 @@ def main() -> None:
             m = BLOCK_IMP.search(html) or BLOCK_LAB.search(html) or BLOCK_OPEN.search(html) or BLOCK.search(html)
             html = html[:m.end()] + "\n" + tag5 + html[m.end():]
         print(f"Incrustado el backtest de «6 diarias» ({len(tag5) / 1024:.1f} KB)")
+    src_seis2 = config.BACKTEST_DIR / SEIS2_FILE
+    if src_seis2.exists():   # «6 diarias v2»: la mitad en 3R y el resto con el cerrojo (también pierde: tal cual)
+        tag6 = _tag("seis2Data", seis_summary(json.loads(src_seis2.read_text(encoding="utf-8"))))
+        if BLOCK_SEIS2.search(html):
+            html = BLOCK_SEIS2.sub(lambda _: tag6, html)
+        else:
+            m = (BLOCK_SEIS.search(html) or BLOCK_IMP.search(html) or BLOCK_LAB.search(html)
+                 or BLOCK_OPEN.search(html) or BLOCK.search(html))
+            html = html[:m.end()] + "\n" + tag6 + html[m.end():]
+        print(f"Incrustado el backtest de «6 diarias v2» ({len(tag6) / 1024:.1f} KB)")
     PAGE.write_text(html, encoding="utf-8")
 
 

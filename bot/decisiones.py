@@ -5,8 +5,9 @@ empezar a medir (esperando), al terminar la medida (entra, o no entra y por qué
 descartarla (tope del día, moneda ocupada, reglas…), y al arrancar, las aperturas que pasaron con el bot parado. La
 entrada por noticia fiable (bot/entrada_noticias.py) va igual, con la ventana «noticia» (ventana_id «noticia-<story>»).
 Los rechazos del riesgo y del paper y la apertura y el cierre de la operación (con su R) llegan por el gancho del bus
-(observe): eventos riskko, humanko, blocked, filled y closed de las stories que el motor (a-…) o la entrada por noticia
-(nf-…) mandaron al paper. El enlace es la story del evento «strategy» y, desde que se abre, trade_id. Solo esas stories
+(observe): eventos riskko, humanko, blocked, filled, manage con «partial» (la salida parcial, fila «parcial»: la
+posición sigue abierta a medias) y closed de las stories que el motor (a-…) o la entrada por noticia (nf-…) mandaron al
+paper. El enlace es la story del evento «strategy» y, desde que se abre, trade_id. Solo esas stories
 (a-… y nf-…): la fase 2 manda al paper con la story de la noticia, que no es de ninguna apertura.
 - Solo se añade: dos disparadores impiden DELETE y UPDATE (la tabla y su migración están en bot/store.py). Una fila
   igual a la última de la misma ventana×moneda×fase (decisión, motivo y operación) no se repite: un reinicio que vuelve
@@ -40,10 +41,10 @@ MAD = ZoneInfo("Europe/Madrid")
 DAY = 86_400_000
 
 FASES = ("medida", "entrada", "riesgo", "paper", "cierre", "perdida")
-DECISIONES = ("entra", "no_entra", "rechazada", "perdida", "abierta", "cerrada", "esperando")
+DECISIONES = ("entra", "no_entra", "rechazada", "perdida", "abierta", "parcial", "cerrada", "esperando")
 MOTIVOS = ("entra", "impulso_nulo", "impulso_bajo", "tarde", "sin_velas", "veto_noticia", "tope_dia", "riesgo_dia",
            "perdida_dia", "exposicion", "moneda_ocupada", "max_posiciones", "reglas", "aprobacion", "bot_parado",
-           "objetivo", "stop", "tiempo", "otro")
+           "objetivo", "stop", "cerrojo", "tiempo", "otro")
 FINALES = ("no_entra", "rechazada", "perdida", "cerrada")   # tras una de estas, esa apertura×moneda no vuelve a intentar
 COLS = tuple(c for c, _ in DECISIONES_COLS)
 DIAS_API = 3                  # GET /api/decisiones sin «desde»: los 3 últimos días
@@ -57,7 +58,7 @@ RETRY_TRIES = 50              # unas 4 h reintentando: luego se da por perdida e
 ORDENES = ("a-", "nf-")       # stories de las órdenes del motor y de la entrada por noticia (las de la fase 2 no)
 _RONDA = object()             # el hilo escritor despierta sin nada nuevo: toca reintentar
 SRC_NOTICIA = "Entrada por noticia fiable"   # entrada_noticias.SRC (sin importarla: arrastra el aprendizaje)
-OBSERVA = frozenset({"strategy", "riskko", "humanko", "blocked", "filled", "closed", "entrada_noticia"})
+OBSERVA = frozenset({"strategy", "riskko", "humanko", "blocked", "filled", "manage", "closed", "entrada_noticia"})
 STORY_A = re.compile(r"^a-(?P<win>.+)-(?P<dia>\d{4}-\d{2}-\d{2})-(?P<coin>[a-z]+)-\d+$")
 STORY_NF = re.compile(r"^nf-(?P<sid>.+)-(?P<coin>[a-z]+)$")
 
@@ -103,10 +104,13 @@ def dia_madrid(ms: int) -> str:
 
 
 def codigo_cierre(why: str | None) -> str:
-    """objetivo | stop | tiempo | otro, del motivo de cierre del paper (paper._manage, paper.close)."""
+    """objetivo | stop | cerrojo | tiempo | otro, del motivo de cierre del paper (paper._manage, paper.close). «cerrojo»:
+    el stop del cerrojo o su seguimiento (sale ganando ≥ el suelo, no es un stop de pérdida)."""
     t = str(why or "")
     if t.startswith("Objetivo"):
         return "objetivo"
+    if t.startswith((paper.STOP_NAMES["cerrojo"], paper.STOP_NAMES["seguimiento"])):
+        return "cerrojo"
     if t.startswith(tuple(paper.STOP_NAMES.values())):
         return "stop"
     if t.startswith("Cierre por tiempo"):
@@ -512,11 +516,36 @@ class Decisiones:
                 ex = p.get("exec") or {}
                 tid = p.get("trade_id") or ctx.get("trade_id")
                 inst = "perpetuo" if ex.get("instrument") == "perp" else "contado"
+                datos = {"entrada": ex.get("px"), "stop": ex.get("sl"), "objetivo": ex.get("tp2"),
+                         "nominal_usdc": ex.get("notional"), "instrumento": inst, "deslizamiento_pb": ex.get("slip"),
+                         "riesgo_con_costes_usdc": ex.get("stopLossUsd")}
+                if _f(ex.get("tp1Frac")) or _f(ex.get("lockR")):   # el plan de salida a medias («6 diarias v2»)
+                    datos.update({k: v for k, v in (
+                        ("parcial", _f(ex.get("tp1")) if _f(ex.get("tp1Frac")) else None),
+                        ("parcial_frac", _f(ex.get("tp1Frac"))), ("suelo", _f(ex.get("floor"))),
+                        ("cerrojo_R", _f(ex.get("lockR"))), ("suelo_R", _f(ex.get("floorR"))),
+                        ("seguimiento_R", _f(ex.get("lockTrailR"))), ("hasta", ex.get("holdUntil")),
+                        ("hasta_activado", ex.get("holdActive"))) if v is not None})
+                if ex.get("descartado"):   # lo que pedía el ticket y la regla del usuario no dejó
+                    datos["descartado"] = list(ex["descartado"])[:4]
                 self._add(ctx, "paper", "abierta", "entra",
-                          f"Abierta en el paper ({inst}, dinero ficticio): {msg.get('title') or ''}", ts, story,
-                          {"entrada": ex.get("px"), "stop": ex.get("sl"), "objetivo": ex.get("tp2"),
-                           "nominal_usdc": ex.get("notional"), "instrumento": inst, "deslizamiento_pb": ex.get("slip"),
-                           "riesgo_con_costes_usdc": ex.get("stopLossUsd")}, tid)
+                          f"Abierta en el paper ({inst}, dinero ficticio): {msg.get('title') or ''}", ts, story, datos, tid)
+            elif kind == "manage":
+                part = p.get("partial")   # solo el evento de la salida parcial lo lleva: los demás manage no cuentan
+                if not isinstance(part, dict):
+                    return
+                tid = p.get("trade_id") or ctx.get("trade_id")
+                R, pnl, fr = _f(part.get("R")), _f(part.get("pnl")), _f(part.get("frac"))
+                txt = (f"Salida parcial ({_n((fr or 0) * 100, 0)} % de la posición) en {_n(_f(part.get('tp1R')) or 0, 1)} R"
+                       + (f": {_sg(R)} R de la posición entera" if R is not None else "")
+                       + (f" ({_sg(pnl)} USDC, dinero ficticio)" if pnl is not None else "")
+                       + ("; el resto sigue con el cerrojo" if part.get("locked") else "; el resto sigue abierto"))
+                self._add(ctx, "cierre", "parcial", "objetivo", txt, ts, story,
+                          {"R": R, "resultado_usdc": pnl, "fraccion": fr, "precio": _f(part.get("px")),
+                           "objetivo_R": _f(part.get("tp1R")), "comision_usdc": _f(part.get("fee")),
+                           "queda_qty": _f(part.get("qty_left")), "cerrojo": bool(part.get("locked")),
+                           "stop": _f(part.get("sl")), "suelo": _f(part.get("floor")),
+                           "hasta": part.get("hold_until")}, tid)
             elif kind == "closed":
                 res = p.get("result") or {}
                 why, R = res.get("why") or "cerrada", _f(res.get("R"))

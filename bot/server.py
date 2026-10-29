@@ -234,7 +234,7 @@ def state_summary(bus: Bus) -> dict:
                               "posiciones": len(cartera.get("positions", []))} if cartera else None}
 
 
-BT_BLOCK = re.compile(r'<script type="application/json" id="(?:bt(?:Open)?Data|impulsoData|seisData)">.*?</script>',
+BT_BLOCK = re.compile(r'<script type="application/json" id="(?:bt(?:Open)?Data|impulsoData|seis2?Data)">.*?</script>',
                       re.S)
 
 
@@ -690,9 +690,10 @@ def make_app(bus: Bus, health, services: Services | None = None) -> web.Applicat
         return j(res)
 
     async def api_bt_impulso(_request: web.Request) -> web.Response:
-        """La estrategia del motor (E2, variante de 7 días), la de «6 diarias» y el resumen del laboratorio."""
+        """La estrategia del motor (E2, variante de 7 días), las de «6 diarias» y «6 diarias v2» y el resumen del
+        laboratorio."""
         res = await asyncio.to_thread(resumen_backtest.load)
-        if res["impulso"] is None and res["lab"] is None and res.get("seis") is None:
+        if all(res.get(k) is None for k in ("impulso", "lab", "seis", "seis2")):
             raise web.HTTPNotFound(text="Aún no hay backtest del motor: python -m bot.laboratorio y controles/compara_impulso.py")
         return j(res)
 

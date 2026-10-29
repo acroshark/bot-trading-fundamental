@@ -5,8 +5,8 @@ La plataforma elegida es OKX EU (MiCA). Todo es **paper**: nunca se opera con di
 El usuario habla español: código, comentarios, textos de la web y documentación van en español.
 
 ## Reglas del usuario (intocables)
-- Relación beneficio/riesgo ≥ 2:1 (ideal 3:1). Stop nunca menor del 1,5 % (el preset usa 3 % y objetivo 3R).
-- Sin break-even ni stop dinámico: bracket puro, «o gano más de 2 o pierdo 1, siempre».
+- Relación beneficio/riesgo ≥ 2:1, y es un MÍNIMO, no un techo: hay que dejar correr la ganancia (aclarado por el usuario el 28-10-2026). Stop nunca menor del 1,5 %.
+- «O gano más de 2 o pierdo 1, siempre»: antes de la ganancia mínima el stop no se mueve (nada de break-even). Se permiten la salida parcial y un cerrojo que suba el stop a un suelo, y desde ahí un seguimiento que nunca baja, siempre que cada parte que gana asegure ≥ 2R y ≥ 3 % neto (`paper.exit_rules`, `evolucion.cumple_reglas`). Excepción conocida: el cierre por tiempo a las 24 h de «6 diarias» puede cerrar entre −1R y +2R.
 - Objetivo ≥ 3 % neto de costes. Largos al contado y cortos en perpetuo. Una posición por moneda; límites diarios de entradas y riesgo.
 - Operativa: medir y seguir el impulso de los primeros minutos de cada apertura, respaldado por las noticias y por las aperturas anteriores.
 - Historia para backtests: como mucho 3 años.
@@ -18,6 +18,8 @@ El usuario habla español: código, comentarios, textos de la web y documentaci�
 - No se promete rentabilidad: se mide en paper y se enseñan las cifras. Lo único sin medir es la señal en vivo de las noticias.
 - Las expectativas del usuario (≥ 3 % por apertura) se contrastan con datos, sin discutir por discutir.
 - Desde el 28-10-2026 (14:49) la cartera de prueba opera «6 diarias» por decisión del usuario (`apertura.SEIS`, activada con `scripts/activar_estrategia.py --preset seis`): impulso de 15 min sin filtros, stop 1,5 %, 3R, como mucho 24 h, ≤ 6 entradas y 3 % de riesgo al día. En el backtest con el propio motor pierde: −0,12 R por operación fuera de muestra, ≈ −0,3 % de la cuenta por jornada. Se mide en vivo tal cual.
+- «6 diarias v2» (`apertura.PRESETS["seis2"]`, salida A elegida por el usuario): stop 2 %, la mitad sale en 3R y la otra mitad sube su stop a +2R y lo sigue a 2R, 24 h sin activar y 7 días activada. Fuera de muestra −0,075 R por operación y gana el 39 %. El 1:1 que propuso el usuario (stop 3 %, todo en 1,5R) gana el 44 % y pierde el 56 %: −0,06 R. Ninguna salida con ≥ 5 entradas al día gana (docs/05, secciones 21 y 22).
+- Fuentes de noticias (29-10-2026): 22 medios de cripto en 91 días, con el sentido puesto por Claude a ciegas, aciertan el 48 % ajustado y ninguno llega al 60 %. Antes de 54 movimientos bruscos de 3 años, ningún medio los anticipa (el consenso acierta el 46 %). Los titulares cuentan lo que ya pasa (`BACKTEST_DIR/controles/fuentes/` y `controles/bruscos/`).
 - La anterior (E2, impulso): +0,14 R por operación fuera de muestra con la salida del laboratorio y +0,35 R con la de 7 días, pero esta segunda se eligió después de ver los datos y no está validada. `--preset impulso` vuelve a ella.
 - Noticias fiables (`bot/fiables.py`): con los criterios fijados (≥ 60 % ajustado, constancia por día, n y días mínimos) pasan grupos que no se distinguen del azar y ninguno pasa la puerta para operar, así que la entrada por noticia (`bot/entrada_noticias.py`) aún no abre nada. 91 días de titulares públicos: 49,2 %, ningún medio pasa (docs/05, sección 20).
 - Con ≥ 6 operaciones al día y las reglas del usuario, la mejor variante pierde (≈ −0,4 % de la cuenta al día fuera de muestra). Ni sabiendo el sentido a 24 h se pasa de +1,9 %/día con 0,5 % de riesgo. Para no perder, la noticia tendría que acertar el sentido un 60 %, y las grabadas aciertan el 49 % (docs/05, sección 19).

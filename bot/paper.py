@@ -1,7 +1,10 @@
 """Paper trading: broker ficticio con precios reales de OKX EU. Recibe los tickets del estratega (patch.strat), pasa
 los controles de riesgo y la aprobación, ejecuta, gestiona los stops y publica la cartera (contratos 2.5, 2.6 y 3.2).
 Las operaciones se guardan en la tabla trades y las abiertas se recuperan al reiniciar.
-Cada ticket puede traer sus salidas (beR, trailStartR, tp1R + tp1Frac, tp2R; ver exit_rules); sin ellas, como siempre.
+Cada ticket puede traer sus salidas (beR, trailStartR, tp1R + tp1Frac, tp2R y el cerrojo lockR + lockFloorR +
+lockTrailR; ver exit_rules); sin ellas, como siempre. Con el cerrojo, el ticket puede traer también winEndActive y
+holdActiveLabel: el cierre por tiempo pasa a esa hora cuando el cerrojo se activa (p. ej. 24 h sin activar y 7 días
+activado, «6 diarias v2»). Una posición con la parcial hecha sigue siendo LA posición de esa moneda («a medias»).
 Un ticket inmediato con maxAgeMs no se ejecuta si la aprobación (veto o a mano) llega más tarde que eso.
 Instrumento del ticket («instrument»): «spot» (por defecto, como siempre) o «perp» (futuro perpetuo: así van los cortos
 del motor de aperturas). Con las reglas del usuario, un corto sin «instrument» va en perpetuo (en contado USDC no se
@@ -19,6 +22,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import math
 import random
 import time
 from datetime import datetime, time as dtime, timedelta
@@ -52,7 +56,8 @@ CLOSED_IN_PORTFOLIO = 50
 COST_SLIP_BPS = 2.0            # deslizamiento supuesto por lado en el coste de ida y vuelta (como el backtest); es
                                # también el máximo del simulado, que se suma al medio diferencial
 BE_MARGIN_BPS = 2.0            # margen del break-even sobre el coste de ida y vuelta
-STOP_NAMES = {"inicial": "Stop de pérdida", "be": "Stop en break-even", "dinamico": "Stop dinámico"}
+STOP_NAMES = {"inicial": "Stop de pérdida", "be": "Stop en break-even", "dinamico": "Stop dinámico",
+              "cerrojo": "Stop del cerrojo", "seguimiento": "Stop de seguimiento"}
 MODE_TEXT = {"auto": "Aprobación automática (solo paper)", "veto": "Ventana de veto de {s} s",
              "manual": "Apruebas cada orden (caduca en 10 min)"}
 INSTRUMENTS = ("spot", "perp")
@@ -70,10 +75,12 @@ NEED_CLOSED = ("id", "story", "opened", "closed", "pnl")
 # ---------------------------------------------------------------- utilidades
 
 def _f(x, default=None):
+    """Número finito o default: «inf» y NaN (que json.loads acepta) no valen como stop, objetivo ni cerrojo."""
     try:
-        return float(x) if x not in (None, "") else default
+        v = float(x) if x not in (None, "") else None
     except (TypeError, ValueError):
         return default
+    return v if v is not None and math.isfinite(v) else default
 
 
 def _n(x: float, d: int = 2) -> str:
@@ -206,12 +213,27 @@ def be_offset_pct() -> float:
     return cost_rt_pct() + BE_MARGIN_BPS / 100
 
 
+def rule_win_ok(r: float | None, stop_pct: float | None) -> bool:
+    """Regla del usuario para una salida que gana (objetivo, parcial o suelo del cerrojo) a r R con stop de stop_pct %:
+    r ≥ RULE_MIN_RR (2R) y r × stop − coste de ida y vuelta ≥ RULE_MIN_NET_PCT (3 % neto)."""
+    r, sp = _f(r), _f(stop_pct)
+    return bool(r and sp and r >= config.RULE_MIN_RR - 1e-9
+                and r * sp - cost_rt_pct() >= config.RULE_MIN_NET_PCT - 1e-9)
+
+
 def exit_rules(t: dict) -> dict:
     """Salidas de un ticket. Un ticket sin estos campos se gestiona como siempre (break-even a +1 R en la entrada y stop
     dinámico desde el principio).
     - beR: R desde el que el stop pasa a break-even; null o ≤ 0 = nunca. Con el campo, el nivel cubre costes.
     - trailStartR: R desde el que actúa el stop dinámico (null = desde la entrada).
-    - tp1R + tp1Frac: salida parcial de esa fracción en tp1 (0 = sin parcial). tp2R: objetivo final (null = sin tope)."""
+    - tp1R + tp1Frac: salida parcial de esa fracción en tp1 (0 = sin parcial). tp2R: objetivo final (null = sin tope).
+    - lockR + lockFloorR (+ lockTrailR): cerrojo. Al llegar a +lockR R el stop sube al suelo (+lockFloorR R) y, con
+      lockTrailR, desde ahí sigue al mejor precio a esa distancia en R, solo por encima del suelo (nunca baja). Un lockR
+      por debajo del suelo sube al suelo; sin suelo no hay cerrojo.
+    Con las reglas del usuario («o gano más de 2 o pierdo 1»): nada mueve el stop antes del cerrojo (sin break-even ni
+    stop dinámico); la parcial solo si su objetivo cumple rule_win_ok (si no, no hay parcial) y el cerrojo solo si su
+    suelo la cumple (si no, no hay cerrojo; entonces el ticket necesita un objetivo fijo ≥ 2R: _invalid). Lo que el
+    ticket pedía y la regla descarta va en «dropped» (textos), para decirlo al abrir. Un valor no finito no vale."""
     trail = _f(t.get("trailPct"))
     if "beR" in t:
         be_r = _f(t.get("beR"))
@@ -221,11 +243,50 @@ def exit_rules(t: dict) -> dict:
     ts, tp1R, tp2R = _f(t.get("trailStartR")), _f(t.get("tp1R")), _f(t.get("tp2R"))
     tp1R = tp1R if tp1R and tp1R > 0 else None
     frac = min(1.0, max(0.0, _f(t.get("tp1Frac"), 0.0))) if tp1R else 0.0
-    if config.USER_RULES:   # horquilla pura: o el objetivo o el stop, sin break-even, stop dinámico ni parciales
-        trail, be_r, ts, frac = None, None, None, 0.0
+    lock, floor, ltrail = _f(t.get("lockR")), _f(t.get("lockFloorR")), _f(t.get("lockTrailR"))
+    if lock and lock > 0 and floor and floor > 0:
+        lock = max(lock, floor)
+    else:
+        lock = floor = None
+    ltrail = ltrail if lock and ltrail and ltrail > 0 else None
+    dropped = []
+    if config.USER_RULES:   # o gano más de 2 o pierdo 1: nada mueve el stop antes de ganar el mínimo
+        trail, be_r, ts = None, None, None
+        stop = _f(t.get("stopPct"))
+        if frac and not rule_win_ok(tp1R, stop):
+            dropped.append(f"salida parcial en {_n(tp1R, 1)} R descartada por tu regla (≥ {_n(config.RULE_MIN_RR, 0)}R "
+                           f"y ≥ {_n(config.RULE_MIN_NET_PCT, 0)} % neto)")
+            frac = 0.0
+        if lock and not rule_win_ok(floor, stop):
+            dropped.append(f"cerrojo con suelo en {_n(floor, 1)} R descartado por tu regla (≥ {_n(config.RULE_MIN_RR, 0)}R "
+                           f"y ≥ {_n(config.RULE_MIN_NET_PCT, 0)} % neto)")
+            lock = floor = ltrail = None
     return {"trail": trail if trail and trail > 0 else None, "be_r": be_r, "be_pct": be_pct,
             "trail_start_r": ts if ts and ts > 0 else None, "tp1R": tp1R, "tp1_frac": frac,
-            "tp2R": tp2R if tp2R and tp2R > 0 else None}
+            "tp2R": tp2R if tp2R and tp2R > 0 else None, "lock_r": lock, "floor_r": floor, "lock_trail_r": ltrail,
+            "dropped": dropped}
+
+
+def lock_update(d: int, entry: float, stop_pct: float, best: float, stop: float, locked: bool, lock_r: float | None,
+                floor_r: float | None, trail_r: float | None = None) -> tuple[float, bool, str | None]:
+    """Cerrojo tras un nuevo extremo favorable `best` (el stop nunca baja). Devuelve (stop, activado, tipo del
+    movimiento o None).
+    - Se activa cuando best llega a +lock_r R: el stop sube al suelo, entrada ± floor_r R («cerrojo»). Antes, nada.
+    - Activado y con trail_r: el stop sigue a best a trail_r R por detrás, solo por encima del suelo («seguimiento»)."""
+    if not lock_r or not floor_r:
+        return stop, locked, None
+    kind = None
+    r = entry * stop_pct / 100
+    if not locked and d * (best - (entry + d * lock_r * r)) >= 0:
+        locked = True
+        lvl = entry + d * floor_r * r
+        if d * (lvl - stop) > 0:
+            stop, kind = lvl, "cerrojo"
+    if locked and trail_r:
+        lvl = best - d * trail_r * r
+        if d * (lvl - stop) > 0:
+            stop, kind = lvl, "seguimiento"
+    return stop, locked, kind
 
 
 def stop_update(d: int, entry: float, stop_pct: float, trail: float | None, best: float, stop: float, be: bool,
@@ -715,9 +776,17 @@ class PaperBroker:
             if stop < config.RULE_MIN_STOP_PCT - 1e-9:
                 return f"Regla del usuario: stop de {_n(stop)} % por debajo del mínimo de {_n(config.RULE_MIN_STOP_PCT)} %"
             rr = _f(t.get("tp2R"))
-            if not rr or rr < config.RULE_MIN_RR - 1e-9:
-                return (f"Regla del usuario: objetivo de {_n(rr)} R por debajo del mínimo de {_n(config.RULE_MIN_RR)} R"
-                        if rr else "Regla del usuario: sin objetivo fijo (hace falta al menos 2R)")
+            if rr and rr < config.RULE_MIN_RR - 1e-9:
+                return f"Regla del usuario: objetivo de {_n(rr)} R por debajo del mínimo de {_n(config.RULE_MIN_RR)} R"
+            if rr and not rule_win_ok(rr, stop):   # el objetivo deja ≥ 3 % neto de comisión y deslizamiento
+                return (f"Regla del usuario: el objetivo de {_n(rr)} R con stop de {_n(stop)} % deja "
+                        f"{_n(rr * stop - cost_rt_pct())} % neto de costes (mínimo {_n(config.RULE_MIN_NET_PCT, 0)} %)")
+            if not rr and exit_rules(t)["lock_r"] is None:   # sin objetivo fijo, solo con un cerrojo que cumpla
+                if _f(t.get("lockR")):
+                    return (f"Regla del usuario: sin objetivo fijo y el cerrojo no vale (su suelo tiene que ser ≥ "
+                            f"{_n(config.RULE_MIN_RR)} R y dejar ≥ {_n(config.RULE_MIN_NET_PCT, 0)} % neto de costes)")
+                return (f"Regla del usuario: sin objetivo fijo ni cerrojo (hace falta al menos "
+                        f"{_n(config.RULE_MIN_RR, 0)}R)")
         if t.get("timing") not in ("now", "window"):
             return f"Momento de entrada desconocido: {t.get('timing')}"
         if t.get("timing") == "window" and not _f(t.get("winAt")):
@@ -1007,7 +1076,16 @@ class PaperBroker:
                # Salidas del ticket (exit_rules) y salidas parciales ya hechas.
                "qty0": qty, "tp1R": rules["tp1R"], "tp1_frac": rules["tp1_frac"], "tp1_done": False,
                "be_r": rules["be_r"], "be_pct": rules["be_pct"], "trail_start_r": rules["trail_start_r"],
-               "realized": 0.0, "fees_exit": 0.0, "partials": []}
+               "realized": 0.0, "fees_exit": 0.0, "partials": [],
+               # Cerrojo (lock_update): activación, suelo y seguimiento en R; con él activado, el cierre por tiempo
+               # pasa a hold_active (winEndActive del ticket) si es más tarde.
+               "lock_r": rules["lock_r"], "floor_r": rules["floor_r"], "lock_trail_r": rules["lock_trail_r"],
+               "locked": False, "locked_at": None, "floor": px + d * r * rules["floor_r"] if rules["lock_r"] else None,
+               "hold_active": None, "hold_active_label": None}
+        end_act = _f(t.get("winEndActive"))
+        if rules["lock_r"] and end_act and end_act > hold_until:
+            pos["hold_active"] = int(end_act)
+            pos["hold_active_label"] = str(t.get("holdActiveLabel") or "cerrojo activado")
         if isinstance(t.get("tags"), dict):   # etiquetas del motor (noticia, apertura anterior…) para Resultados
             pos["tags"] = dict(t["tags"])
         pos["instrument"] = inst = instrument_of(t)
@@ -1017,7 +1095,9 @@ class PaperBroker:
         ex.update(px=px, slip=round(slip, 3), ms=round((time.perf_counter() - t0) * 1000, 1), notional=round(notional, 2),
                   qty=qty, sl=sl, tp1=pos["tp1"], tp2=pos["tp2"], trail=trail, tp1Frac=rules["tp1_frac"],
                   beR=rules["be_r"], trailStartR=rules["trail_start_r"], stopLossUsd=round(stop_loss, 2),
-                  instrument=inst)
+                  instrument=inst, lockR=rules["lock_r"], floorR=rules["floor_r"], lockTrailR=rules["lock_trail_r"],
+                  floor=pos["floor"], holdUntil=hold_until, holdActive=pos["hold_active"],
+                  **({"descartado": list(rules["dropped"])} if rules["dropped"] else {}))
         pos["exec"] = ex
         self.positions[story] = pos
         self._save_trade(pos)
@@ -1026,6 +1106,14 @@ class PaperBroker:
             plan += f" · parcial del {_n(pos['tp1_frac'] * 100, 0)} % en {_px(pos['tp1'])}"
         if pos["tp2"]:
             plan += f" · objetivo {_px(pos['tp2'])}"
+        if pos["lock_r"]:
+            plan += (f" · cerrojo: a +{_n(pos['lock_r'], 1)} R el stop sube a {_px(pos['floor'])} "
+                     f"(+{_n(pos['floor_r'], 1)} R)"
+                     + (f" y sigue al precio a {_n(pos['lock_trail_r'], 1)} R" if pos["lock_trail_r"] else ""))
+            if pos["hold_active"]:
+                plan += f"; activado, como mucho hasta el {datetime.fromtimestamp(pos['hold_active'] / 1000, MAD):%d-%m %H:%M}"
+        for txt in rules["dropped"]:   # lo que pedía el ticket y la regla del usuario no deja (se dice, no se calla)
+            plan += f" · {txt}"
         if pos["be_r"] is None:
             plan += " · sin break-even"
         elif pos["be_pct"]:
@@ -1059,11 +1147,40 @@ class PaperBroker:
         be_now = p["be"] and not was_be
         if kind:
             p["sl"], p["sl_kind"] = sl, kind
-        if be_now or abs(p["sl"] - p["sl_pub"]) >= MANAGE_STEP_R * r:
+        # Cerrojo (lock_update): antes de +lock_r R no mueve nada; activado, suelo y seguimiento por encima del suelo.
+        lock_now, lock_moved, extra = False, False, {}
+        if p.get("lock_r"):
+            was_locked = bool(p.get("locked"))
+            sl, p["locked"], kind = lock_update(d, p["entry"], p["stop_pct"], p["high_water"], p["sl"], was_locked,
+                                                p["lock_r"], p.get("floor_r"), p.get("lock_trail_r"))
+            if kind:
+                p["sl"], p["sl_kind"] = sl, kind
+                lock_moved = True
+            lock_now = p["locked"] and not was_locked
+            if lock_now:
+                p["locked_at"] = now
+                if p.get("hold_active") and p["hold_active"] > p["hold_until"]:
+                    p["hold_until"], p["hold_label"] = p["hold_active"], p.get("hold_active_label") or "cerrojo activado"
+                extra["lock"] = {"at": now, "lock_r": p["lock_r"], "floor_r": p.get("floor_r"),
+                                 "trail_r": p.get("lock_trail_r"), "floor": p.get("floor"),
+                                 "hold_until": p["hold_until"]}
+        if be_now or lock_now or abs(p["sl"] - p["sl_pub"]) >= MANAGE_STEP_R * r:
             p["sl_pub"] = p["sl"]
-            p["exec"] = {**p["exec"], "sl": p["sl"], "be": p["be"], "high_water": p["high_water"]}
+            p["exec"] = {**p["exec"], "sl": p["sl"], "be": p["be"], "high_water": p["high_water"],
+                         **({"locked": True, "holdUntil": p["hold_until"]} if p.get("locked") else {})}
             lock = d * (p["sl"] - p["entry"]) / r
-            if be_now:
+            if lock_now:
+                title = f"{coin}: cerrojo a +{_n(p['floor_r'], 1)} R"
+                tr = p.get("lock_trail_r")
+                text = (f"+{_n(p['lock_r'], 1)} R alcanzado: el stop sube a {_px(p['sl'])} (asegura {_sg(lock)} R en lo "
+                        "que queda)" + (f" y desde ahí sigue al precio a {_n(tr, 1)} R, sin bajar nunca" if tr else "")
+                        + f" · cierre por tiempo: {p['hold_label']} ({_hm(p['hold_until'])} del "
+                        f"{datetime.fromtimestamp(p['hold_until'] / 1000, MAD):%d-%m} Madrid)")
+            elif p["sl_kind"] == "seguimiento":
+                title = f"{coin}: stop de seguimiento a {_px(p['sl'])}"
+                text = (f"A {_n(p.get('lock_trail_r') or 0.0, 1)} R del {'máximo' if d > 0 else 'mínimo'} de "
+                        f"{_px(p['high_water'])} (por encima del suelo del cerrojo) · asegura {_sg(lock)} R")
+            elif be_now:
                 title = f"{coin}: stop a break-even"
                 text = (f"+{_n(p.get('be_r') or 1.0, 1)} R alcanzado: stop movido a {_px(p['sl'])} (asegura {_sg(lock)} R); "
                         + ("cubre las comisiones y el deslizamiento supuesto" if p.get("be_pct")
@@ -1074,7 +1191,9 @@ class PaperBroker:
                 title = f"{coin}: stop dinámico a {_px(p['sl'])}"
                 text = (f"{_n(dist)} % desde el {'máximo' if d > 0 else 'mínimo'} de {_px(p['high_water'])} · "
                         f"asegura {_sg(lock)} R")
-            self._event("manage", "exec", p["story"], coin, title, text, {"exec": dict(p["exec"])}, now)
+            self._event("manage", "exec", p["story"], coin, title, text, {"exec": dict(p["exec"]), **extra}, now)
+            self._save_trade(p)
+        elif lock_moved:   # el seguimiento sube el stop menos de 0,25 R: se guarda ya, para que un reinicio no lo baje
             self._save_trade(p)
 
         if p.get("tp1_frac") and not p.get("tp1_done") and p.get("tp1") and d * (px - p["tp1"]) >= 0:
@@ -1084,7 +1203,7 @@ class PaperBroker:
         if p["tp2"] and d * (px - p["tp2"]) >= 0:
             why, exit_px = f"Objetivo ({_n(p['tp2R'], 1)} R)", p["tp2"]   # orden límite: sale al precio del objetivo
         elif d * (px - p["sl"]) <= 0:
-            why, exit_px = STOP_NAMES[p["sl_kind"]], self._exit_px(p, px)
+            why, exit_px = STOP_NAMES.get(p["sl_kind"], "Stop"), self._exit_px(p, px)
         elif now >= p["hold_until"]:
             why, exit_px = f"Cierre por tiempo ({p['hold_label']})", self._exit_px(p, px)
         if why:
@@ -1135,13 +1254,25 @@ class PaperBroker:
         p["fees_exit"] = p.get("fees_exit", 0.0) + fee
         part = {"qty": q, "px": px, "at": now, "pnl": round(net, 4), "fee": round(fee, 4),
                 "why": f"Objetivo parcial ({_n(p.get('tp1R') or 0.0, 1)} R)"}
+        part["R"] = round(net / p["riskUsd"], 4) if p.get("riskUsd") else None   # en R de la posición entera
+        part["tp1R"] = p.get("tp1R")
         p["partials"] = [*p.get("partials", []), part]
         p["tp1_done"] = True
         p["exec"] = {**p["exec"], "qty": p["qty"], "tp1_done": True, "partial": part}
+        rest = ""
+        if p.get("locked"):
+            sure = d * (p["sl"] - p["entry"]) / (p["entry"] * p["stop_pct"] / 100)
+            rest = f" con el cerrojo: stop en {_px(p['sl'])} (asegura {_sg(sure)} R)"
+        elif p.get("lock_r"):
+            rest = f" (el cerrojo se activa a +{_n(p['lock_r'], 1)} R)"
+        # «partial» (solo en este evento) para el registro de decisiones: la parcial y si el resto ya va con el cerrojo
         self._event("manage", "exec", p["story"], coin, f"{coin}: salida parcial en {_px(px)}",
                     f"{'Vendidos' if d > 0 else 'Comprados'} {_qty(coin, q)} {coin} ({_n(p['tp1_frac'] * 100, 0)} % de la "
-                    f"posición) a {_px(px)}: {_sg(net)} {config.QUOTE} con comisión · quedan {_qty(coin, p['qty'])} {coin}",
-                    {"exec": dict(p["exec"])}, now)
+                    f"posición) a {_px(px)}: {_sg(net)} {config.QUOTE} con comisión · quedan {_qty(coin, p['qty'])} {coin}"
+                    + rest,
+                    {"exec": dict(p["exec"]),
+                     "partial": {**part, "frac": p["tp1_frac"], "qty_left": p["qty"], "locked": bool(p.get("locked")),
+                                 "sl": p["sl"], "floor": p.get("floor"), "hold_until": p["hold_until"]}}, now)
         self._save_trade(p)
         return False
 
@@ -1172,6 +1303,9 @@ class PaperBroker:
         if parts:   # detalle de las salidas: las parciales y la última (el resto de la posición)
             trade["partials"] = parts
             trade["exit_last"] = round(exit_px, 8)
+        if p.get("lock_r"):   # cerrojo: si llegó a activarse y con qué suelo y seguimiento
+            trade.update(lock_r=p["lock_r"], floor_r=p.get("floor_r"), lock_trail_r=p.get("lock_trail_r"),
+                         locked=bool(p.get("locked")), locked_at=p.get("locked_at"))
         if p.get("tags"):
             trade["tags"] = p["tags"]
         trade.update(instrument=p.get("instrument") or "spot", funding=round(fund, 4), commissions=round(comm, 4))
@@ -1227,8 +1361,7 @@ class PaperBroker:
         self._check_halt(now, prices)
         if now - self._saved_at >= SAVE_EVERY_MS:
             self._saved_at = now
-            for story, p in list(self.positions.items()):
-                self._guard(story, self._save_trade, p)
+            self.save_positions()
 
     def _step_pending(self, story: str, it: dict, now: int) -> None:
         if now < it["deadline"]:
@@ -1275,21 +1408,29 @@ class PaperBroker:
             self._err_at[key] = t
             log.exception(msg)
 
+    def save_positions(self) -> None:
+        """Guarda ya todas las posiciones abiertas (stop, extremo, cerrojo…), cada una aparte."""
+        for story, p in list(self.positions.items()):
+            self._guard(story, self._save_trade, p)
+
     async def run(self) -> None:
         self.announce()
         last_pf = 0.0
-        while True:
-            try:
-                self.step()
-            except Exception:
-                self._log_err("step", "Paper trading: fallo en la ronda de gestión")
-            if time.monotonic() - last_pf >= PORTFOLIO_EVERY_S:
-                last_pf = time.monotonic()
-                try:   # aparte: la cartera sale aunque falle la ronda
-                    self.publish_portfolio()
+        try:
+            while True:
+                try:
+                    self.step()
                 except Exception:
-                    self._log_err("portfolio", "Paper trading: fallo al publicar la cartera")
-            await asyncio.sleep(STEP_EVERY_S)
+                    self._log_err("step", "Paper trading: fallo en la ronda de gestión")
+                if time.monotonic() - last_pf >= PORTFOLIO_EVERY_S:
+                    last_pf = time.monotonic()
+                    try:   # aparte: la cartera sale aunque falle la ronda
+                        self.publish_portfolio()
+                    except Exception:
+                        self._log_err("portfolio", "Paper trading: fallo al publicar la cartera")
+                await asyncio.sleep(STEP_EVERY_S)
+        finally:   # al parar el bot: lo último de cada posición (lo que va entre los guardados de cada 30 s) no se pierde
+            self.save_positions()
 
     # ---- vistas
 
@@ -1316,7 +1457,13 @@ class PaperBroker:
                 "tp1_done": p.get("tp1_done", False), "realized": round(p.get("realized", 0.0), 2),
                 "be_r": p.get("be_r", 1.0), "trail_start_r": p.get("trail_start_r"),
                 "instrument": p.get("instrument") or "spot", "funding": round(p.get("funding", 0.0), 2),
-                "tags": p.get("tags")})
+                "tags": p.get("tags"),
+                # Cerrojo: activación, suelo y seguimiento (R), si ya está activado, el precio del suelo, el cierre por
+                # tiempo de ahora (hold_until) y el que tendrá activado (hold_active); qty0 = cantidad inicial.
+                "hold_label": p.get("hold_label"), "qty0": round(p.get("qty0") or p["qty"], 8),
+                "lock_r": p.get("lock_r"), "floor_r": p.get("floor_r"), "lock_trail_r": p.get("lock_trail_r"),
+                "locked": bool(p.get("locked")), "floor": p.get("floor"), "hold_active": p.get("hold_active"),
+                "sl_kind": p.get("sl_kind")})
         return {"type": "portfolio", "ts": now, "equity": round(eq, 2), "start_equity": self.start_equity,
                 "day_pnl": round(pnl, 2), "day_pnl_pct": round(pct, 3), "positions": positions,
                 "pending": [{"story": i["story"], "deadline": i["deadline"], "mode": i["mode"],

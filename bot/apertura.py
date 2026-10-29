@@ -11,6 +11,9 @@ Preset IMPULSO: la prometedora más sólida del laboratorio, que NO es una venta
 Preset SEIS («6 diarias», 28-10-2026, lo pidió el usuario): el impulso de los 15 primeros min sin filtros, stop 1,5 % y
 3R, como mucho 24 h, hasta 6 entradas al día y el veto de una noticia FIABLE en contra (news_mode «fiables»,
 bot/fiables.py). Pierde en el backtest de 3 años: se mide en paper y solo se activa con scripts/activar_estrategia.py.
+Preset SEIS2 («6 diarias v2», 28-10-2026, lo eligió el usuario: la salida «A»): las entradas de SEIS con stop 2 %, la
+mitad en 3R y el resto con un cerrojo (a +3R su stop sube a +2R y lo sigue a 2R; 24 h sin activar, 7 días activado).
+Antes del cerrojo el stop no se mueve. También pierde en 3 años (menos): se mide en paper (--preset seis2).
 Los topes diarios de entradas y de riesgo cuentan TODAS las entradas del paper del día (paper_day_entries): son
 compartidos con la entrada por noticia confirmada (bot/entrada_noticias.py).
 Por qué entra o no (28-10-2026): en modo impulso cada punto de decisión de cada apertura×moneda queda en la tabla
@@ -787,16 +790,22 @@ def pre_coverage_ok(bars: list, open_ms: int, params: dict | None = None) -> boo
 
 
 def simulate_plan(bars: list, j: int, d: int, plan: dict, end_ms: int, fee: float | None = None,
-                  slip: float | None = None) -> dict:
+                  slip: float | None = None, end_active_ms: int | None = None) -> dict:
     """Operación abierta en la apertura de bars[j] con el plan de salidas de un ticket (stopPct, trailPct, beR,
-    trailStartR, tp1R, tp1Frac, tp2R; paper.exit_rules) y gestionada como en el paper. Supuesto pesimista dentro de
-    cada vela: primero el stop vigente (a su precio, o a la apertura si la vela ya abre peor); después la parcial y el
-    objetivo (órdenes límite, a su precio); después el extremo favorable mueve el stop y, si el contrario toca el stop
-    nuevo, sale en él. Costes: fee por lado sobre lo negociado y slip en la entrada y en las salidas a mercado.
-    Devuelve {k (vela de salida), t, ret (% neto del nominal), R (ret / stopPct), why, first, mfe (%), mae (%), partial},
-    con first = objetivo | stop | ninguno (lo primero que tocó: el objetivo final o un stop; ninguno = salió por tiempo),
-    mfe y mae = mejor y peor excursión hasta la salida (en la vela de salida, hasta el objetivo o el stop en que sale)
-    y partial = se hizo la salida parcial."""
+    trailStartR, tp1R, tp1Frac, tp2R y el cerrojo lockR, lockFloorR, lockTrailR; paper.exit_rules) y gestionada como en
+    el paper. Supuesto pesimista dentro de cada vela: primero el stop vigente (a su precio, o a la apertura si la vela ya
+    abre peor); después la parcial y el objetivo (órdenes límite, a su precio); después el extremo favorable mueve el
+    stop (break-even y dinámico) y, si el contrario toca el stop nuevo, sale en él; después el cierre por tiempo (end_ms;
+    con el cerrojo activado en una vela anterior, end_active_ms si es más tarde); por último, con el extremo de la
+    vela, el cerrojo (paper.lock_update): se activa y su seguimiento se mueve, y vale desde la vela SIGUIENTE (como
+    BACKTEST_DIR/controles/salidas_motor.py: dentro de la vela no se sabe si el máximo llegó antes que el mínimo).
+    Costes: fee por lado sobre lo negociado y slip en la entrada y en las salidas a mercado.
+    Devuelve {k (vela de salida), t, ret (% neto del nominal), R (ret / stopPct), why, first, mfe (%), mae (%), partial,
+    locked}, con why = objetivo | inicial | be | dinamico | cerrojo | seguimiento | tiempo | fin de datos, first =
+    objetivo | stop | ninguno (lo primero que tocó: el objetivo final o un stop; ninguno = salió por tiempo), mfe y mae
+    = mejor y peor excursión hasta la salida (en la vela de salida, hasta el objetivo o el stop en que sale), partial =
+    se hizo la salida parcial (partial_t: al cierre de qué vela; None sin parcial, o si fue de toda la posición) y
+    locked = el cerrojo llegó a activarse."""
     fee = config.FEE_PCT / 100 if fee is None else fee
     slip = paper.COST_SLIP_BPS / 1e4 if slip is None else slip
     ru = paper.exit_rules(plan)
@@ -806,7 +815,8 @@ def simulate_plan(bars: list, j: int, d: int, plan: dict, end_ms: int, fee: floa
     stop = entry - d * r
     tp1 = entry + d * r * ru["tp1R"] if ru["tp1_frac"] else None
     tp2 = entry + d * r * ru["tp2R"] if ru["tp2R"] else None
-    best, worst, be, kind, part = entry, entry, False, "inicial", False
+    best, worst, be, kind, part, locked, part_t = entry, entry, False, "inicial", False, False, None
+    end_act = max(end_ms, end_active_ms) if end_active_ms else end_ms
     rem, gross, turn = 1.0, 0.0, 1.0   # parte abierta, resultado bruto y nominal negociado, en partes del nominal
     k, ex, why, first = len(bars) - 1, None, "fin de datos", "ninguno"
     for k in range(j, len(bars)):
@@ -831,7 +841,7 @@ def simulate_plan(bars: list, j: int, d: int, plan: dict, end_ms: int, fee: floa
             gross += q * d * (tp1 / entry - 1)
             turn += q * tp1 / entry
             rem -= q
-            tp1 = None
+            tp1, part_t = None, b[T] + MIN
         if tp2 is not None and d * (fav - tp2) >= 0:   # 3) el objetivo (MFE hasta el objetivo)
             best = tp2 if d * (tp2 - best) > 0 else best
             ex, why, first = tp2, "objetivo", "objetivo"
@@ -841,20 +851,25 @@ def simulate_plan(bars: list, j: int, d: int, plan: dict, end_ms: int, fee: floa
         stop, be, mv = paper.stop_update(d, entry, sp, ru["trail"], best, stop, be, ru["be_r"], ru["be_pct"],
                                          ru["trail_start_r"])
         kind = mv or kind
-        if d * (adv - stop) <= 0:   # 4) pesimista: el contrario toca el stop nuevo (MAE hasta ese stop)
+        if mv and d * (adv - stop) <= 0:   # 4) pesimista: el contrario toca el stop nuevo (MAE hasta ese stop)
             worst = stop if d * (stop - w0) < 0 else w0
             ex, why, first = stop * (1 - d * slip), kind, "stop"
             break
-        if b[T] + MIN >= end_ms:   # 5) fin de la ventana
+        if b[T] + MIN >= (end_act if locked else end_ms):   # 5) fin de la ventana (con el cerrojo, la suya)
             ex, why = b[C] * (1 - d * slip), "tiempo"
             break
+        if ru["lock_r"]:   # 6) el cerrojo con el extremo de esta vela: vale desde la siguiente
+            stop, locked, mv = paper.lock_update(d, entry, sp, best, stop, locked, ru["lock_r"], ru["floor_r"],
+                                                 ru["lock_trail_r"])
+            kind = mv or kind
     if ex is None:
         ex = bars[k][C] * (1 - d * slip)
     gross += rem * d * (ex / entry - 1)
     turn += rem * ex / entry
     ret = (gross - fee * turn) * 100
     return {"k": k, "t": bars[k][T] + MIN, "ret": ret, "R": ret / sp, "why": why, "first": first,
-            "mfe": d * (best - entry) / entry * 100, "mae": d * (worst - entry) / entry * 100, "partial": part}
+            "mfe": d * (best - entry) / entry * 100, "mae": d * (worst - entry) / entry * 100, "partial": part,
+            "partial_t": part_t, "locked": locked}
 
 
 def session_case(coin: str, d: int, open_ms: int, bars: list, vol_sum=None, prev_opens: list[int] | None = None,
@@ -1327,8 +1342,16 @@ IMPULSO = {
     "windows": list(LAB_WINDOWS),
     "coins": list(config.COINS),
     "sl_pct": 3.0,
-    "target_r": 3.0,            # objetivo en R (9 % con el stop de 3 %)
+    "target_r": 3.0,            # objetivo en R (9 % con el stop de 3 %); None = sin objetivo final (solo con cerrojo)
     "max_hold_h": 168,          # sin tope de tiempo: solo 7 días de seguridad
+    # Salida parcial y cerrojo (28-10-2026, «6 diarias v2»): con estos valores, horquilla pura (sin parcial ni cerrojo).
+    "tp1_r": None,              # salida parcial: en tp1_r R (≥ 2R y ≥ 3 % neto con las reglas del usuario) ...
+    "tp1_frac": 0.0,            # ... esta parte de la posición (0 = sin parcial)
+    "lock_r": None,             # cerrojo: al llegar a +lock_r R el stop sube al suelo (None = sin cerrojo) ...
+    "floor_r": None,            # ... de +floor_r R (≥ 2R y ≥ 3 % neto con las reglas del usuario) ...
+    "trail_r": None,            # ... y desde ahí sigue al precio a trail_r R por detrás (None: se queda en el suelo)
+    "trail_atr": None,          # ... o a trail_atr × ATR de 1 h al abrir (no es el trail_atr de la ruptura, de 1 min)
+    "max_hold_active_h": None,  # tope de tiempo desde la entrada con el cerrojo activado (None = el de max_hold_h)
     "min_net_pct": 3.0,         # regla del usuario: (objetivo − entrada) − coste de ida y vuelta − funding ≥ 3 %
     "avg_hold_h": 65,           # duración media para el funding esperado (≈ 65 h con 7 días de seguridad, réplica fuera)
     "long_instrument": "spot",  # spot | perp
@@ -1377,6 +1400,32 @@ SEIS = {
     "max_day_risk_pct": 3.0,
     "lab": None,
 }
+# Preset SEIS2 («6 diarias v2», 28-10-2026, decisión del usuario: «obviamente es la A»): las entradas de SEIS y la
+# salida «A» de BACKTEST_DIR/controles/salidas_motor.py (F2 con stop 2 %, seguimiento a 2R, 24 h / 7 días): stop 2 %; la
+# mitad sale en 3R (+6 %, orden límite) y la otra mitad, al llegar a +3R, sube su stop al suelo de +2R (+4 %, 3,76 %
+# neto) y desde ahí lo sigue a 2R por detrás del mejor precio (nunca baja). Sin activar, cierre a las 24 h; activado,
+# hasta 7 días desde la entrada. Antes de +3R el stop NO se mueve (nada de break-even): «o gano más de 2 o pierdo 1»
+# sigue valiendo para cada mitad (cada parte que gana, ≥ 2R y ≥ 3 % neto).
+# HONESTO: NO es una ventaja. En la réplica del motor (3 años, mismas entradas, controles del paper y funding real;
+# docs/05, sección 21) pierde menos que SEIS pero pierde: −0,054 R por operación dentro de muestra (−0,057 sin funding)
+# y −0,075 R fuera (SEIS: −0,11 y −0,12), con ≈ 4,8 operaciones por jornada fuera y como mucho +5,7R en una operación.
+# Se mide en paper porque lo pidió el usuario; se activa con scripts/activar_estrategia.py --preset seis2 (SEIS se
+# queda tal cual para poder volver).
+SEIS2 = {
+    **SEIS,
+    "sl_pct": 2.0,
+    "target_r": None,           # sin objetivo final: la mitad que queda corre con el cerrojo
+    "tp1_r": 3.0,               # la mitad sale en 3R (+6 %, 5,76 % neto)
+    "tp1_frac": 0.5,
+    "lock_r": 3.0,              # al llegar a +3R ...
+    "floor_r": 2.0,             # ... el stop de la otra mitad sube a +2R (+4 %, 3,76 % neto) ...
+    "trail_r": 2.0,             # ... y lo sigue a 2R por detrás del mejor precio
+    "trail_atr": None,
+    "max_hold_h": 24,           # sin activar el cerrojo: como mucho 24 h
+    "max_hold_active_h": 168,   # con el cerrojo activado: hasta 7 días desde la entrada
+    "avg_hold_h": 16,           # duración media para el funding esperado (15,2 h dentro y 17,3 h fuera en la réplica)
+    "lab": None,
+}
 PRESETS = {
     "impulso": {"params": IMPULSO, "nombre": "E2 · impulso",
                 "descripcion": "Impulso de los primeros 15 min (≥ 0,2 %) con volumen relativo ≥ 1,5 y BTC a favor, "
@@ -1384,17 +1433,22 @@ PRESETS = {
     "seis": {"params": SEIS, "nombre": "6 diarias",
              "descripcion": "Impulso de los primeros 15 min sin filtros, stop 1,5 % y objetivo 3R, como mucho 24 h; "
                             "veto de noticias fiables en contra"},
+    "seis2": {"params": SEIS2, "nombre": "6 diarias v2",
+              "descripcion": "Impulso de los primeros 15 min sin filtros, stop 2 %; la mitad sale en 3R y el resto "
+                             "corre con un cerrojo (a +3R su stop sube a +2R y sigue al precio a 2R); 24 h sin "
+                             "activar y hasta 7 días activado; veto de noticias fiables en contra"},
 }
+EXIT_KEYS = ("tp1_r", "tp1_frac", "lock_r", "floor_r", "trail_r", "trail_atr", "max_hold_active_h")   # la salida
 # Parámetros de operativa que identifican un preset (preset_of): con todos iguales, es ese preset
 PRESET_KEYS = ("measure_min", "min_move_pct", "entry", "pb_frac", "entry_end_min", "brk_tf", "rvol_min", "vol_filter",
                "btc_filter", "news_mode", "windows", "coins", "sl_pct", "target_r", "max_hold_h", "min_net_pct",
-               "long_instrument", "short_instrument", "risk_pct", "max_day_entries", "max_day_risk_pct")
+               "long_instrument", "short_instrument", "risk_pct", "max_day_entries", "max_day_risk_pct", *EXIT_KEYS)
 LAB_KEYS = ("measure_min", "min_move_pct", "entry", "rvol_min", "vol_filter", "btc_filter", "windows", "coins",
-            "sl_pct", "target_r")   # con todas como en el preset, se reproduce LAB_REF
+            "sl_pct", "target_r", "tp1_frac", "lock_r")   # con todas como en el preset, se reproduce LAB_REF
 IMP_STATUS_KEYS = ("estrategia", "measure_min", "min_move_pct", "entry", "pb_frac", "entry_end_min", "brk_tf", "rvol_min",
                    "vol_filter", "btc_filter", "news_mode", "windows", "coins", "sl_pct", "target_r", "target_pct",
                    "max_hold_h", "min_net_pct", "avg_hold_h", "long_instrument", "short_instrument", "min_strength",
-                   "risk_pct", "max_day_entries", "max_day_risk_pct", "session_max_min", "lab")
+                   "risk_pct", "max_day_entries", "max_day_risk_pct", "session_max_min", "lab", *EXIT_KEYS)
 
 
 def entry_kind(entry) -> tuple[str, int | None]:
@@ -1425,8 +1479,11 @@ def _ids(val, sets: dict, allowed, norm) -> tuple[list, list] | None:
 def impulse_params(over: dict | None = None) -> tuple[dict, list[str]]:
     """Parámetros completos del modo impulso (PARAMS + IMPULSO + cambios) y los avisos. Un valor que no vale vuelve al
     del preset; t:N antes de acabar la medida pasa a t:measure_min; windows y coins admiten lista, grupo del
-    laboratorio, id suelto o ids separados por comas. Con las reglas del usuario, stop ≥ 1,5 % y objetivo ≥ 2R (con
-    aviso si sube algo); siempre horquilla pura."""
+    laboratorio, id suelto o ids separados por comas. Salida: horquilla pura (target_r) o, con cerrojo (lock_r y
+    floor_r), parcial opcional (tp1_r + tp1_frac), seguimiento (trail_r o trail_atr) y tope de tiempo activado
+    (max_hold_active_h); sin objetivo final (target_r None) solo con cerrojo, y el seguimiento sin cerrojo no se usa
+    (nada mueve el stop antes del cerrojo). Con las reglas del usuario, stop ≥ 1,5 % y objetivo, parcial y suelo ≥ 2R
+    (con aviso si sube algo); nunca break-even ni stop dinámico."""
     p = {**PARAMS, **IMPULSO, **{k: v for k, v in (over or {}).items() if k != "estrategia"}, "estrategia": "impulso"}
     notes = []
 
@@ -1435,16 +1492,47 @@ def impulse_params(over: dict | None = None) -> tuple[dict, list[str]]:
         p[k] = IMPULSO[k]
 
     for k, cast in (("measure_min", int), ("entry_end_min", int), ("brk_tf", int), ("pb_frac", float),
-                    ("sl_pct", float), ("target_r", float), ("max_hold_h", float), ("avg_hold_h", float)):
+                    ("sl_pct", float), ("max_hold_h", float), ("avg_hold_h", float)):
         try:
             p[k] = cast(p[k])
-            if p[k] <= 0:
+            if not (p[k] > 0 and math.isfinite(p[k])):   # «inf» o NaN (json.loads los acepta) no valen
+                raise ValueError
+        except (TypeError, ValueError, OverflowError):
+            back(k, "tiene que ser un número positivo")
+    for k in ("target_r", *(x for x in EXIT_KEYS if x != "tp1_frac")):   # None o un número > 0
+        if p[k] is None:
+            continue
+        try:
+            p[k] = float(p[k])
+            if not (p[k] > 0 and math.isfinite(p[k])):   # un objetivo o cerrojo infinito no se cobra nunca
                 raise ValueError
         except (TypeError, ValueError):
-            back(k, "tiene que ser un número positivo")
+            back(k, "None o un número > 0")
+    try:
+        p["tp1_frac"] = float(p["tp1_frac"] or 0.0)
+        if not 0 <= p["tp1_frac"] <= 1:
+            raise ValueError
+    except (TypeError, ValueError):
+        back("tp1_frac", "un número de 0 a 1 (0 = sin parcial)")
+    if p["tp1_frac"] and p["tp1_r"] is None:
+        notes.append("tp1_frac sin tp1_r: sin salida parcial")
+        p["tp1_frac"] = 0.0
+    if (p["lock_r"] is None) != (p["floor_r"] is None):
+        notes.append("cerrojo incompleto (hacen falta lock_r y floor_r): sin cerrojo")
+        p["lock_r"] = p["floor_r"] = None
+    if p["lock_r"] is None:   # sin cerrojo nada mueve el stop: ni seguimiento ni tope de tiempo activado
+        for k in ("trail_r", "trail_atr", "max_hold_active_h"):
+            if p[k] is not None:
+                notes.append(f"{k} sin cerrojo (lock_r y floor_r): no se usa (el stop no se mueve antes del cerrojo)")
+                p[k] = None
+    elif p["trail_r"] is not None and p["trail_atr"] is not None:
+        notes.append("trail_r y trail_atr a la vez: manda trail_r")
+        p["trail_atr"] = None
+    if p["target_r"] is None and p["lock_r"] is None:
+        back("target_r", "sin objetivo final hace falta un cerrojo (lock_r y floor_r)")
     try:   # 0 = cualquier movimiento ≠ 0 (preset SEIS)
         p["min_move_pct"] = float(p["min_move_pct"])
-        if not p["min_move_pct"] >= 0:
+        if not (p["min_move_pct"] >= 0 and math.isfinite(p["min_move_pct"])):
             raise ValueError
     except (TypeError, ValueError):
         back("min_move_pct", "tiene que ser un número ≥ 0 (0 = cualquier movimiento)")
@@ -1454,9 +1542,9 @@ def impulse_params(over: dict | None = None) -> tuple[dict, list[str]]:
             continue
         try:
             p[k] = int(p[k]) if k == "max_day_entries" else float(p[k])
-            if p[k] < (low or 0) or (low is None and p[k] <= 0):
+            if p[k] < (low or 0) or (low is None and p[k] <= 0) or not math.isfinite(p[k]):
                 raise ValueError
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             back(k, "None o un número " + (f"≥ {low}" if low is not None else "> 0"))
     if p["measure_min"] >= p["entry_end_min"]:
         back("measure_min", f"tiene que ser menor que entry_end_min ({p['entry_end_min']})")
@@ -1487,12 +1575,23 @@ def impulse_params(over: dict | None = None) -> tuple[dict, list[str]]:
             back(k, f"{what} o un grupo del laboratorio: " + ", ".join(sets))
         p[k] = list(got[0]) if got and got[0] else list(IMPULSO[k])
     if config.USER_RULES:   # reglas del usuario para toda operación (con aviso si sube algo)
-        for k, low, unit in (("sl_pct", config.RULE_MIN_STOP_PCT, " %"), ("target_r", config.RULE_MIN_RR, " R")):
-            if p[k] < low - 1e-12:
+        for k, low, unit in (("sl_pct", config.RULE_MIN_STOP_PCT, " %"), ("target_r", config.RULE_MIN_RR, " R"),
+                             ("floor_r", config.RULE_MIN_RR, " R"),
+                             ("tp1_r", config.RULE_MIN_RR if p["tp1_frac"] else None, " R")):
+            if low is not None and p[k] is not None and p[k] < low - 1e-12:
                 notes.append(f"{k} {_n(p[k])}{unit} sube a {_n(low)}{unit} por la regla del usuario")
                 p[k] = float(low)
+    if p["lock_r"] is not None and p["lock_r"] < p["floor_r"] - 1e-12:   # se activa como pronto en el suelo
+        notes.append(f"lock_r {_n(p['lock_r'])} R por debajo del suelo: el cerrojo se activa en el suelo "
+                     f"({_n(p['floor_r'])} R)")
+        p["lock_r"] = p["floor_r"]
+    if p["max_hold_active_h"] is not None and p["max_hold_active_h"] < p["max_hold_h"] - 1e-9:
+        notes.append(f"max_hold_active_h {_n(p['max_hold_active_h'], 0)} h es menos que max_hold_h: se usa "
+                     f"{_n(p['max_hold_h'], 0)} h")
+        p["max_hold_active_h"] = p["max_hold_h"]
     p["session_max_min"] = max(p["entry_end_min"], m or 0)
-    p.update(be_r=None, trail_atr=0.0, trail_start_r=None, tp1_frac=0.0, target_pct=None, gate=False, moving_pct=None)
+    # nunca break-even ni el stop dinámico de la ruptura: lo único que mueve el stop es el cerrojo (EXIT_KEYS)
+    p.update(be_r=None, trail_start_r=None, target_pct=None, gate=False, moving_pct=None)
     p["lab"] = LAB_REF if all(p[k] == IMPULSO[k] for k in LAB_KEYS) else None
     return p, notes
 
@@ -1564,10 +1663,53 @@ def preset_info(params: dict | None, activa: dict | None = None) -> dict:
     return {"preset": None, "nombre": a.get("nombre"), "descripcion": a.get("descripcion")}
 
 
+def _horas(h: float) -> str:
+    """«24 h» o, en días enteros a partir de 2, «7 días»."""
+    return f"{_n(h / 24, 0)} días" if h >= 48 - 1e-9 and abs(h / 24 - round(h / 24)) < 1e-9 else f"{_n(h, 0)} h"
+
+
 def hold_text(params: dict | None = None) -> str:
-    """Tope de tiempo de una entrada: «sin tope (7 días de seguridad)» o «como mucho 24 h»."""
-    h = _ip(params)["max_hold_h"]
-    return f"sin tope ({_n(h / 24, 0)} días de seguridad)" if h >= 168 - 1e-9 else f"como mucho {_n(h, 0)} h"
+    """Tope de tiempo de una entrada: «sin tope (7 días de seguridad)», «como mucho 24 h» o, con cerrojo, «como mucho
+    24 h sin activar el cerrojo y hasta 7 días activado»."""
+    p = _ip(params)
+    h, ha = p["max_hold_h"], p.get("max_hold_active_h")
+    base = f"sin tope ({_n(h / 24, 0)} días de seguridad)" if h >= 168 - 1e-9 else f"como mucho {_n(h, 0)} h"
+    if p.get("lock_r") and ha and ha > h + 1e-9:
+        return f"{base} sin activar el cerrojo y hasta {_horas(ha)} activado"
+    return base
+
+
+def _frac_text(f: float) -> str:
+    return "la mitad" if abs(f - 0.5) < 1e-9 else "toda la posición" if f >= 1 - 1e-9 else f"el {_n(f * 100, 0)} %"
+
+
+def _g(x: float) -> str:
+    """Número corto para los textos: 2, 1,5, 0,75 (sin ceros de más)."""
+    t = f"{float(x):.2f}".rstrip("0").rstrip(".")
+    return t.replace(".", ",")
+
+
+def exit_text(params: dict | None = None, corto: bool = False) -> str:
+    """La salida en español. Corta (para «qué hará»): «stop 1,5 % y objetivo 3R» o «stop 2 %, la mitad en 3R y el resto
+    corre». Larga: con los porcentajes, el cerrojo, el seguimiento y el tope de tiempo."""
+    p = _ip(params)
+    sl, R, f = p["sl_pct"], p["target_r"], p["tp1_frac"] if p.get("tp1_r") else 0.0
+    if not p.get("lock_r"):
+        if f:
+            base = f"stop {_g(sl)} %, {_frac_text(f)} en {_g(p['tp1_r'])}R y el resto con objetivo {_g(R or 0)}R"
+        else:
+            base = f"stop {_g(sl)} % y objetivo {_g(R)}R" + ("" if corto else f" (+{_g(sl * R)} %)")
+        return base if corto else f"{base}, {hold_text(p)}"
+    if corto:
+        part = f"{_frac_text(f)} en {_g(p['tp1_r'])}R y el resto corre" if f else "la posición corre"
+        return f"stop {_g(sl)} %, {part}" + (f" (objetivo {_g(R)}R)" if R else "")
+    part = (f"{_frac_text(f)} sale en {_g(p['tp1_r'])}R (+{_g(sl * p['tp1_r'])} %) y el resto corre" if f
+            else "la posición corre")
+    tr = (f" y lo sigue a {_g(p['trail_r'])}R por detrás" if p.get("trail_r") else
+          f" y lo sigue a {_g(p['trail_atr'])} × ATR de 1 h por detrás" if p.get("trail_atr") else "")
+    obj = f"; objetivo final {_g(R)}R (+{_g(sl * R)} %)" if R else ""
+    return (f"stop {_g(sl)} %, {part}: al llegar a +{_g(p['lock_r'])}R su stop sube a +{_g(p['floor_r'])}R "
+            f"(+{_g(sl * p['floor_r'])} %){tr}; antes, el stop no se mueve{obj}; {hold_text(p)}")
 
 
 def _easter(y: int) -> date:
@@ -1764,36 +1906,106 @@ def expected_funding_pct(d: int, rate_pct: float | None, hours: float) -> float:
     return max(0.0, d * rate_pct * hours / 8) if rate_pct is not None else 0.0
 
 
+def lock_trail_r(params: dict | None = None, atr_h_pct: float | None = None) -> float | None:
+    """Distancia del seguimiento del cerrojo en R: trail_r, o trail_atr × ATR de 1 h (en % del precio) / stop; sin ATR,
+    un tercio del stop por ATR (como BACKTEST_DIR/controles/salidas_motor.py). None sin cerrojo o sin seguimiento."""
+    p = _ip(params)
+    if not p.get("lock_r"):
+        return None
+    if p.get("trail_r"):
+        return float(p["trail_r"])
+    if p.get("trail_atr"):
+        atr = atr_h_pct if atr_h_pct is not None and atr_h_pct > 0 else p["sl_pct"] / 3
+        return round(p["trail_atr"] * atr / p["sl_pct"], 4)
+    return None
+
+
+PART_TXT = {"parcial": "la salida parcial", "suelo": "el suelo del cerrojo", "objetivo": "el objetivo"}
+PART_NAME = {"parcial": "Salida parcial", "suelo": "Suelo del cerrojo", "objetivo": "Objetivo"}
+
+
 def impulse_plan(d: int, entry: float, params: dict | None = None, funding_pct: float | None = None,
-                 instrument: str = "spot") -> dict:
-    """Horquilla pura desde la entrada real: stop a sl_pct % y objetivo a target_r × stop; sin break-even, stop dinámico
-    ni parciales. Con las reglas del usuario: stop ≥ 1,5 %, R:R ≥ 2 y (objetivo − entrada) − coste de ida y vuelta −
-    funding esperado en la duración media (perpetuos) ≥ min_net_pct (3 %). Siempre: objetivo ≥ 3 × coste."""
+                 instrument: str = "spot", atr_h_pct: float | None = None) -> dict:
+    """Plan de salidas desde la entrada real, sin break-even ni stop dinámico (nada mueve el stop antes del cerrojo):
+    - horquilla pura (IMPULSO, SEIS): stop a sl_pct % y objetivo a target_r × stop;
+    - con cerrojo (SEIS2): stop a sl_pct %, salida parcial de tp1_frac en tp1_r R y el resto con el cerrojo: a +lock_r R
+      su stop sube al suelo de +floor_r R y sigue al precio a lockTrailR R (trail_r, o trail_atr × ATR de 1 h con
+      atr_h_pct: lock_trail_r); objetivo final solo con target_r.
+    Cada salida que gana (parcial, suelo del cerrojo y objetivo) va en «partes». Con las reglas del usuario: stop ≥
+    1,5 % y cada parte ≥ 2R (rr = la menor) y con (salida − entrada) − coste de ida y vuelta − funding esperado
+    (perpetuos) ≥ min_net_pct (3 %); gross_pct y net_pct son los de la peor parte. El funding esperado va en la duración
+    media (avg_hold_h) para la parcial y el objetivo, y hasta el tope con el cerrojo activado (max_hold_active_h) para
+    el suelo: solo se cobra en las que activan el cerrojo, que pueden durar hasta ese tope. Siempre: cada parte
+    ≥ 3 × coste. Sin objetivo final ni cerrojo no hay plan."""
     p = _ip(params)
     sl, R = p["sl_pct"], p["target_r"]
-    stop, tgt = entry * (1 - d * sl / 100), entry * (1 + d * sl * R / 100)
-    rr = (d * (tgt - entry)) / (d * (entry - stop))
-    gross, cost = d * (tgt - entry) / entry * 100, paper.cost_rt_pct()
-    fund = expected_funding_pct(d, funding_pct, p["avg_hold_h"]) if instrument == "perp" else 0.0
-    net = gross - cost - fund
+    frac = p["tp1_frac"] if p.get("tp1_r") else 0.0
+    lock, floor = (p["lock_r"], p["floor_r"]) if p.get("lock_r") else (None, None)
+    stop = entry * (1 - d * sl / 100)
+    tgt = entry * (1 + d * sl * R / 100) if R else None
+    cost = paper.cost_rt_pct()
+    perp = instrument == "perp"
+    fund = expected_funding_pct(d, funding_pct, p["avg_hold_h"]) if perp else 0.0
+    hold_lock = p.get("max_hold_active_h") or p["avg_hold_h"]   # el suelo solo se cobra con el cerrojo activado
+    fund_lock = expected_funding_pct(d, funding_pct, max(hold_lock, p["avg_hold_h"])) if perp else 0.0
+    raw = []   # (qué, R, precio, fracción, bruto %, neto %, funding %, horas) sin redondear: las comprobaciones van con esto
+    for que, r, fr in (("parcial", p["tp1_r"] if frac else None, frac), ("suelo", floor, None), ("objetivo", R, None)):
+        if r:
+            px = entry * (1 + d * sl * r / 100)
+            gross = d * (px - entry) / entry * 100
+            fu, hh = (fund_lock, max(hold_lock, p["avg_hold_h"])) if que == "suelo" else (fund, p["avg_hold_h"])
+            raw.append((que, r, px, fr, gross, gross - cost - fu, fu, hh))
+    worst = min(raw, key=lambda x: (x[1], x[5])) if raw else None
+    rr = worst[1] if worst else 0.0
+    if tgt is not None and not frac and not lock:   # la horquilla de siempre: R:R desde los precios
+        rr = (d * (tgt - entry)) / (d * (entry - stop))
+    gross, net = (worst[4], worst[5]) if worst else (0.0, 0.0)
+    trail = lock_trail_r(p, atr_h_pct)
+    parts = [{"que": q, "R": r, "precio": px, "frac": fr, "bruto_pct": round(g, 3), "neto_pct": round(nt, 3),
+              **({"funding_pct": round(fu, 4), "funding_h": hh} if perp else {})}
+             for q, r, px, fr, g, nt, fu, hh in raw]
     inst = "perpetuo" if instrument == "perp" else "contado"
-    out = {"stopPct": sl, "tp1R": R, "tp2R": R, "tp1Frac": 0.0, "beR": None, "trailPct": None, "trailStartR": None,
-           "rr": round(rr, 3), "entry": entry, "stop_px": stop, "target_px": tgt, "instrument": instrument,
-           "gross_pct": round(gross, 3), "cost_pct": round(cost, 3), "funding_pct": round(fund, 4),
-           "net_pct": round(net, 3), "ok": True,
-           "why": f"Horquilla pura desde {_px(entry)} ({inst}): stop {_px(stop)} (−{_n(sl)} %) y objetivo {_px(tgt)} "
-                  f"(+{_n(gross)} %, {_n(net)} % neto de costes, R:R {_n(rr)}); sin break-even, stop dinámico ni "
-                  "parciales"}
+    out = {"stopPct": sl, "tp1R": p["tp1_r"] if frac else R, "tp2R": R, "tp1Frac": frac, "beR": None, "trailPct": None,
+           "trailStartR": None, "rr": round(rr, 3), "entry": entry, "stop_px": stop, "target_px": tgt,
+           "instrument": instrument, "gross_pct": round(gross, 3), "cost_pct": round(cost, 3),
+           "funding_pct": round(fund, 4), "net_pct": round(net, 3), "ok": True,
+           "lockR": lock, "lockFloorR": floor, "lockTrailR": trail,
+           "tp1_px": entry * (1 + d * sl * p["tp1_r"] / 100) if frac else None,
+           "lock_px": entry * (1 + d * sl * lock / 100) if lock else None,
+           "floor_px": entry * (1 + d * sl * floor / 100) if lock else None, "partes": parts}
+    by = {x["que"]: x for x in parts}
+    if lock:
+        tr = f" y lo sigue a {_n(trail, 2)} R" if trail else ""
+        pt = (f"{_frac_text(frac)} sale en {_px(out['tp1_px'])} ({_n(p['tp1_r'], 1)}R, +{_n(by['parcial']['bruto_pct'])} "
+              f"%, {_n(by['parcial']['neto_pct'])} % neto) y el resto" if frac else "la posición")
+        out["why"] = (f"Desde {_px(entry)} ({inst}): stop {_px(stop)} (−{_n(sl)} %); {pt} corre con el cerrojo: a "
+                      f"+{_n(lock, 1)}R ({_px(out['lock_px'])}) su stop sube a {_px(out['floor_px'])} (+{_n(floor, 1)}R, "
+                      f"{_n(by['suelo']['neto_pct'])} % neto){tr}"
+                      + (f"; objetivo final {_px(tgt)} ({_n(R, 1)}R)" if tgt else "")
+                      + "; sin break-even: antes del cerrojo el stop no se mueve")
+    elif frac:
+        out["why"] = (f"Desde {_px(entry)} ({inst}): stop {_px(stop)} (−{_n(sl)} %), {_frac_text(frac)} en "
+                      f"{_px(out['tp1_px'])} ({_n(p['tp1_r'], 1)}R) y objetivo {_px(tgt) if tgt else '–'}; sin "
+                      "break-even ni stop dinámico")
+    else:
+        out["why"] = (f"Horquilla pura desde {_px(entry)} ({inst}): stop {_px(stop)} (−{_n(sl)} %) y objetivo "
+                      f"{_px(tgt) if tgt else '–'} (+{_n(gross)} %, {_n(net)} % neto de costes, R:R {_n(rr)}); sin "
+                      "break-even, stop dinámico ni parciales")
     need = p.get("min_net_pct")
-    if config.USER_RULES and (sl < config.RULE_MIN_STOP_PCT - 1e-9 or rr < config.RULE_MIN_RR - 1e-9):
+    bad = next((x for x in raw if need and x[5] < need - 1e-9), None)
+    small = next((x for x in raw if x[4] < 3 * cost - 1e-9), None)
+    if not raw:
+        out.update(ok=False, why="Sin objetivo final ni cerrojo: no hay plan de salida")
+    elif config.USER_RULES and (sl < config.RULE_MIN_STOP_PCT - 1e-9 or rr < config.RULE_MIN_RR - 1e-9):
         out.update(ok=False, why=f"Regla del usuario: stop {_n(sl)} % (mínimo {_n(config.RULE_MIN_STOP_PCT)} %) y R:R "
                                  f"{_n(rr)} (mínimo {_n(config.RULE_MIN_RR)})")
-    elif config.USER_RULES and need and net < need - 1e-9:
-        fd = f" y el funding esperado en {_n(p['avg_hold_h'], 0)} h ({_n(fund, 3)} %)" if fund else ""
-        out.update(ok=False, why=f"Regla del usuario: el objetivo da +{_n(gross)} % y, quitando el coste de ida y vuelta "
-                                 f"({_n(cost)} %){fd}, quedan {_n(net)} % netos < {_n(need)} %")
-    elif gross < 3 * cost - 1e-9:
-        out.update(ok=False, why=f"Objetivo +{_n(gross)} % < 3 × coste de ida y vuelta ({_n(3 * cost)} %)")
+    elif config.USER_RULES and bad:
+        fd = f" y el funding esperado en {_n(bad[7], 0)} h ({_n(bad[6], 3)} %)" if bad[6] else ""
+        out.update(ok=False, why=f"Regla del usuario: {PART_TXT[bad[0]]} da +{_n(bad[4])} % y, quitando el coste de ida "
+                                 f"y vuelta ({_n(cost)} %){fd}, quedan {_n(bad[5])} % netos < {_n(need)} %")
+    elif small:
+        out.update(ok=False, why=f"{PART_NAME[small[0]]} +{_n(small[4])} % < 3 × coste de ida y vuelta "
+                                 f"({_n(3 * cost)} %)")
     return out
 
 
@@ -1826,6 +2038,7 @@ class ImpulseRun:
         self.vol, self.rvol = 0.0, None      # volumen desde la apertura y rvol al decidir
         self.entries, self.results, self.tags = 0, [], {}
         self.entry_px = self.stop_px = self.target_px = None
+        self.tp1_px = self.floor_px = None   # salida parcial y suelo del cerrojo («6 diarias v2»)
         self.t_next = self.last_c = None
         self.last_why = f"Se mide el impulso de los {self.N} primeros min desde la apertura ({_hm(open_ms)} Madrid)"
         self.end_why: str | None = None
@@ -1893,13 +2106,18 @@ class ImpulseRun:
         return None
 
     def levels(self) -> dict:
+        """Niveles para la web. Mientras mide: movimiento_pct (cierre de la última vela / apertura) y minutos_medidos;
+        en posición: entrada, stop, objetivo y, con cerrojo, parcial y suelo."""
+        live = (self.last_c / self.po - 1) * 100 if self.po and self.last_c is not None else None
+        mins = min(self.N, (self.t_next - self.open_ms) // MIN) if self.t_next is not None else 0
         return {"apertura": self.po, "impulso_pct": round(self.mom, 3) if self.mom is not None else None,
                 "maximo": self.hi, "minimo": self.lo, "extremo": self.ext,
                 "retroceso": self.level if self.kind == "pb" else None,
                 "ruptura": self.level if self.kind == "brk" else None,
                 "hora_entrada": self.open_ms + self.t_min * MIN if self.kind == "t" else None,
                 "rvol": round(self.rvol, 3) if self.rvol is not None else None, "entrada": self.entry_px,
-                "stop": self.stop_px, "objetivo": self.target_px}
+                "stop": self.stop_px, "objetivo": self.target_px, "parcial": self.tp1_px, "suelo": self.floor_px,
+                "movimiento_pct": round(live, 3) if live is not None else None, "minutos_medidos": max(0, mins)}
 
     def feed(self, bar: list, live_ok: bool = True) -> dict | None:
         """Una vela de 1 min cerrada (en orden). Devuelve {"action": "enter", ...}, {"action": "end", ...} o None."""
@@ -2051,13 +2269,67 @@ class ImpulseRun:
             self.tags["instrumento"] = rec["instrument"]
         self.entry_px, self.target_px = _f(rec.get("entry")), _f(rec.get("tp2"))
         self.stop_px = _f(rec.get("sl_initial")) or _f(rec.get("sl"))
+        self.tp1_px = _f(rec.get("tp1")) if _f(rec.get("tp1_frac")) else None
+        self.floor_px = _f(rec.get("floor"))
         if self.entry_px and self.dir:
             inst = INST_TEXT.get(self.tags.get("instrumento") or impulse_instrument(self.dir, self.p), "")
-            lv = "".join(f", {k} {_px(v)}" for k, v in (("stop", self.stop_px), ("objetivo", self.target_px)) if v)
+            lv = "".join(f", {k} {_px(v)}" for k, v in (("stop", self.stop_px), ("objetivo", self.target_px),
+                                                         ("parcial", self.tp1_px), ("suelo del cerrojo", self.floor_px))
+                         if v)
             self.last_why = (f"En posición (paper, recuperada tras reiniciar): {'compra' if self.dir > 0 else 'venta'} "
-                             f"{inst} a {_px(self.entry_px)}{lv}")
+                             f"{inst} a {_px(self.entry_px)}{lv}" + position_state_text(rec))
         else:
             self.last_why = "Entrada enviada al paper (recuperada tras reiniciar): a la espera de ejecutarse"
+
+
+def position_state_text(pos: dict | None) -> str:
+    """«; la mitad ya salió en 3R (+1,23 USDC) · cerrojo activado: stop en X (asegura +2,0 R), como mucho hasta el
+    dd-mm HH:MM Madrid» para una posición del paper con la parcial hecha o el cerrojo activado ("" si ninguna)."""
+    x = pos if isinstance(pos, dict) else {}
+    out = []
+    if x.get("tp1_done"):
+        fr = _f(x.get("tp1_frac"), 0.0) or 0.0
+        out.append(f"{_frac_text(fr) if fr else 'la parcial'} ya salió"
+                   + (f" ({_sg(_f(x.get('realized'), 0.0))} {config.QUOTE})" if _f(x.get("realized")) is not None else ""))
+    if x.get("locked"):
+        e, sl, slp = _f(x.get("entry")), _f(x.get("sl")), _f(x.get("sl_initial"))
+        sure = (sl - e) / (e - slp) if e and sl and slp and e != slp else None
+        hu = _f(x.get("hold_until"))
+        out.append(f"cerrojo activado: stop en {_px(sl)}" if sl else "cerrojo activado")
+        if sure is not None:
+            out[-1] += f" (asegura {_sg(sure)} R)"
+        if hu:
+            out[-1] += f", como mucho hasta el {datetime.fromtimestamp(hu / 1000, MAD).strftime('%d-%m %H:%M')} Madrid"
+    return ("; " + " · ".join(out)) if out else ""
+
+
+def _lista(xs) -> str:
+    xs = [str(x) for x in xs or []]
+    return xs[0] if len(xs) == 1 else ", ".join(xs[:-1]) + " y " + xs[-1] if xs else ""
+
+
+def window_plan_text(open_ms: int, params: dict | None = None) -> str:
+    """Qué hará el motor en una apertura (para «Programadas»): «medirá el impulso de los 15 primeros min de BTC, ETH,
+    SOL y XRP y entrará a las HH:MM en el sentido del impulso; stop 2 %, la mitad en 3R y el resto corre». Con filtros
+    (umbral, volumen relativo, BTC), los dice entre paréntesis."""
+    p = _ip(params)
+    kind, m = entry_kind(p["entry"])
+    move = ("en el sentido del impulso" if p["min_move_pct"] <= 0
+            else f"a favor del impulso si pasa de ±{_g(p['min_move_pct'])} %")
+    if kind == "t":
+        when = f"entrará a las {_hm(open_ms + m * MIN)} {move}"
+    elif kind == "pb":
+        when = (f"entrará {move} en la reanudación tras retroceder el {_g(p['pb_frac'] * 100)} % del impulso "
+                f"(antes de las {_hm(open_ms + p['entry_end_min'] * MIN)})")
+    else:
+        when = f"entrará {move} en la ruptura del rango (antes de las {_hm(open_ms + p['entry_end_min'] * MIN)})"
+    filt = [f"volumen relativo ≥ {_g(p['rvol_min'])}" if p.get("rvol_min") else "",
+            {"a_favor": "BTC a favor", "no_contra": "BTC no en contra"}.get(p["btc_filter"], ""),
+            {"no_baja": "volatilidad no baja", "alta": "volatilidad alta", "baja": "volatilidad baja"}.get(
+                p["vol_filter"], "")]
+    filt = [x for x in filt if x]
+    return (f"medirá el impulso de los {p['measure_min']} primeros min de {_lista(p['coins'])} y {when}"
+            + (f" ({', '.join(filt)})" if filt else "") + f"; {exit_text(p, corto=True)}")
 
 
 def senal_de_fila(row: dict | None) -> dict | None:
@@ -2291,9 +2563,8 @@ class OpeningEngine:
                     else "en su sentido (cualquier movimiento)")
             w["why"] = (f"Se sigue el impulso de los {p['measure_min']} primeros min {move}"
                         f" · {impulse_entry_type(p)} · {' · '.join(x for x in conf if x)} · largos "
-                        f"{INST_TEXT[p['long_instrument']]} y cortos {INST_TEXT[p['short_instrument']]} · stop "
-                        f"{_n(p['sl_pct'])} % y "
-                        f"objetivo {_n(p['target_r'], 1)} R (+{_n(p['sl_pct'] * p['target_r'])} %), {hold_text(p)}")
+                        f"{INST_TEXT[p['long_instrument']]} y cortos {INST_TEXT[p['short_instrument']]} · "
+                        f"{exit_text(p)}")
             w["armed"], w["at_open"] = True, w["at_open"] or at_open
             return
         for coin in config.COINS:
@@ -2421,13 +2692,14 @@ class OpeningEngine:
         if not r:
             return
         d, fase = r.get("decision"), r.get("fase")
-        if d in ("no_entra", "rechazada", "perdida", "cerrada", "abierta") or (d == "entra" and fase != "medida"):
+        final = ("no_entra", "rechazada", "perdida", "cerrada", "abierta", "parcial")   # parcial: sigue a medias
+        if d in final or (d == "entra" and fase != "medida"):
             if r.get("lado") in ("largo", "corto"):
                 run.dir = 1 if r["lado"] == "largo" else -1
             if _f(r.get("impulso_pct")) is not None:
                 run.mom = _f(r["impulso_pct"])
             run.end(r.get("motivo") or "Decidida antes de reiniciar el bot")
-            if r.get("story") and d in ("entra", "abierta"):   # se envió al paper: no se repite la story
+            if r.get("story") and d in ("entra", "abierta", "parcial"):   # se envió al paper: no se repite la story
                 pre = self._prefix(w, coin)
                 if str(r["story"]).startswith(pre) and str(r["story"])[len(pre):].isdigit():
                     w["seq"][coin] = max(w["seq"].get(coin, 0), int(str(r["story"])[len(pre):]))
@@ -2796,9 +3068,11 @@ class OpeningEngine:
         return float(self.p.get("risk_pct") or config.RISK_PER_TRADE_PCT)
 
     def _ticket_imp(self, w: dict, coin: str, act: dict, plan: dict, now: int) -> dict:
-        """Ticket del modo impulso: inmediato, horquilla pura (tp1R = tp2R, sin parcial, break-even ni dinámico),
-        tope de tiempo desde la entrada (7 días de seguridad o, con «6 diarias», 24 h), instrumento (contado o
-        perpetuo), estrategia y etiquetas (con origen «motor_aperturas», el preset y la versión)."""
+        """Ticket del modo impulso: inmediato, sin break-even ni stop dinámico, con tope de tiempo desde la entrada (7
+        días de seguridad o, con «6 diarias», 24 h), instrumento (contado o perpetuo), estrategia y etiquetas (con origen
+        «motor_aperturas», el preset y la versión). Horquilla pura (tp1R = tp2R, sin parcial) o, con cerrojo («6 diarias
+        v2»), parcial (tp1R + tp1Frac), cerrojo (lockR, lockFloorR, lockTrailR) sin objetivo final y tope de tiempo
+        activado (winEndActive, holdActiveLabel: hasta 7 días)."""
         p, d, tags = self.p, act["dir"], act["tags"]
         end = now + int(p["max_hold_h"] * H)
         until = datetime.fromtimestamp(end / 1000, MAD).strftime('%d-%m %H:%M')
@@ -2809,18 +3083,50 @@ class OpeningEngine:
             hrs = _n(p["max_hold_h"], 0)
             valid, label = f"como mucho {hrs} h (hasta el {until} Madrid)", f"tope de {hrs} h"
         sig = w["signals"].get(coin) or {}
-        return {"coin": coin, "side": "long" if d > 0 else "short", "mode": MODE_IMP, "risk": self._risk_imp(),
-                "stopPct": plan["stopPct"], "trailPct": None, "timing": "now", "win": f"Apertura {w['name']}",
-                "winAt": None, "entryType": impulse_entry_type(p), "tp1R": plan["tp2R"], "tp2R": plan["tp2R"],
-                "tp1Frac": 0.0, "beR": None, "trailStartR": None, "valid": valid,
-                "inval": _cut(f"Stop {_px(plan['stop_px'])} (−{_n(plan['stopPct'])} %) u objetivo "
-                              f"{_px(plan['target_px'])} (+{_n(plan['gross_pct'])} %)", 160),
-                "why": _cut(act["why"], 300), "llm": None, "winEnd": end, "holdLabel": label,
-                "maxAgeMs": MAX_FILL_DELAY_MS, "instrument": plan["instrument"], "market": w["lead"], "src": SRC,
-                "signal": {"dir": sig.get("dir"), "strength": sig.get("strength")}, "origen": "motor_aperturas",
-                "strategy": impulse_strategy(d, tags),
-                "tags": {**tags, "estrategia_firma": self.firma, "origen": "motor_aperturas",
-                         "preset": preset_of(p)}}
+        lock = plan.get("lockR")
+        if lock:
+            inval = (f"Stop {_px(plan['stop_px'])} (−{_n(plan['stopPct'])} %)"
+                     + (f"; {_frac_text(plan['tp1Frac'])} en {_px(plan['tp1_px'])} ({_n(plan['tp1R'], 1)}R)"
+                        if plan.get("tp1Frac") else "")
+                     + f"; el resto con el cerrojo (suelo {_px(plan['floor_px'])}, +{_n(plan['lockFloorR'], 1)}R)")
+        else:
+            inval = (f"Stop {_px(plan['stop_px'])} (−{_n(plan['stopPct'])} %) u objetivo {_px(plan['target_px'])} "
+                     f"(+{_n(plan['gross_pct'])} %)")
+        t = {"coin": coin, "side": "long" if d > 0 else "short", "mode": MODE_IMP, "risk": self._risk_imp(),
+             "stopPct": plan["stopPct"], "trailPct": None, "timing": "now", "win": f"Apertura {w['name']}",
+             "winAt": None, "entryType": impulse_entry_type(p), "tp1R": plan["tp1R"], "tp2R": plan["tp2R"],
+             "tp1Frac": plan.get("tp1Frac") or 0.0, "beR": None, "trailStartR": None, "valid": valid,
+             "inval": _cut(inval, 160), "why": _cut(act["why"], 300), "llm": None, "winEnd": end, "holdLabel": label,
+             "maxAgeMs": MAX_FILL_DELAY_MS, "instrument": plan["instrument"], "market": w["lead"], "src": SRC,
+             "signal": {"dir": sig.get("dir"), "strength": sig.get("strength")}, "origen": "motor_aperturas",
+             "strategy": impulse_strategy(d, tags),
+             "tags": {**tags, "estrategia_firma": self.firma, "origen": "motor_aperturas", "preset": preset_of(p)}}
+        if lock:   # cerrojo: el paper sube el stop al suelo a +lockR R y lo sigue; activado, hasta winEndActive
+            t.update(lockR=lock, lockFloorR=plan["lockFloorR"], lockTrailR=plan.get("lockTrailR"))
+            ha = p.get("max_hold_active_h")
+            if ha and ha > p["max_hold_h"] + 1e-9:
+                end_a = now + int(ha * H)
+                t.update(winEndActive=end_a, holdActiveLabel=f"{_horas(ha)} con el cerrojo")
+                t["valid"] = (f"{valid} sin activar el cerrojo; activado, hasta "
+                              f"{datetime.fromtimestamp(end_a / 1000, MAD).strftime('%d-%m %H:%M')} Madrid")
+        return t
+
+    def _plan_txt(self, plan: dict) -> str:
+        """Stop, objetivo o parcial y cerrojo, y tope de tiempo de un plan de impulse_plan, para los textos."""
+        stop = f"stop {_px(plan['stop_px'])} (−{_n(plan['stopPct'])} %)"
+        if not plan.get("lockR"):
+            return (f"{stop} y objetivo {_px(plan['target_px'])} ({_n(plan['tp2R'], 1)} R, +{_n(plan['gross_pct'])} %, "
+                    f"{_n(plan['net_pct'])} % neto), {hold_text(self.p)}")
+        by = {x["que"]: x for x in plan.get("partes") or []}
+        part = (f"{_frac_text(plan['tp1Frac'])} sale en {_px(plan['tp1_px'])} ({_n(plan['tp1R'], 1)} R, "
+                f"+{_n(by['parcial']['bruto_pct'])} %) y el resto corre" if plan.get("tp1Frac") and "parcial" in by
+                else "la posición corre")
+        tr = f" y lo sigue a {_n(plan['lockTrailR'], 2)} R" if plan.get("lockTrailR") else ""
+        fl = by.get("suelo") or {}
+        return (f"{stop}; {part} con el cerrojo: a +{_n(plan['lockR'], 1)} R su stop sube a {_px(plan['floor_px'])} "
+                f"(+{_n(plan['lockFloorR'], 1)} R, {_n(fl.get('neto_pct') or 0.0)} % neto){tr}"
+                + (f"; objetivo final {_px(plan['target_px'])}" if plan.get("target_px") else "")
+                + f"; {hold_text(self.p)}")
 
     async def _enter_imp(self, w: dict, coin: str, act: dict, now: int) -> None:
         """Entrada del modo impulso: cartera, una posición por moneda, horquilla desde el precio real con el filtro del
@@ -2844,15 +3150,23 @@ class OpeningEngine:
         d, tags = act["dir"], act["tags"]
         inst = impulse_instrument(d, self.p)
         entry = self._live_price(coin, now) or act["price"]
-        plan = impulse_plan(d, entry, self.p, self._funding_now(coin), inst)
+        plan = impulse_plan(d, entry, self.p, self._funding_now(coin), inst, (run.ctx or {}).get("atr_h_pct"))
         w["plans"][coin] = {k: plan[k] for k in ("stopPct", "tp2R", "rr", "ok", "why", "instrument", "gross_pct",
-                                                 "cost_pct", "funding_pct", "net_pct")}
-        w["plans"][coin].update(entry=entry, stop=plan["stop_px"], target=plan["target_px"])
+                                                 "cost_pct", "funding_pct", "net_pct", "tp1R", "tp1Frac", "lockR",
+                                                 "lockFloorR", "lockTrailR", "partes")}
+        w["plans"][coin].update(entry=entry, stop=plan["stop_px"], target=plan["target_px"], parcial=plan["tp1_px"],
+                                suelo=plan["floor_px"])
         plan_d = {"entrada": entry, "stop": plan["stop_px"], "objetivo": plan["target_px"], "stop_pct": plan["stopPct"],
                   "objetivo_R": plan["tp2R"], "bruto_pct": plan["gross_pct"], "neto_pct": plan["net_pct"],
                   "coste_pct": plan["cost_pct"], "funding_pct": plan["funding_pct"],
                   "instrumento": "perpetuo" if inst == "perp" else "contado", "riesgo_pct": self._risk_imp(),
                   "tope_h": self.p["max_hold_h"]}
+        if plan.get("tp1Frac") or plan.get("lockR"):   # «6 diarias v2»: parcial y cerrojo
+            plan_d.update(parcial=plan["tp1_px"], parcial_R=plan["tp1R"] if plan.get("tp1Frac") else None,
+                          parcial_frac=plan.get("tp1Frac") or 0.0, cerrojo_R=plan.get("lockR"),
+                          suelo=plan["floor_px"], suelo_R=plan.get("lockFloorR"),
+                          seguimiento_R=plan.get("lockTrailR"), tope_activado_h=self.p.get("max_hold_active_h"),
+                          partes=plan["partes"])
         if not plan["ok"]:
             run.on_rejected(now, plan["why"])
             return self._no_entra(w, coin, now, "reglas" if plan["why"].startswith("Regla del usuario") else "otro",
@@ -2885,9 +3199,7 @@ class OpeningEngine:
             return self._no_entra(w, coin, now, "otro")
         # Antes de submit: lo que digan el riesgo y el paper (que lo apunta su gancho del bus) va después
         self._dec(w, coin, now, "entrada", "entra", "entra",
-                  f"Se envía al paper: {verb.lower()} {INST_TEXT[inst]} a {_px(entry)}, stop {_px(plan['stop_px'])} "
-                  f"(−{_n(plan['stopPct'])} %) y objetivo {_px(plan['target_px'])} ({_n(plan['tp2R'], 1)} R, "
-                  f"+{_n(plan['gross_pct'])} %, {_n(plan['net_pct'])} % neto), {hold_text(self.p)}",
+                  f"Se envía al paper: {verb.lower()} {INST_TEXT[inst]} a {_px(entry)}, " + self._plan_txt(plan),
                   {"plan": plan_d, "limites": lim_d,
                    "rvol": round(_f(act.get("rvol")), 3) if _f(act.get("rvol")) is not None else None,
                    "rvol_min": self.p.get("rvol_min")}, story=story)
@@ -2900,10 +3212,15 @@ class OpeningEngine:
             w["stories"][story] = {"coin": coin, "at": now, "pending": False, "open": False}
             self._own_entry(story, t["risk"], now)
             run.entry_px, run.stop_px, run.target_px = entry, plan["stop_px"], plan["target_px"]
-            run.last_why = (f"En posición (paper): {verb.lower()} {INST_TEXT[inst]} a {_px(entry)}, stop "
-                            f"{_px(plan['stop_px'])} y objetivo {_px(plan['target_px'])}; "
-                            + (f"sin tope de tiempo ({t['holdLabel']})" if self.p["max_hold_h"] >= 168 - 1e-9
-                               else f"como mucho {_n(self.p['max_hold_h'], 0)} h"))
+            run.tp1_px, run.floor_px = plan["tp1_px"], plan["floor_px"]
+            if plan.get("lockR"):
+                run.last_why = (f"En posición (paper): {verb.lower()} {INST_TEXT[inst]} a {_px(entry)}, "
+                                + self._plan_txt(plan))
+            else:
+                run.last_why = (f"En posición (paper): {verb.lower()} {INST_TEXT[inst]} a {_px(entry)}, stop "
+                                f"{_px(plan['stop_px'])} y objetivo {_px(plan['target_px'])}; "
+                                + (f"sin tope de tiempo ({t['holdLabel']})" if self.p["max_hold_h"] >= 168 - 1e-9
+                                   else f"como mucho {_n(self.p['max_hold_h'], 0)} h"))
             log.info("Aperturas: %s %s en %s (%s, %s)", verb, coin, w["name"], story, t["strategy"])
         else:
             run.on_rejected(now, "vetada por el control de riesgo del paper")
@@ -2923,7 +3240,7 @@ class OpeningEngine:
             if isinstance(t, dict) and (t.get("story") not in closed
                                         or _f(t.get("closed"), 0) > _f(closed[t["story"]].get("closed"), 0)):
                 closed[t.get("story")] = t
-        positions = {x.get("story") for x in pf.get("positions") or [] if isinstance(x, dict)}
+        positions = {x.get("story"): x for x in pf.get("positions") or [] if isinstance(x, dict)}
         queued = {x.get("story") for x in (pf.get("pending") or []) + (pf.get("scheduled") or []) if isinstance(x, dict)}
         for s in open_st:
             x = w["stories"][s]
@@ -2938,6 +3255,11 @@ class OpeningEngine:
                     run.set_signal(s2["dir"])
             elif s in positions:
                 x["open"] = True
+                st = position_state_text(positions[s])   # «6 diarias v2»: la parcial hecha y el cerrojo activado
+                if st and run.state == "en_posicion" and run.entry_px:
+                    side = "compra" if run.dir > 0 else "venta"
+                    inst = INST_TEXT.get((run.tags or {}).get("instrumento") or "", "")
+                    run.last_why = f"En posición (paper): {side} {inst} a {_px(run.entry_px)}{st}".replace("  ", " ")
             elif s in queued:
                 x["pending"] = True
             elif now - x["at"] <= SUBMIT_GRACE_MS:
@@ -3112,12 +3434,20 @@ class OpeningEngine:
     def build_status(self, now: int) -> dict:
         if self.impulso:
             day = self._day_ledger(None, now)
+            kind, m = entry_kind(self.p["entry"])
             wins = [{"id": w["key"], "name": w["name"], "markets": w["markets"], "open_utc": w["open_ms"],
                      "state": self._wstate_imp(w, now), "why": w["why"],
-                     "coins": {c: self._coin_imp(w, c, now) for c in self.p["coins"]}}
+                     "coins": {c: self._coin_imp(w, c, now) for c in self.p["coins"]},
+                     # Para «Programadas» y «Pasando controles»: hora de Madrid, fin de la medida, hora de entrada
+                     # (t:N), estrategia y qué hará
+                     "hora_madrid": _hm(w["open_ms"]), "medida_hasta": w["open_ms"] + self.p["measure_min"] * MIN,
+                     "entrada_ms": w["open_ms"] + m * MIN if kind == "t" else None,
+                     "estrategia": self.preset.get("nombre") or "impulso",
+                     "hara": window_plan_text(w["open_ms"], self.p)}
                     for w in sorted(self.windows.values(), key=lambda x: x["open_ms"])]
             return {"type": "openings", "ts": now, "strategy": "impulso", "windows": wins,
                     "params": {**{k: self.p[k] for k in IMP_STATUS_KEYS}, **self.preset},
+                    "salida": exit_text(self.p), "salida_corta": exit_text(self.p, corto=True),
                     "params_source": self.source,
                     "notice": self.notice, "states": list(IMP_STATES), "paused": self.paused,
                     "estrategia_cargada": self.loaded,

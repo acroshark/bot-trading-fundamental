@@ -33,8 +33,9 @@ ajuste dentro de las reglas del usuario e informe semanal. SOLO PAPER: nada de e
   mínimos de siempre) y el modo automático nunca lo aplica solo.
 - Lo aplicado se escribe en DATA_DIR/estrategia_activa.json (con su firma); el motor lo lee al arrancar y lo recarga
   en caliente (apertura.ACTIVA_CHECK_S, entre aperturas; leer_estrategia_activa y params_motor). Reglas fijas que nada
-  de esto puede romper, aunque BOT_USER_RULES=0: stop ≥ 1,5 %, objetivo ≥ 2R y ≥ 3 % neto de costes, sin
-  break-even, stop dinámico ni parciales (cumple_reglas).
+  de esto puede romper, aunque BOT_USER_RULES=0: «o gano más de 2 o pierdo 1» (cumple_reglas). Stop ≥ 1,5 %; toda
+  parte que gana (objetivo, salida parcial y suelo del cerrojo) ≥ 2R y ≥ 3 % neto de costes; sin break-even ni nada que
+  mueva el stop antes del cerrojo (el seguimiento solo con cerrojo y por encima de su suelo).
 - Honestidad estadística: medias contraídas hacia 0 R (como 20 operaciones neutras), peso que se reduce a la mitad
   cada 90 días, mínimos de casos, corrección por número de pruebas (Holm en los aspirantes, Bonferroni en los ajustes)
   y confirmación con datos nuevos. Con poca muestra no se concluye nada.
@@ -107,7 +108,7 @@ N_BOOT = 2000
 SEED = 20261027
 ENFRIAR_D = 14               # modo automático: días mínimos entre dos promociones (o desde la última reversión)
 PAUSA_ESPERA_D = 6           # modo automático: la pausa se aplica sola si sigue propuesta en la evaluación siguiente
-MIN_NET_PCT = 3.0            # regla del usuario: el objetivo deja ≥ 3 % neto de costes
+MIN_NET_PCT = config.RULE_MIN_NET_PCT   # regla del usuario: toda parte que gana deja ≥ 3 % neto de costes
 COST_SLIP_BPS = 2.0          # deslizamiento por lado del coste de ida y vuelta (como paper.cost_rt_pct)
 CHAMP_PREFIX = "impulso-"    # estrategias del motor de aperturas en el paper (apertura.impulse_strategy)
 APR_LOTE = 1000              # cambios de peso del aprendizaje que se copian al historial por ronda
@@ -118,6 +119,8 @@ DUR_TXT = {"7d": "sin tope de tiempo, 7 días de seguridad", "24h": "24 horas",
 # Parámetros de operativa que forman la versión (firma_motor): con todos iguales, es la misma estrategia
 FIRMA_KEYS = ("measure_min", "min_move_pct", "entry", "pb_frac", "entry_end_min", "rvol_min", "vol_filter",
               "btc_filter", "news_mode", "windows", "coins", "sl_pct", "target_r", "max_hold_h", "min_net_pct")
+# Salida parcial y cerrojo («6 diarias v2»): entran en la firma solo si se usan (sin ellos, la firma de siempre)
+FIRMA_SALIDA = ("tp1_r", "tp1_frac", "lock_r", "floor_r", "trail_r", "trail_atr", "max_hold_active_h")
 
 TIPOS = {"fuente_añadida": "Medio añadido", "fuente_silenciada": "Medio silenciado",
          "fuente_retirada": "Medio retirado", "fuente_restaurada": "Medio restaurado",
@@ -194,9 +197,11 @@ AVISO = ("Solo paper: nada de esto opera con dinero real. Al principio hay pocas
          "mínimos de casos, una prueba estadística corregida por el número de pruebas y su confirmación con datos "
          "nuevos.")
 REGLAS = {"stop_min_pct": config.RULE_MIN_STOP_PCT, "rr_min": config.RULE_MIN_RR, "objetivo_neto_min_pct": MIN_NET_PCT,
-          "break_even": False, "stop_dinamico": False, "parciales": False, "solo_paper": True,
-          "texto": "Stop ≥ 1,5 %, objetivo ≥ 2R y ≥ 3 % neto de costes, sin break-even ni stop dinámico; solo paper. "
-                   "La evolución nunca las rompe."}
+          "break_even": False, "stop_dinamico": False, "parciales": "≥ 2R y ≥ 3 % neto",
+          "cerrojo": "suelo ≥ 2R y ≥ 3 % neto; el seguimiento, solo por encima del suelo", "solo_paper": True,
+          "texto": "O gano más de 2 o pierdo 1: stop ≥ 1,5 %; toda parte que gana (objetivo, salida parcial o suelo del "
+                   "cerrojo) ≥ 2R y ≥ 3 % neto de costes; sin break-even ni stop dinámico antes del cerrojo; solo "
+                   "paper. La evolución nunca las rompe."}
 CRITERIOS = {"promocion_min_operaciones": PROMO_MIN_OPS, "p_max": P_MAX, "correccion": "Holm",
              "confirmacion_min_operaciones": CONFIRMA_MIN_OPS, "degradacion_R_contraido": DEGRADA_R,
              "degradacion_min_operaciones": DEGRADA_MIN_OPS, "referencia_min_operaciones": MIN_REF,
@@ -224,7 +229,7 @@ MARKET_WIN = {"tokio": "tokio-seul", "seul": "tokio-seul", "shanghai": "china", 
               "frankfurt": "europa", "londres": "europa", "madrid": "europa", "saopaulo": "saopaulo",
               "nuevayork": "nuevayork"}
 VISTA_PARAMS = ("measure_min", "min_move_pct", "entry", "rvol_min", "vol_filter", "btc_filter", "news_mode", "windows",
-                "coins", "sl_pct", "target_r", "max_hold_h", "min_net_pct")
+                "coins", "sl_pct", "target_r", "max_hold_h", "min_net_pct", *FIRMA_SALIDA)
 # Por si bot/apertura.py no se puede importar (lo están editando): lo esencial del preset IMPULSO.
 LAB_REF_FALLBACK = "ap_mom:15:0,2|rvol:1,5|todos|a_favor|todas|todas|todos|t:30|3|3|sig"
 PRESET_FALLBACK = {"estrategia": "impulso", "measure_min": 15, "min_move_pct": 0.2, "entry": "t:30", "pb_frac": 0.5,
@@ -528,32 +533,72 @@ def gemelo_preset() -> str | None:
     return lab.rsplit("|", 1)[0] + "|" + DUR_MOTOR
 
 
+NUM_REGLAS = ("sl_pct", "target_r", "tp1_r", "tp1_frac", "lock_r", "floor_r", "trail_r", "trail_atr", "max_hold_h",
+              "max_hold_active_h", "min_net_pct")   # números de la salida que cumple_reglas exige finitos
+
+
 def cumple_reglas(params: dict | None, base: dict | None = None) -> tuple[bool, list[str]]:
     """Reglas fijas del usuario sobre los parámetros del motor (encima del preset IMPULSO o de base). No dependen de
-    BOT_USER_RULES: stop ≥ 1,5 %, objetivo ≥ 2R y ≥ 3 % neto de costes, horquilla pura y solo modo impulso."""
+    BOT_USER_RULES: «o gano más de 2 o pierdo 1».
+    - Stop ≥ 1,5 %. Solo el modo impulso.
+    - Toda parte que gana ≥ 2R y deja ≥ 3 % neto de costes: el objetivo final (target_r; sin él, solo con cerrojo), la
+      salida parcial (tp1_r con tp1_frac) y el suelo del cerrojo (floor_r con lock_r; el cerrojo no se activa por
+      debajo de su suelo).
+    - Nada mueve el stop antes del cerrojo: sin break-even (be_r), sin el stop dinámico de siempre (trail_start_r,
+      trailPct) y sin seguimiento (trail_r, trail_atr) que no vaya con un cerrojo.
+    - Todo número finito: un objetivo, parcial o cerrojo «infinito» (json.loads acepta Infinity) no se cobra nunca."""
     over = dict(params or {})
     p = {**(_preset()[0] if base is None else base), **over}
     fallos = []
-    sl, r = _f(p.get("sl_pct")), _f(p.get("target_r"))
+    for k in NUM_REGLAS:
+        v = p.get(k)
+        if v is None or isinstance(v, bool):
+            continue
+        try:
+            x = float(v)
+        except (TypeError, ValueError):
+            continue   # lo que no es un número lo dice su propia comprobación
+        if not math.isfinite(x):
+            fallos.append(f"{k} = {v!r} (tiene que ser un número finito)")
+    cost = coste_rt_pct()
+    sl = _f(p.get("sl_pct"))
     if sl is None or sl < config.RULE_MIN_STOP_PCT - 1e-9:
         fallos.append(f"stop {_n(sl)} % (mínimo {_n(config.RULE_MIN_STOP_PCT)} %)")
-    if r is None or r < config.RULE_MIN_RR - 1e-9:
-        fallos.append(f"objetivo {_n(r)}R (mínimo {_n(config.RULE_MIN_RR)}R)")
-    if sl is not None and r is not None:
-        net = sl * r - coste_rt_pct()
-        if net < MIN_NET_PCT - 1e-9:
-            fallos.append(f"el objetivo deja {_n(net)} % neto de costes (mínimo {_n(MIN_NET_PCT)} %)")
+
+    def parte(nombre: str, r, el: str) -> None:   # una salida que gana: ≥ 2R y ≥ 3 % neto
+        rv = _f(r)
+        if rv is None or rv < config.RULE_MIN_RR - 1e-9:
+            fallos.append(f"{nombre} {_n(rv)}R (mínimo {_n(config.RULE_MIN_RR)}R)")
+        elif sl is not None and rv * sl - cost < MIN_NET_PCT - 1e-9:
+            fallos.append(f"{el} deja {_n(rv * sl - cost)} % neto de costes (mínimo {_n(MIN_NET_PCT)} %)")
+
+    lock, floor = _f(p.get("lock_r")), _f(p.get("floor_r"))
+    con_cerrojo = bool(lock and lock > 0)
+    if p.get("target_r") is not None:
+        parte("objetivo", p.get("target_r"), "el objetivo")
+    elif not con_cerrojo:
+        fallos.append("sin objetivo final ni cerrojo (hace falta al menos uno)")
+    frac = _f(p.get("tp1_frac"), 0.0) or 0.0
+    if frac < 0 or frac > 1:
+        fallos.append(f"salida parcial del {_n(frac * 100, 0)} % (entre 0 y 100 %)")
+    elif frac > 0:
+        parte("salida parcial en", p.get("tp1_r"), f"la salida parcial en {_n(_f(p.get('tp1_r')))}R")
+    if con_cerrojo:
+        parte("suelo del cerrojo en", floor, f"el suelo del cerrojo en {_n(floor)}R")
+        if floor is not None and lock < floor - 1e-9:
+            fallos.append(f"cerrojo que se activa en {_n(lock)}R, por debajo de su suelo ({_n(floor)}R)")
+    elif p.get("lock_r") not in (None, 0, 0.0):
+        fallos.append(f"lock_r = {p.get('lock_r')!r} (None o un número > 0)")
     mn = p.get("min_net_pct")
     if mn is not None and (_f(mn) is None or _f(mn) < MIN_NET_PCT - 1e-9):
         fallos.append(f"min_net_pct = {mn!r} (mínimo {_n(MIN_NET_PCT)} %)")
-    if over.get("be_r") not in (None, 0, 0.0):
-        fallos.append("break-even (prohibido)")
-    if (_f(over.get("trail_atr"), 0.0) or 0.0) > 0 or over.get("trail_start_r") is not None \
-            or over.get("trailPct") is not None:
-        fallos.append("stop dinámico (prohibido)")
-    if (_f(over.get("tp1_frac"), 0.0) or 0.0) > 0:
-        fallos.append("salida parcial (prohibida: horquilla pura)")
-    if over.get("target_pct") is not None:
+    if p.get("be_r") not in (None, 0, 0.0):
+        fallos.append("break-even (prohibido: el stop no se mueve antes de ganar el mínimo)")
+    if p.get("trail_start_r") is not None or p.get("trailPct") is not None:
+        fallos.append("stop dinámico (prohibido antes del cerrojo)")
+    if ((_f(p.get("trail_r"), 0.0) or 0.0) > 0 or (_f(p.get("trail_atr"), 0.0) or 0.0) > 0) and not con_cerrojo:
+        fallos.append("seguimiento sin cerrojo (prohibido: movería el stop antes de ganar el mínimo)")
+    if p.get("target_pct") is not None:
         fallos.append("objetivo en % (se usa target_r)")
     if p.get("estrategia", "impulso") != "impulso":
         fallos.append("solo el modo impulso del motor de aperturas")
@@ -638,6 +683,10 @@ def firma_motor(p: dict | None) -> str:
     listas sin orden). El motor la calcula con sus parámetros completos (OpeningEngine.p) y la copia en las etiquetas de
     cada ticket (tags.estrategia_firma): así cada operación paper dice qué versión la abrió. La pausa no cuenta."""
     key = {k: _norm((p or {}).get(k)) for k in FIRMA_KEYS}
+    for k in FIRMA_SALIDA:   # solo si se usan: así las firmas de antes del cerrojo no cambian
+        v = (p or {}).get(k)
+        if v not in (None, 0, 0.0, False):
+            key[k] = _norm(v)
     return hashlib.sha1(json.dumps(key, sort_keys=True).encode()).hexdigest()[:12]
 
 
@@ -1278,6 +1327,8 @@ def calcular(paper: list[dict], meta: list[dict], filas: list[dict], activa: dic
     base = firma(activa)
     conf = _confirmacion_motor(activa, f_act, motor)
     hz = _f(ef.get("max_hold_h"), HORIZONTE_H[DUR_MOTOR]) or HORIZONTE_H[DUR_MOTOR]
+    if ef.get("lock_r") and _f(ef.get("max_hold_active_h")):   # con el cerrojo activado dura más
+        hz = max(hz, _f(ef["max_hold_active_h"]))
     # las del campeón: las de su versión (y, con el preset, las de antes de la firma); nunca las de la entrada por
     # noticia fiable (otra estrategia que comparte la cartera: sin firma, con el preset se colaban como de E2)
     mias = [o for o in paper if o.get("origen") not in ORIGENES_AJENOS

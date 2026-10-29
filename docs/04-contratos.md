@@ -26,7 +26,7 @@ Este documento es la referencia común. Cualquier módulo que publique o consuma
   - Reintenta con espera creciente.
   - Registra el fallo con `logging`.
 - Todo opera en **paper** (dinero ficticio con precios reales). Ningún texto puede dar a entender que hay dinero real.
-- Las reglas del usuario (`config.USER_RULES`: stop ≥ 1,5 %, objetivo ≥ 2R y ≥ 3 % neto, sin break-even, stop dinámico ni parciales) no las cambia ningún módulo de los que miden y aprenden (aprendizaje, fuentes vivas, evolución): solo deciden qué noticias cuentan, cuánto pesan y qué estrategia (que las cumpla) opera el motor.
+- Las reglas del usuario (`config.USER_RULES`, «o gano más de 2 o pierdo 1»; desde el 28-10-2026 también «dejar correr»): stop ≥ 1,5 %; toda parte que gana —objetivo fijo, salida parcial o suelo del cerrojo— lo hace en ≥ 2R (`RULE_MIN_RR`) y deja ≥ 3 % neto de costes (`RULE_MIN_NET_PCT`); nada mueve el stop antes de ganar ese mínimo (sin break-even ni stop dinámico). Se permite el **cerrojo**: al llegar a +N R el stop sube a un suelo que cumple lo anterior y desde ahí puede seguir al precio, solo por encima del suelo (nunca baja). El paper apaga la parcial o el cerrojo que no cumplan y rechaza el ticket sin objetivo fijo ni cerrojo válido; `evolucion.cumple_reglas` rechaza los parámetros que las rompan. No las cambia ningún módulo de los que miden y aprenden (aprendizaje, fuentes vivas, evolución): solo deciden qué noticias cuentan, cuánto pesan y qué estrategia (que las cumpla) opera el motor.
 
 ## 1. Interfaces que ya existen
 
@@ -88,8 +88,10 @@ def closes_before_open(a, b, day) -> bool;  def ordered_by_close(day) -> list[Ma
 #   observe(evento): gancho síncrono del bus → eventos «entrada_noticia» (2.16) y entradas en el paper («strategy» →
 #   riesgo → aprobación → paper, como el motor). BOT_ENTRADA_NOTICIAS=0 la apaga
 # bot/apertura.py       paper_day_entries(cartera, ahora) -> {story: riesgo %}: TODAS las entradas del paper del día de
-#   Madrid; la usan el motor y la entrada por noticia (topes diarios compartidos). PRESETS {impulso, seis},
-#   preset_of(params), preset_info(params, activa). OpeningEngine(..., decisiones=Decisiones): por qué entra o no (2.17)
+#   Madrid; la usan el motor y la entrada por noticia (topes diarios compartidos). PRESETS {impulso, seis, seis2},
+#   preset_of(params), preset_info(params, activa), exit_text(params, corto), window_plan_text(open_ms, params),
+#   impulse_plan(..., atr_h_pct) y simulate_plan(..., end_active_ms) con la parcial y el cerrojo (paper.exit_rules,
+#   paper.lock_update, paper.rule_win_ok). OpeningEngine(..., decisiones=Decisiones): por qué entra o no (2.17)
 # bot/decisiones.py     Decisiones(bus, store, clock=now_ms)  → mensaje «decision_apertura» y tabla decisiones_apertura (2.17)
 #   add(ventana_id, coin, fase, decision, motivo_codigo, motivo, **columnas) -> fila | None (nunca lanza; la guarda un
 #   hilo), ultima(ventana_id, coin), ventana(ventana_id), fases(ventana_id), de_story(story), consulta(desde,
@@ -183,7 +185,10 @@ Se publica como mucho cada 10 s y solo si ha cambiado. El detalle por feed sale 
  "positions": [{"story": "n…", "coin": "SOL", "side": "long|short", "qty": 3.1, "entry": 104.9, "sl": 103.2,
                 "trail_pct": 1.2, "high_water": 105.6, "opened": 0, "riskUsd": 50, "notional": 3250,
                 "headline": "…", "strategy": "seguir-bolsa-anterior", "window": "Apertura Londres",
-                "instrument": "spot|perp", "funding": 0.0, "tags": {}}],
+                "instrument": "spot|perp", "funding": 0.0, "tags": {},
+                "tp1": 106.0, "tp1_frac": 0.5, "tp1_done": false, "realized": 0.0, "qty0": 3.1,
+                "lock_r": 3.0, "floor_r": 2.0, "lock_trail_r": 2.0, "locked": false, "floor": 104.0,
+                "hold_until": 0, "hold_label": "tope de 24 h", "hold_active": 0, "sl_kind": "inicial"}],
  "pending": [{"story": "n…", "deadline": 0, "mode": "veto|manual", "coin": "SOL", "side": "long|short"}],
  "scheduled": [{"story": "n…", "at": 0, "expires": 0, "coin": "SOL", "side": "long|short"}],
  "closed": [ /* últimas 50 operaciones, formato de 3.2 */ ],
@@ -204,6 +209,7 @@ Se publica como mucho cada 10 s y solo si ha cambiado. El detalle por feed sale 
   - cuenta su margen (la mitad del nominal) en la exposición, y el nominal total en perpetuos no pasa de 2 veces el capital (2:1);
   - la comisión supuesta es la misma que en contado (0,10 % por lado), la prudente.
 - `tags`: las etiquetas del ticket (2.6), tal cual.
+- **Parcial y cerrojo** («6 diarias v2», 28-10-2026): `tp1`/`tp1_frac`/`tp1_done` (la salida parcial y si ya se hizo; `realized` = lo cobrado en ella), `qty0` (cantidad inicial; `qty` es lo que queda: la posición «a medias» sigue siendo LA posición de esa moneda), `lock_r`/`floor_r`/`lock_trail_r` (activación, suelo y seguimiento en R; null sin cerrojo), `locked` (activado), `floor` (precio del suelo), `sl_kind` (`inicial|be|dinamico|cerrojo|seguimiento`), `hold_until` y `hold_label` (el cierre por tiempo de ahora: al activarse el cerrojo pasa a `hold_active`, p. ej. de 24 h a 7 días desde la entrada).
 
 ### 2.6 Eventos nuevos o ampliados (`"type": "event"`)
 
@@ -217,10 +223,10 @@ Todos llevan `kind`, `agent`, `story` (salvo `flow` y `brief`), `title`, `text`,
 | `triaged`, `lowprio` | `local` | `triage` (ver 2.7) |
 | `verified`, `unverified` | `verifier` | `verify{score (0-1), checks[{ok, t}], why?, dt, llm}` |
 | `impact`, `noimpact` | `impact` | `impact{dir (+1 o −1), mag (% esperado en main), conf (0-1), hz (texto), why, main (moneda), per{moneda: %}, markets{bolsa: %}, drop? (texto), llm}` |
-| `strategy`, `nostrategy` | `strat` | `strat{coin, side, mode, risk (% del capital), stopPct, trailPct, timing ("now"/"window"), win (texto), winAt (ms o null), entryType, tp1R, tp2R, tp1Frac?, beR?, trailStartR?, maxAgeMs?, instrument? ("spot"/"perp"), tags?, winEnd?, holdLabel?, valid, inval, why, llm, none? (bool)}`; el motor de aperturas añade `tags` también en el patch |
+| `strategy`, `nostrategy` | `strat` | `strat{coin, side, mode, risk (% del capital), stopPct, trailPct, timing ("now"/"window"), win (texto), winAt (ms o null), entryType, tp1R, tp2R, tp1Frac?, beR?, trailStartR?, lockR?, lockFloorR?, lockTrailR?, maxAgeMs?, instrument? ("spot"/"perp"), tags?, winEnd?, holdLabel?, winEndActive?, holdActiveLabel?, valid, inval, why, llm, none? (bool)}`; el motor de aperturas añade `tags` también en el patch |
 | `riskok`, `riskko` | `risk` | `risk{checks[{ok, t}], ok, why?, motivo_codigo?}` (`riskko`: `motivo_codigo` del catálogo de 2.17 para el primer control que falla, `paper.motivo_codigo`) |
 | `humanwait`, `humanok`, `humanko` | `human` | `human{mode, deadline?, by?, at?, no?}` |
-| `scheduled`, `order`, `filled`, `manage`, `blocked` | `exec` | `exec{scheduled?, sent?, px, slip (pb), ms, notional, sl, tp1?, tp2?, trail?, stopLossUsd?, blocked?, why?, motivo_codigo? (blocked, 2.17), instrument, funding?, funding_n?}` (un `manage` con `funding` es una liquidación de funding de un perpetuo); `filled` lleva además `trade_id` en el patch (el `id` de la operación de 3.2) |
+| `scheduled`, `order`, `filled`, `manage`, `blocked` | `exec` | `exec{scheduled?, sent?, px, slip (pb), ms, notional, sl, tp1?, tp2?, trail?, stopLossUsd?, blocked?, why?, motivo_codigo? (blocked, 2.17), instrument, funding?, funding_n?, lockR?, floorR?, lockTrailR?, floor?, holdUntil?, holdActive?, locked?}` (un `manage` con `funding` es una liquidación de funding de un perpetuo); `filled` lleva además `trade_id` en el patch (el `id` de la operación de 3.2). Dos `manage` llevan además, solo ellos, un campo propio en el patch: el que activa el cerrojo, `lock{at, lock_r, floor_r, trail_r, floor, hold_until}` (título «BTC: cerrojo a +2,0 R»), y el de la salida parcial, `partial{qty, px, at, pnl, fee, why, R (de la posición entera), tp1R, frac, qty_left, locked, sl, floor, hold_until}` (lo usa el registro de decisiones, 2.17). El seguimiento del cerrojo publica `manage` «BTC: stop de seguimiento a X» cada vez que sube 0,25 R; en la tabla `trades` la posición se guarda en cada subida, por pequeña que sea, y todas las abiertas al parar el bot: un reinicio no baja el stop |
 | `closed` | `exec` | `result{coin, side, qty, entry, exit, why, pnl, pnl_pct, R, fees, opened, closedAt, riskUsd, notional, headline, strategy, window}` y `trade_id` (el `id` de la operación); el evento lleva `tone: "good"` o `"bad"` |
 | `reflejo` | `flow` | `reflejo{estado ("pendiente"\|"confirmada"\|"contraria"\|"sin_reflejo"), mov_pct, min, ref ("BTC"\|"media"), umbral_pct}` (ver abajo) |
 | `entrada_noticia` | `strat` | `entrada_noticia{estado ("esperando"\|"confirmada"\|"caducada"\|"vetada"), motivo, motivo_codigo? (caducada y vetada con moneda: el catálogo de 2.17), moneda (o null: toda la noticia), dir (±1), lado, grupo{clave, tipo, nombre, sentido, n, n_historias, dias, acierto, acierto_bruto, ic90_bajo, opera}, ta, expira?, ts_triaje?, umbral_pct?, mov_pct?, min?, paper_story?, entrada?, stop?, objetivo?, instrumento?, riesgo_pct?}`; `story` = la de la noticia (ver 2.16) |
@@ -289,9 +295,13 @@ Salidas opcionales del ticket (`paper.exit_rules`). Un ticket sin estos campos s
 - `trailStartR`: R desde el que actúa el stop dinámico. `null` significa desde la entrada.
 - `tp1R` + `tp1Frac`: salida parcial de esa fracción de la posición en tp1. 0 significa sin parcial.
 - `tp2R`: objetivo final. `null` significa sin tope.
+- `lockR` + `lockFloorR` (+ `lockTrailR`), el **cerrojo** (`paper.lock_update`): al llegar a +`lockR` R (el mejor precio desde la entrada) el stop sube al suelo, entrada ± `lockFloorR` R, y con `lockTrailR` sigue al mejor precio a esa distancia en R, solo por encima del suelo; nunca baja. Antes de `lockR` nada mueve el stop. Un `lockR` por debajo del suelo se activa en el suelo; sin `lockFloorR` no hay cerrojo.
+- `winEndActive` + `holdActiveLabel` (con cerrojo): al activarse, el cierre por tiempo pasa de `winEnd` a `winEndActive` si es más tarde («6 diarias v2»: 24 h sin activar, 7 días desde la entrada activado).
+- Con las reglas del usuario: `beR`, `trailPct` y `trailStartR` no se usan (nada mueve el stop antes del cerrojo); la parcial solo si `tp1R` ≥ 2R y deja ≥ 3 % neto (`paper.rule_win_ok`; si no, sin parcial); el cerrojo solo si su suelo cumple lo mismo (si no, sin cerrojo). Lo que la regla descarta se dice: el `filled` lo añade a su texto («salida parcial en 1,5 R descartada por tu regla…») y `exec.descartado [texto]`. El `tp2R` también tiene que dejar ≥ 3 % neto (`riskko` «Regla del usuario: el objetivo de 2,00 R con stop de 1,50 % deja 2,76 % neto…», `reglas`; la fase 2, `claude_agents.make_ticket`, ya lo sube lo justo). Sin `tp2R`, el ticket necesita un cerrojo válido: si no, `riskko` «Regla del usuario: sin objetivo fijo ni cerrojo…» o «…y el cerrojo no vale…» (`motivo_codigo: reglas`).
+- Un número no finito (`Infinity`, `NaN`) en cualquier campo del ticket cuenta como ausente: un objetivo o cerrojo «infinito» no se cobraría nunca.
 - `maxAgeMs` (solo `timing: "now"`): si la aprobación (veto o a mano) llega más tarde que esto desde el envío, el paper no la ejecuta (`blocked`). El motor de aperturas manda 60 000; sin el campo, como siempre.
 
-Con parciales, el `closed` y la operación de 3.2 dan `qty` inicial, `exit` como precio medio de todas las salidas, y `pnl`, `fees` y `R` totales (R sobre el riesgo inicial). La operación de 3.2 añade `partials[]` y `exit_last`.
+Con parciales, el `closed` y la operación de 3.2 dan `qty` inicial, `exit` como precio medio de todas las salidas, y `pnl`, `fees` y `R` totales (R sobre el riesgo inicial). La operación de 3.2 añade `partials[]` (cada una con su `R` en R de la posición entera) y `exit_last`; con cerrojo, `lock_r`, `floor_r`, `lock_trail_r`, `locked` y `locked_at`. Motivos de cierre nuevos: «Stop del cerrojo» y «Stop de seguimiento» (con «tras salida parcial» si la hubo) y «Cierre por tiempo (7 días con el cerrojo)».
 
 En `llm` se guarda el gasto de cada llamada: `{model, key, tin, cached, tout, cost}` (cost en $), con el mismo cálculo que la simulación de la web.
 
@@ -367,35 +377,45 @@ Estado (no evento) de `bot/apertura.py`, cada 3 s como mucho y solo si cambia. D
  "params": {"estrategia": "impulso", "measure_min": 15, "min_move_pct": 0.2, "entry": "t:30", "rvol_min": 1.5, "btc_filter": "a_favor",
             "news_mode": "no_contra", "windows": ["tokio-seul", "china", "europa", "saopaulo", "nuevayork"], "coins": ["BTC", "ETH", "SOL", "XRP"],
             "sl_pct": 3.0, "target_r": 3.0, "max_hold_h": 168, "min_net_pct": 3.0, "long_instrument": "spot", "short_instrument": "perp", "…": "…",
-            "preset": "impulso|seis|null", "nombre": "E2 · impulso|6 diarias|<nombre de la evolución>|null", "descripcion": "…|null"},
+            "tp1_r": null, "tp1_frac": 0.0, "lock_r": null, "floor_r": null, "trail_r": null, "trail_atr": null, "max_hold_active_h": null,
+            "preset": "impulso|seis|seis2|null", "nombre": "E2 · impulso|6 diarias|6 diarias v2|<nombre de la evolución>|null", "descripcion": "…|null"},
+ "salida": "stop 3 % y objetivo 3R (+9 %), sin tope (7 días de seguridad)", "salida_corta": "stop 3 % y objetivo 3R",
  "params_source": "preset_impulso|preset_impulso+entorno|manual|evolucion|usuario", "notice": null, "paused": false,
  "estrategia_cargada": {"firma": "3f2a…", "ts": 0, "pausada": false, "fuente": "evolucion", "registro": "v…", "preset": "seis"},
  "states": ["esperando_apertura", "midiendo_impulso", "esperando_entrada", "en_posicion", "terminada"],
  "day": {"date": "2026-10-27", "entries": 1, "risk_pct": 0.5, "max_entries": 4, "max_risk_pct": 2.0},
  "windows": [{"id": "europa-2026-10-27", "name": "Europa", "markets": ["frankfurt", "londres", "madrid"], "open_utc": 0,
               "state": "esperando_entrada", "why": "Se sigue el impulso de los 15 primeros min…",
+              "hora_madrid": "09:00", "medida_hasta": 0, "entrada_ms": 0, "estrategia": "6 diarias v2",
+              "hara": "medirá el impulso de los 15 primeros min de BTC, ETH, SOL y XRP y entrará a las 09:15 en el sentido del impulso; stop 2 %, la mitad en 3R y el resto corre",
               "coins": {"BTC": {"state": "esperando_entrada", "step": "hora|retroceso|reanudacion|ruptura|null", "signal": 1,
                                 "why": "…", "instrument": "spot|perp|null", "rvol": 3.0, "range": {"hi": 0, "lo": 0},
                                 "news": {"dir": 0, "strength": 0.0, "why": "…", "label": "a_favor|en_contra|sin_noticia"},
                                 "tags": {}, "levels": {"apertura": 0, "impulso_pct": 0.3, "maximo": 0, "minimo": 0, "extremo": 0,
                                                        "retroceso": null, "ruptura": null, "hora_entrada": 0, "rvol": 3.0,
-                                                       "entrada": 0, "stop": 0, "objetivo": 0},
+                                                       "entrada": 0, "stop": 0, "objetivo": 0, "parcial": null, "suelo": null,
+                                                       "movimiento_pct": 0.12, "minutos_medidos": 7},
                                 "context": {"atr_pct": 0, "atr_h_pct": 0, "btc_dir": 1, "prev_ms": 0, "prev_react": 0.1},
                                 "plan": {"stopPct": 3.0, "tp2R": 3.0, "rr": 3.0, "ok": true, "why": "…", "instrument": "spot",
                                          "gross_pct": 9.0, "cost_pct": 0.24, "funding_pct": 0.0, "net_pct": 8.76,
-                                         "entry": 0, "stop": 0, "target": 0},
+                                         "entry": 0, "stop": 0, "target": 0, "tp1R": 3.0, "tp1Frac": 0.0, "lockR": null,
+                                         "lockFloorR": null, "lockTrailR": null, "partes": [{"que": "objetivo", "R": 3.0, "precio": 0,
+                                         "frac": null, "bruto_pct": 9.0, "neto_pct": 8.76}], "parcial": null, "suelo": null},
                                 "entries": 1, "results": [], "drivers": [], "strength": 0.0, "gate": null, "moving": null}}}]}
 ```
-- **Reglas (modo impulso):** se mide el impulso de los primeros `measure_min` minutos de cada apertura; si pasa de ±`min_move_pct` %, se sigue con la entrada del laboratorio (`t:N`, `pb` o `brk`), con volumen relativo ≥ `rvol_min` y el filtro de BTC. Las noticias filtran (`news_mode`) y etiquetan. Horquilla pura de `sl_pct` % y `target_r` R sin tope de tiempo (`max_hold_h` = 7 días de seguridad), sin break-even, stop dinámico ni parciales, y solo si el objetivo deja ≥ `min_net_pct` % neto de comisiones, deslizamiento y funding esperado. Una posición por moneda; topes diarios de entradas y riesgo. Largos al contado, cortos en perpetuo.
+- **Reglas (modo impulso):** se mide el impulso de los primeros `measure_min` minutos de cada apertura; si pasa de ±`min_move_pct` %, se sigue con la entrada del laboratorio (`t:N`, `pb` o `brk`), con volumen relativo ≥ `rvol_min` y el filtro de BTC. Las noticias filtran (`news_mode`) y etiquetan. Salida (`apertura.impulse_plan`): horquilla pura de `sl_pct` % y `target_r` R sin tope de tiempo (`max_hold_h` = 7 días de seguridad) o, con cerrojo («6 diarias v2»), parcial y cerrojo (abajo); nunca break-even ni stop dinámico antes del cerrojo. Cada parte que gana (objetivo, parcial y suelo del cerrojo, `plan.partes`) tiene que ser ≥ 2R y dejar ≥ `min_net_pct` % neto de comisiones, deslizamiento y funding esperado (`plan.rr` y `plan.net_pct` son los de la peor). Una posición por moneda (también a medias); topes diarios de entradas y riesgo. Largos al contado, cortos en perpetuo.
+- **Parcial y cerrojo (parámetros, 28-10-2026):** `tp1_r` + `tp1_frac` (salida parcial; `tp1_frac` 0 = sin parcial), `lock_r` + `floor_r` (cerrojo: activación y suelo en R), `trail_r` (seguimiento en R) o `trail_atr` (× ATR de 1 h al abrir, `context.atr_h_pct`; sin dato, un tercio del stop; no es el `trail_atr` de la ruptura), `max_hold_active_h` (tope desde la entrada con el cerrojo activado) y `target_r` null (sin objetivo final; solo con cerrojo). `apertura.impulse_params` los valida: sin cerrojo no hay seguimiento ni tope activado (con aviso); el cerrojo no se activa por debajo de su suelo; con las reglas del usuario, suelo y parcial suben a 2R. El ticket lleva entonces `tp1R`, `tp1Frac`, `lockR`, `lockFloorR`, `lockTrailR`, `winEndActive` y `holdActiveLabel` (2.6) y `tp2R` null.
+- **«Programadas» y «Pasando controles» (web, 28-10-2026):** cada ventana trae `hora_madrid` (de la apertura), `medida_hasta` (fin de la medida, ms), `entrada_ms` (hora de entrada con `t:N`; null con `pb`/`brk`), `estrategia` (el nombre de la estrategia activa, o «impulso» si no es ningún preset) y `hara` (qué hará: `apertura.window_plan_text`). Las que aún no han abierto van en `esperando_apertura`; mientras mide, `coins[c].levels.movimiento_pct` (cierre de la última vela / apertura) y `minutos_medidos`; esperando la entrada, `esperando_entrada`. Arriba, `salida` y `salida_corta` describen la salida en uso. En posición, con la parcial hecha o el cerrojo activado, el `why` de la moneda lo dice («la mitad ya salió (+1,23 USDC) · cerrojo activado: stop en X (asegura +2,00 R), como mucho hasta el dd-mm HH:MM Madrid»).
 - **Señal de noticias:** cada noticia triada pesa dirección × magnitud × credibilidad × decaimiento × `srcWeight`; la credibilidad sale multiplicada por el peso aprendido de su medio (`aprendizaje.source_weight`, 1 mientras no haya datos). Las de fuentes silenciadas o retiradas no cuentan (2.6).
 - **Estrategia de la evolución:** en modo impulso, si existe `DATA_DIR/estrategia_activa.json` (lo escribe la evolución al aplicar o revertir) y cumple las reglas del usuario (`evolucion.leer_estrategia_activa`; si no, se ignora con un error en el registro), sus parámetros mandan sobre el preset y sobre `BOT_IMPULSO_PARAMS` (`params_source: evolucion`, o `usuario` si el archivo lo escribió `scripts/activar_estrategia.py`: `fuente: "usuario"`, como `estrategia_cargada.fuente`). Con `pausada`, el motor mide pero no abre entradas nuevas (`paused: true` y aviso en `notice`); las abiertas siguen en el paper. Se relee cuando cambia, cada minuto como mucho, y solo si ninguna apertura se está armando o está en su sesión de entrada: las aperturas aún no armadas se rehacen con los parámetros nuevos.
 - `estrategia_cargada`: la versión que opera (`firma` = `evolucion.firma_motor` de sus parámetros, la misma que llevan los tickets en `tags.estrategia_firma`), desde cuándo (`ts`), si está pausada, de dónde salen los parámetros, el `registro` del historial que la aplicó y el `preset`. La evolución lo lee para saber si el motor ya opera la versión del archivo.
 - **Presets (`apertura.PRESETS`, 28-10-2026):** `params.preset` dice a qué preset corresponden los parámetros en uso (`apertura.preset_of`: todos los de `PRESET_KEYS` iguales; con cualquier cambio de la evolución o de `BOT_IMPULSO_PARAMS`, `null`), y `params.nombre` / `params.descripcion` su nombre visible (sin preset, el `nombre` de `estrategia_activa.json`, o `null`).
   - `impulso` («E2 · impulso», el de siempre, por defecto): el de arriba.
   - `seis` («6 diarias»: «Impulso de los primeros 15 min sin filtros, stop 1,5 % y objetivo 3R, como mucho 24 h; veto de noticias fiables en contra»): `measure_min` 15, `min_move_pct` 0 (cualquier movimiento ≠ 0; un impulso de 0 exacto no se opera), `entry` `t:15` (al medir), `rvol_min` null, `vol_filter` `todos`, `btc_filter` `ninguno`, `news_mode` `fiables`, las 5 ventanas y las 4 monedas, `sl_pct` 1,5, `target_r` 3 (+4,5 %), `max_hold_h` 24, `min_net_pct` 3, `avg_hold_h` 13, largos al contado y cortos en perpetuo, `risk_pct` null (0,5 %), `max_day_entries` 6, `max_day_risk_pct` 3, `lab` null. Pierde en el backtest de 3 años (`seis_diarias_resumen.json`, 3 de la API): se mide en paper y solo se activa con `scripts/activar_estrategia.py --preset seis` (`--preset impulso` vuelve a E2), que escribe `estrategia_activa.json` y lo apunta en `evolution_log` (2.11).
+  - `seis2` («6 diarias v2», 28-10-2026: «Impulso de los primeros 15 min sin filtros, stop 2 %; la mitad sale en 3R y el resto corre con un cerrojo (a +3R su stop sube a +2R y sigue al precio a 2R); 24 h sin activar y hasta 7 días activado; veto de noticias fiables en contra»): las entradas y los límites de `seis` con la salida «A»: `sl_pct` 2, `tp1_r` 3 y `tp1_frac` 0,5 (la mitad en +6 %, 5,76 % neto), `lock_r` 3, `floor_r` 2 (+4 %, 3,76 % neto), `trail_r` 2, `trail_atr` null, `target_r` null, `max_hold_h` 24, `max_hold_active_h` 168, `avg_hold_h` 16. También pierde en 3 años (`seis2_resumen.json`, docs/05 §21). `--preset seis2` la activa; `--preset seis` vuelve a «6 diarias».
 - **`news_mode: "fiables"`:** veta la entrada si en las `news_hours` (6) horas previas hay una noticia de un grupo FIABLE (2.15, `fiables.fiable_para` con su medio, feed, tipo y sentido) que se aplica a esa moneda (`fiables.monedas_de`: la nombra o es una macro confirmada por la cripto) y va en contra del impulso. Solo cuentan los grupos que pasan la puerta para operar (2.15): sin ellos no veta nada. La señal (`signal_from`) lleva entonces `fiables: [{story, dir, ts, grupo, nombre, acierto, titular}]` (el campo no sale si no hay ninguna) y las etiquetas, `noticia_fiable`.
 - **Topes diarios compartidos (28-10-2026):** `day.entries` y `day.risk_pct` cuentan TODAS las entradas del paper del día de Madrid (`apertura.paper_day_entries`: posiciones y cerradas abiertas hoy, pendientes y programadas; también las de la entrada por noticia y las de la fase 2) más las que el motor acaba de enviar. Antes solo contaban las del motor (`a-…`). La entrada por noticia (2.16) cuenta lo mismo.
-- Con `max_hold_h` < 168 (24 h en «6 diarias»), el ticket lleva `valid` «como mucho 24 h (hasta el …)» y `holdLabel` «tope de 24 h»; con 168, como siempre.
+- Con `max_hold_h` < 168 (24 h en «6 diarias»), el ticket lleva `valid` «como mucho 24 h (hasta el …)» y `holdLabel` «tope de 24 h»; con 168, como siempre. Con cerrojo y `max_hold_active_h` mayor, además `winEndActive` (entrada + `max_hold_active_h`), `holdActiveLabel` «7 días con el cerrojo» y `valid` «… sin activar el cerrojo; activado, hasta …».
 - **Por qué entra o no (28-10-2026, 2.17):** en modo impulso, cada punto de decisión de cada apertura×moneda va a `decisiones_apertura`. Al reiniciar, el `why` y el estado de una moneda salen de su última fila: una decisión final o una entrada ya enviada al paper la terminan con su motivo (nunca se repite una entrada), y con la medida hecha y la entrada aún por llegar se vuelve a medir con las noticias de entonces (`datos.noticias` de la fila). Una ventana cuya sesión acabó con el bot parado: con filas, cada moneda sale de la suya (no «pasó con el bot parado»); sin filas y sin ningún evento guardado durante la sesión, `why` «La sesión de esta apertura pasó con el bot parado: no se siguió» y una fila `perdida` por moneda; sin filas pero con eventos (la siguió una versión que no las guardaba), `why` «Esta apertura la siguió el bot antes del último reinicio sin guardar su decisión (versión anterior): no se repite» y ninguna fila. Al cerrar la sesión sin medir (sin velas) el `why` es «Fin de la sesión sin medir el impulso: no llegaron las velas de 1 min»; sin entrar, «Fin de la sesión sin entrar».
 
 ### 2.10 `aprendizaje` (medida de noticias y medios, pesos y post-mortems)
@@ -428,7 +448,9 @@ Estado (no evento) de `bot/aprendizaje.py`, como mucho cada 3 min y solo si camb
 Estado (no evento) de `bot/evolucion.py`, solo si cambia. Todo solo paper.
 ```json
 {"type": "evolucion", "ts": 0, "estado": "ok|arrancando|sin_datos|error", "nota": null, "modo": "proponer|automatico", "aviso": "Solo paper: …",
- "reglas": {"stop_min_pct": 1.5, "rr_min": 2.0, "objetivo_neto_min_pct": 3.0, "texto": "…"}, "criterios": {"texto": "…", "…": "…"},
+ "reglas": {"stop_min_pct": 1.5, "rr_min": 2.0, "objetivo_neto_min_pct": 3.0, "break_even": false, "stop_dinamico": false,
+            "parciales": "≥ 2R y ≥ 3 % neto", "cerrojo": "suelo ≥ 2R y ≥ 3 % neto; el seguimiento, solo por encima del suelo",
+            "texto": "…"}, "criterios": {"texto": "…", "…": "…"},
  "campeon": {"nombre": "…", "codigo": null, "lab_id": "…", "fuente": "preset|evolucion", "pausada": false, "desde": 0, "params": {},
              "efectivos": {"sl_pct": 3.0, "target_r": 3.0, "windows": [], "coins": [], "news_mode": "no_contra"},
              "firma": "…", "confirmado": true, "pendiente_reinicio": false,
@@ -654,7 +676,8 @@ cola hasta que ya no se puedan confirmar a tiempo):
 
 `bot/decisiones.py` (28-10-2026; solo paper). El motor de aperturas en modo impulso y la entrada por noticia fiable apuntan
 cada punto de decisión de cada apertura×moneda; los rechazos del riesgo y del paper y la apertura y el cierre de la
-operación los apunta su gancho del bus (`observe`: `riskko`, `humanko`, `blocked`, `filled`, `closed`). Cada fila sale al
+operación los apunta su gancho del bus (`observe`: `riskko`, `humanko`, `blocked`, `filled`, el `manage` de la salida
+parcial —el que lleva `partial` en el patch, 2.6— y `closed`). Cada fila sale al
 momento por el WebSocket y se guarda en la tabla (§4) en un hilo con su propia conexión: escribir no para el bucle
 (medido: 0,05 ms de media y menos de 1 ms como máximo por fila, también con la base bloqueada por otro escritor). Si
 guardar falla, queda en `bot.log` y en memoria (`GET /api/decisiones` la da igual) y se reintenta a 1 s, 2 s, 4 s… (como
@@ -687,13 +710,21 @@ queda en `bot.log` y no estará en la base. El motor sigue siempre.
     nombre, acierto, titular}], etiqueta, fiable}` (las que pesaron; al reiniciar, `apertura.senal_de_fila` las vuelve a
     dar como señal).
   - `entrada`: `plan {entrada, stop, objetivo, stop_pct, objetivo_R, bruto_pct, neto_pct, coste_pct, funding_pct,
-    instrumento, riesgo_pct, tope_h}`, `limites {entradas, max_entradas, riesgo_pct, max_riesgo_pct}` (los del día de
+    instrumento, riesgo_pct, tope_h}` (con parcial o cerrojo, «6 diarias v2», además `parcial`, `parcial_R`,
+    `parcial_frac`, `cerrojo_R`, `suelo`, `suelo_R`, `seguimiento_R`, `tope_activado_h` y `partes`; `objetivo` y
+    `objetivo_R` null sin objetivo final), `limites {entradas, max_entradas, riesgo_pct, max_riesgo_pct}` (los del día de
     Madrid al decidir), `rvol` (volumen relativo medido al entrar) y `rvol_min` (null los dos sin ese filtro, como en
     «6 diarias»); `tarde`: `vela_ms`, `decision_ms`; sin volumen relativo: `rvol`, `rvol_min`. Si los datos de la medida
     no se pueden preparar, la fila va con `datos` null y la decisión es la misma.
   - `riesgo`: `controles_fallidos [texto]`. `paper` (abierta): `entrada`, `stop`, `objetivo`, `nominal_usdc`,
-    `instrumento`, `deslizamiento_pb`, `riesgo_con_costes_usdc`.
+    `instrumento`, `deslizamiento_pb`, `riesgo_con_costes_usdc`; con parcial o cerrojo («6 diarias v2»), además el plan
+    de salida que abrió el paper: `parcial` (precio), `parcial_frac`, `suelo` (precio), `cerrojo_R`, `suelo_R`,
+    `seguimiento_R`, `hasta` (cierre por tiempo sin activar, ms) y `hasta_activado` (con el cerrojo activado, ms); solo
+    los que tienen valor. `descartado [texto]` si la regla del usuario quitó la parcial o el cerrojo del ticket.
   - `cierre`: `R` (la web lo lee), `resultado_usdc`, `resultado_pct`, `entrada`, `salida`, `costes_usdc`, `motivo_paper`.
+    En la `parcial`: `R` (lo que da esa parte, en R de la posición entera), `resultado_usdc`, `fraccion`, `precio`,
+    `objetivo_R`, `comision_usdc`, `queda_qty`, `cerrojo` (si el resto ya va con el cerrojo), `stop`, `suelo` y `hasta`
+    (el cierre por tiempo de lo que queda). La `cerrada` posterior trae el R de la operación entera (parcial incluida).
   - `perdida`: `arranque` (cuándo lo vio el bot), `fin_sesion`.
 
 Fases y decisiones (la última fila de cada ventana×moneda es su estado):
@@ -707,12 +738,15 @@ Fases y decisiones (la última fila de cada ventana×moneda es su estado):
 | `riesgo` | `rechazada` | `riskko` del paper (`exposicion`, `max_posiciones`, `perdida_dia`, `moneda_ocupada`, `reglas`, `otro`) |
 | `paper` | `abierta` | `filled`: abierta (con `trade_id`) |
 | `paper` | `rechazada` | `humanko` (`aprobacion`: rechazada por ti, caducada) o `blocked` (`exposicion`, `max_posiciones`, `perdida_dia`, `aprobacion`: aprobada tarde o cancelada, `otro`); también si el paper nunca la abrió sin decir por qué |
-| `cierre` | `cerrada` | `closed`: `objetivo`, `stop`, `tiempo` u `otro` (manual), con `datos.R` |
+| `cierre` | `parcial` | el `manage` de la salida parcial («6 diarias v2»: la mitad en 3R): `objetivo`, con `datos.R` de esa parte; la posición sigue abierta a medias (no es final: tras reiniciar, la moneda se da por hecha y no se repite la entrada) |
+| `cierre` | `cerrada` | `closed`: `objetivo`, `stop` (de pérdida, break-even o dinámico), `cerrojo` (stop del cerrojo o de su seguimiento: sale ganando ≥ el suelo), `tiempo` u `otro` (manual), con `datos.R` de toda la operación |
 | `perdida` | `perdida` | `bot_parado`: la sesión pasó con el bot parado (al arrancar, una vez por ventana×moneda; si no hay ningún evento guardado durante la sesión) o el bot se paró midiendo, antes de la hora de entrada o antes de apuntar esa moneda y volvió con la sesión acabada (en una apertura con filas de otras monedas: si son del motor, siempre; si solo hay filas del paper, como en el primer caso) |
 
 Catálogo cerrado de `motivo_codigo` (un código fuera del catálogo se guarda como `otro`): `entra`, `impulso_nulo`,
 `impulso_bajo`, `tarde`, `sin_velas`, `veto_noticia`, `tope_dia`, `riesgo_dia`, `perdida_dia`, `exposicion`,
-`moneda_ocupada`, `max_posiciones`, `reglas`, `aprobacion`, `bot_parado`, `objetivo`, `stop`, `tiempo`, `otro`.
+`moneda_ocupada`, `max_posiciones`, `reglas`, `aprobacion`, `bot_parado`, `objetivo`, `stop`, `cerrojo`, `tiempo`, `otro`.
+Decisiones: `entra`, `no_entra`, `rechazada`, `perdida`, `abierta`, `parcial`, `cerrada`, `esperando` (`parcial` y el
+código `cerrojo`, 28-10-2026).
 
 Entrada por noticia (2.16): `esperando` → `medida/esperando`; su `strategy` → `entrada/entra`; `caducada` y `vetada` →
 `entrada/no_entra` con su `motivo_codigo` (una `vetada` porque la rechazó el riesgo no repite la fila del riesgo);
@@ -732,7 +766,7 @@ no se cuela en la ventana `noticia-<story>` aunque la entrada por noticia haya a
 | `GET /api/predicciones` | Último `predictions` |
 | `GET /api/backtest` | Contenido de `BACKTEST_DIR/resultados.json` (3.1) |
 | `GET /api/backtest/aperturas` | `BACKTEST_DIR/aperturas.json`: el motor anterior (v2 «ruptura»), solo como referencia (404 sin archivo) |
-| `GET /api/backtest/impulso` | `{impulso, lab}` (`bot/resumen_backtest.py`): `impulso` = `BACKTEST_DIR/impulso_7d.json` (lo escribe `controles/compara_impulso.py`), la variante de 7 días que opera el motor, con `fuera` y `dentro` = `{n, mean_R, win_rate, salidas, horas_media, largos, cortos, desde, hasta, total_R, max_dd_R, curva_R [[ms, R acumulado]] (≤ 151 puntos)}` y `nota`; `lab` = resumen de `laboratorio.json` (`summary`, `promising`, `robust`, `avance` = cuenta honesta en avance trimestral con 0,5 % de riesgo); `seis` = `BACKTEST_DIR/seis_diarias_resumen.json` (la réplica del motor con el preset «6 diarias»), con la misma forma que `impulso` más `nombre` y `params`. Lo que falte va como `null`; 404 si faltan los tres |
+| `GET /api/backtest/impulso` | `{impulso, lab}` (`bot/resumen_backtest.py`): `impulso` = `BACKTEST_DIR/impulso_7d.json` (lo escribe `controles/compara_impulso.py`), la variante de 7 días que opera el motor, con `fuera` y `dentro` = `{n, mean_R, win_rate, salidas, horas_media, largos, cortos, desde, hasta, total_R, max_dd_R, curva_R [[ms, R acumulado]] (≤ 151 puntos)}` y, si la curva del archivo trae un punto por operación, `max_R` y `min_R` (la mejor y la peor), `ganadoras_n`, `ganadoras_bajo_2R` y `ganadoras_bajo_1R` (cuántas ganadoras ganan menos de 2R y de 1R: el cierre por tiempo sale con lo que haya), calculados con la curva completa (`resumen_backtest.per_trade`) y `nota`; `lab` = resumen de `laboratorio.json` (`summary`, `promising`, `robust`, `avance` = cuenta honesta en avance trimestral con 0,5 % de riesgo); `seis` = `BACKTEST_DIR/seis_diarias_resumen.json` (la réplica del motor con el preset «6 diarias»), con la misma forma que `impulso` más `nombre` y `params`; `seis2` = `BACKTEST_DIR/seis2_resumen.json` (la réplica del motor con el preset «6 diarias v2»: la mitad en 3R y el resto con el cerrojo; `salidas` con `stop`, `tiempo`, `cerrojo`, `seguimiento` y, si las hay, `tiempo (activada)` y `fin de datos`), con la misma forma que `seis`. Lo que falte va como `null`; 404 si faltan los cuatro. La demostración (sin bot) los lleva incrustados en `<script type="application/json" id="seisData">` y `id="seis2Data"` (`scripts/incrustar_backtest.py`); en vivo, la web los quita y los pide aquí |
 | `GET /api/noticias_fiables` | Último `noticias_fiables` (2.15); 404 si aún no hay ningún cálculo |
 | `GET /api/decisiones?desde=<ms>&ventana_id=&coin=&limite=` | `{rows, n, desde}`: filas de `decisiones_apertura` (2.17) con `ts ≥ desde` (por defecto, los 3 últimos días), de esa apertura y moneda si se piden, la más reciente primero (`ts` y luego `id`), como mucho 2.000 (`limite` de 1 a 2.000). `datos` como objeto. 400 con un parámetro no válido; 404 si el módulo no está en marcha (entonces no se guardan). No va en el estado inicial del WebSocket |
 | `GET /api/resultados` | Operaciones paper y agregados (3.2) |
@@ -858,7 +892,7 @@ Origen permitido (vale para todas las órdenes, también las de fuentes, pesos y
   - `evolution_log(id, ts, tipo, sujeto, antes, despues, motivo, evidencia, origen, revierte)`: `antes`, `despues` y `evidencia` en JSON. Solo se añade: dos disparadores impiden DELETE y UPDATE.
   - `evolution_proposals(id, ts, tipo, sujeto, clave, estado pendiente|aplicada|descartada|caducada|revertida, cuerpo, actualizada, resuelta_ts, resuelta_por, nota)`: no se borra.
   - `evolution_state(clave, valor)`: `modo`, `ultima_evaluacion`, `ultimo_cambio`, `bloqueos`, `observacion` y el cursor de la copia del aprendizaje.
-  - Archivo `DATA_DIR/estrategia_activa.json` (escritura atómica): `version, estrategia "impulso", fuente preset|evolucion|usuario, params, lab_id, lab_twin, twin_filtro, codigo, nombre, pausada, desde, actualizado, motivo, registro, propuesta, firma, solo_paper: true` y, si lo escribió `scripts/activar_estrategia.py` (fuente `usuario`, o `preset` al volver a E2), `preset` (`seis|impulso`) y `descripcion`. Lo lee el motor (2.9) y nunca vale si rompe las reglas del usuario. Un ajuste de la evolución sobre un preset quita `preset` y `descripcion` (ya no es el preset).
+  - Archivo `DATA_DIR/estrategia_activa.json` (escritura atómica): `version, estrategia "impulso", fuente preset|evolucion|usuario, params, lab_id, lab_twin, twin_filtro, codigo, nombre, pausada, desde, actualizado, motivo, registro, propuesta, firma, solo_paper: true` y, si lo escribió `scripts/activar_estrategia.py` (fuente `usuario`, o `preset` al volver a E2), `preset` (`seis2|seis|impulso`) y `descripcion`. Lo lee el motor (2.9) y nunca vale si rompe las reglas del usuario. Un ajuste de la evolución sobre un preset quita `preset` y `descripcion` (ya no es el preset).
 - Noticias fiables (2.15; `bot/fiables.py`, que `store.prune` no toca):
   - `noticias_fiables(id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER, json TEXT)`: un registro por cálculo nuevo, con el mensaje `noticias_fiables` entero en `json`. Solo se añade: dos disparadores impiden DELETE y UPDATE. Con los mismos datos de entrada (`firma_datos`) no se repite; al arrancar se carga el último.
 - Fuentes vivas (2.12; `bot/fuentes_vivas.py`):

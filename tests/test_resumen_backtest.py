@@ -79,7 +79,7 @@ async def test_ruta_con_seis(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "BACKTEST_DIR", tmp_path)
     store = Store(tmp_path / "bot.db")
     (tmp_path / rb.SEIS_FILE).write_text(json.dumps(_seis()), encoding="utf-8")
-    assert set(rb.load()) == {"impulso", "lab", "seis"}
+    assert set(rb.load()) == {"impulso", "lab", "seis", "seis2"}
     async with TestClient(TestServer(make_app(Bus(store), lambda: {}))) as client:
         r = await client.get("/api/backtest/impulso")   # solo con «6 diarias» ya responde
         assert r.status == 200
@@ -111,3 +111,72 @@ def test_incrustar_y_quitar_el_bloque_de_seis(tmp_path, monkeypatch):
     m = inc.BLOCK_SEIS.search(html)
     assert m and '"nombre":"6 diarias"' in m.group(0) and '"viejo"' not in html and 'id="btData"' in html
     assert "seisData" not in server.BT_BLOCK.sub("<!--BT-->", html)   # en vivo llega por /api/backtest/impulso
+
+
+def _seis2() -> dict:
+    d = _impulso(300)
+    d.update(sl_pct=2.0, nota="réplica del motor con SEIS2", nombre="6 diarias v2",
+             params={"measure_min": 15, "entry": "t:15", "sl_pct": 2.0, "target_r": None, "tp1_r": 3.0,
+                     "tp1_frac": 0.5, "lock_r": 3.0, "floor_r": 2.0, "trail_r": 2.0, "max_hold_h": 24,
+                     "max_hold_active_h": 168})
+    d["fuera"].update(mean_R=-0.075, salidas={"stop": 675, "tiempo": 670, "seguimiento": 62, "cerrojo": 57})
+    return d
+
+
+async def test_seis2_en_la_ruta_y_en_la_demostracion(tmp_path, monkeypatch):
+    import importlib.util
+    from pathlib import Path
+    from bot import server
+    monkeypatch.setattr(config, "BACKTEST_DIR", tmp_path)
+    store = Store(tmp_path / "bot.db")
+    (tmp_path / rb.SEIS2_FILE).write_text(json.dumps(_seis2()), encoding="utf-8")
+    res = rb.load()
+    assert set(res) == {"impulso", "lab", "seis", "seis2"} and res["seis"] is None
+    s2 = res["seis2"]
+    assert s2["nombre"] == "6 diarias v2" and s2["params"]["lock_r"] == 3.0 and s2["params"]["target_r"] is None
+    assert s2["fuera"]["salidas"]["cerrojo"] == 57 and len(s2["fuera"]["curva_R"]) == rb.CURVE_POINTS + 1
+    async with TestClient(TestServer(make_app(Bus(store), lambda: {}))) as client:
+        r = await client.get("/api/backtest/impulso")   # solo con «6 diarias v2» ya responde
+        assert r.status == 200
+        d = await r.json()
+        assert d["seis2"]["nombre"] == "6 diarias v2" and d["seis2"]["fuera"]["mean_R"] == -0.075
+    store.close()
+    root = Path(__file__).resolve().parents[1]
+    spec = importlib.util.spec_from_file_location("incrustar_backtest", root / "scripts" / "incrustar_backtest.py")
+    inc = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(inc)
+    page = tmp_path / "radar.html"
+    page.write_text('<html><!--BT--><script type="application/json" id="seisData">{"viejo":1}</script></html>',
+                    encoding="utf-8")
+    bt = tmp_path / "bt"
+    bt.mkdir()
+    (bt / "resultados.json").write_text(json.dumps({"strategies": []}), encoding="utf-8")
+    (bt / rb.SEIS_FILE).write_text(json.dumps(_seis()), encoding="utf-8")
+    (bt / rb.SEIS2_FILE).write_text(json.dumps(_seis2()), encoding="utf-8")
+    monkeypatch.setattr(inc, "PAGE", page)
+    monkeypatch.setattr(config, "BACKTEST_DIR", bt)
+    inc.main()
+    html = page.read_text(encoding="utf-8")
+    m2, m1 = inc.BLOCK_SEIS2.search(html), inc.BLOCK_SEIS.search(html)
+    assert m2 and '"nombre":"6 diarias v2"' in m2.group(0) and m1.end() < m2.start()   # justo detrás de seisData
+    inc.main()                                                                         # otra vez: se reemplaza
+    assert page.read_text(encoding="utf-8").count('id="seis2Data"') == 1
+    live = server.BT_BLOCK.sub("<!--BT-->", page.read_text(encoding="utf-8"))
+    assert "seis2Data" not in live and "seisData" not in live   # en vivo llega por /api/backtest/impulso
+
+
+def test_cuentas_por_operacion_con_la_curva_completa():
+    """Con un punto de la curva por operación: la mejor y la peor, y cuántas ganadoras ganan menos de 2R y de 1R (el
+    cierre por tiempo sale con lo que haya). Se calculan antes de reducir la curva; sin un punto por operación, nada."""
+    rs = [-1.1, 0.4, 2.9, -1.1, 1.5, 5.7, 0.05, -0.3] * 30           # 240 operaciones
+    acc, curva = 0.0, []
+    for i, r in enumerate(rs):
+        acc = round(acc + r, 3)
+        curva.append([1_800_000_000_000 + i * H, acc])
+    d = {"fuera": {"n": len(rs), "mean_R": 0.0, "curva_R": curva}, "dentro": {"n": 7, "curva_R": curva[:5]}}
+    s = rb.seis_summary(d, points=50)
+    f = s["fuera"]
+    assert (f["max_R"], f["min_R"]) == (5.7, -1.1) and f["ganadoras_n"] == 150
+    assert f["ganadoras_bajo_2R"] == 90 and f["ganadoras_bajo_1R"] == 60 and len(f["curva_R"]) == 51
+    assert "max_R" not in s["dentro"] and "ganadoras_n" not in s["dentro"]   # 5 puntos para 7 operaciones: no se sabe
+    assert rb.per_trade([], 0) == {} and rb.per_trade(curva, None) == {}

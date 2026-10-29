@@ -337,7 +337,8 @@ def test_cierre_manual_con_deslizamiento_en_contra(env):
 def test_reglas_de_salida_compatibles_hacia_atras():
     old = paper.exit_rules({"trailPct": 1.0, "tp1R": 1.5, "tp2R": None})
     assert old == {"trail": 1.0, "be_r": 1.0, "be_pct": 0.0, "trail_start_r": None, "tp1R": 1.5, "tp1_frac": 0.0,
-                   "tp2R": None}                                     # sin campos nuevos: como siempre
+                   "tp2R": None, "lock_r": None, "floor_r": None,
+                   "lock_trail_r": None, "dropped": []}              # sin campos nuevos: como siempre (sin cerrojo)
     assert paper.cost_rt_pct() == pytest.approx(0.24) and paper.be_offset_pct() == pytest.approx(0.26)
     new = paper.exit_rules({"beR": None, "trailStartR": 1.5, "tp1R": 1.0, "tp1Frac": 0.5, "tp2R": 2})
     assert new["be_r"] is None and new["be_pct"] == pytest.approx(0.26) and new["trail_start_r"] == 1.5
@@ -1261,3 +1262,282 @@ def test_reglas_del_usuario_aceptan_el_ticket_del_modo_impulso(env, monkeypatch)
     p = env.broker.positions["a-europa-2026-10-23-btc-1"]
     assert p["hold_until"] == T0 + 168 * 60 * MIN and p["hold_label"] == "7 días de seguridad" and p["be_r"] is None
     assert p["tp2"] == pytest.approx(91.0) and p["sl"] == pytest.approx(103.0) and p["trail_pct"] is None
+
+
+# ---------------------------------------------------------------- «6 diarias v2»: la mitad en 3R y el resto con el cerrojo
+
+H = 60 * MIN
+
+
+def ticket_a(side="long", coin="BTC", **kw) -> dict:
+    """El ticket de la salida «A» (apertura.SEIS2): stop 2 %, la mitad en 3R y el resto con el cerrojo (a +3R el stop
+    sube a +2R y lo sigue a 2R); 24 h sin activar y 7 días activado."""
+    return ticket(coin=coin, side=side, stop=2.0, tp2=None, tp1R=3.0, tp1Frac=0.5, beR=None, trailStartR=None,
+                  lockR=3.0, lockFloorR=2.0, lockTrailR=2.0, winEnd=T0 + 24 * H, holdLabel="tope de 24 h",
+                  winEndActive=T0 + 168 * H, holdActiveLabel="7 días con el cerrojo", **kw)
+
+
+def test_reglas_de_salida_con_cerrojo_solo_lo_que_cumple(monkeypatch):
+    monkeypatch.setattr(config, "USER_RULES", True)
+    a = paper.exit_rules(ticket_a(trail=0.5))
+    assert (a["tp1R"], a["tp1_frac"], a["tp2R"]) == (3.0, 0.5, None)
+    assert (a["lock_r"], a["floor_r"], a["lock_trail_r"]) == (3.0, 2.0, 2.0)
+    assert a["be_r"] is None and a["trail"] is None and a["trail_start_r"] is None   # nada antes del cerrojo
+    assert paper.rule_win_ok(2.0, 2.0) and paper.rule_win_ok(3.0, 1.5)              # 3,76 % y 4,26 % netos
+    assert not paper.rule_win_ok(1.9, 3.0) and not paper.rule_win_ok(2.0, 1.5)       # < 2R · 2,76 % neto
+    bajo = paper.exit_rules({**ticket_a(), "tp1R": 1.5, "lockFloorR": 1.5})         # parcial y suelo < 2R: fuera
+    assert bajo["tp1_frac"] == 0.0 and bajo["lock_r"] is None and bajo["floor_r"] is None
+    assert bajo["lock_trail_r"] is None
+    poco = paper.exit_rules({**ticket_a(), "stopPct": 1.5})                         # suelo 2R con stop 1,5 %: 2,76 %
+    assert poco["lock_r"] is None and poco["tp1_frac"] == 0.5                       # la parcial (4,26 %) sí
+    assert paper.exit_rules({**ticket_a(), "lockR": 1.0})["lock_r"] == 2.0          # nunca por debajo del suelo
+    assert paper.exit_rules({**ticket_a(), "lockFloorR": None})["lock_r"] is None   # sin suelo no hay cerrojo
+    monkeypatch.setattr(config, "USER_RULES", False)                                 # sin las reglas: tal cual
+    assert paper.exit_rules({**ticket_a(), "lockFloorR": 1.0})["floor_r"] == 1.0
+
+
+@pytest.mark.parametrize("d", [1, -1])
+def test_lock_update_sin_break_even_y_el_seguimiento_nunca_baja(d):
+    e, sp = 100.0, 2.0                                   # 1 R = 2
+    px = lambda r: e + d * 2 * r
+    stop = px(-1)
+    for best in (px(0.5), px(1), px(2.99)):             # antes de +3R el stop no se mueve (ni a break-even)
+        stop, on, kind = paper.lock_update(d, e, sp, best, stop, False, 3.0, 2.0, 2.0)
+        assert stop == px(-1) and not on and kind is None
+    stop, on, kind = paper.lock_update(d, e, sp, px(3), stop, False, 3.0, 2.0, 2.0)
+    assert on and kind == "cerrojo" and stop == pytest.approx(px(2))   # suelo +2R (el seguimiento, a +1R, no manda)
+    stop, on, kind = paper.lock_update(d, e, sp, px(5), stop, on, 3.0, 2.0, 2.0)
+    assert kind == "seguimiento" and stop == pytest.approx(px(3))       # 2R por detrás de +5R
+    same, on, kind = paper.lock_update(d, e, sp, px(4.5), stop, on, 3.0, 2.0, 2.0)
+    assert same == stop and kind is None                                # nunca baja
+    fijo, on2, kind = paper.lock_update(d, e, sp, px(9), px(-1), False, 3.0, 2.0, None)
+    assert on2 and kind == "cerrojo" and fijo == pytest.approx(px(2))   # sin seguimiento se queda en el suelo
+    assert paper.lock_update(d, e, sp, px(9), px(-1), False, None, None, 2.0) == (px(-1), False, None)
+
+
+def test_salida_a_largo_parcial_cerrojo_seguimiento_y_reinicio(env, monkeypatch):
+    monkeypatch.setattr(config, "USER_RULES", True)
+    story = "a-europa-2026-10-23-btc-1"
+    assert env.broker.submit(ticket_a(), story, strategy="impulso-largo-sin-noticia")
+    q = _qty(env, story)
+    p = env.broker.positions[story]
+    assert p["sl"] == pytest.approx(98.0) and p["tp2"] is None and p["tp1"] == pytest.approx(106.0)
+    assert p["floor"] == pytest.approx(104.0) and p["hold_until"] == T0 + 24 * H and p["hold_active"] == T0 + 168 * H
+    f = env.evs("filled", story)[0]
+    assert "cerrojo: a +3,0 R el stop sube a 104,00 (+2,0 R) y sigue al precio a 2,0 R" in f["text"]
+    assert f["patch"]["exec"]["lockR"] == 3.0 and f["patch"]["exec"]["floorR"] == 2.0
+    env.at(60, BTC=103.0)                                # +1,5 R
+    env.at(120, BTC=105.9)                               # +2,95 R: sin break-even ni dinámico, el stop no se mueve
+    assert env.broker.positions[story]["sl"] == pytest.approx(98.0) and not env.evs("manage", story)
+    env.at(180, BTC=106.0)                               # +3R: la mitad sale y el resto sube su stop a +2R
+    p = env.broker.positions[story]
+    assert p["tp1_done"] and p["qty"] == pytest.approx(q / 2) and p["locked"] and p["sl"] == pytest.approx(104.0)
+    assert p["sl_kind"] == "cerrojo" and p["hold_until"] == T0 + 168 * H and p["hold_label"] == "7 días con el cerrojo"
+    lock, part = env.evs("manage", story)
+    assert lock["title"] == "BTC: cerrojo a +2,0 R" and lock["patch"]["lock"]["floor"] == pytest.approx(104.0)
+    assert "asegura +2,00 R" in lock["text"] and "7 días con el cerrojo" in lock["text"]
+    assert part["patch"]["partial"]["locked"] and part["patch"]["partial"]["R"] == pytest.approx(
+        (q / 2 * 6 - q / 2 * 106 * FEE) / (q * 2), abs=1e-4)
+    assert "partial" not in lock["patch"] and "lock" not in part["patch"]
+    # Una posición por moneda también a medias: otra entrada en BTC se veta
+    assert not env.broker.submit(ticket_a(), "a-china-2026-10-23-btc-1")
+    assert _why(env, "a-china-2026-10-23-btc-1").startswith("Ya hay una operación en BTC")
+    pf = env.broker.portfolio()
+    [pp] = pf["positions"]
+    assert pp["locked"] and pp["tp1_done"] and pp["floor"] == pytest.approx(104.0) and pp["lock_r"] == 3.0
+    assert pp["hold_until"] == T0 + 168 * H and pp["qty0"] == pytest.approx(q) and pp["sl_kind"] == "cerrojo"
+    env.at(300, BTC=110.0)                               # +5R: el seguimiento sube el stop a +3R
+    assert env.broker.positions[story]["sl"] == pytest.approx(106.0)
+    assert env.evs("manage", story)[-1]["title"] == "BTC: stop de seguimiento a 106,00"
+    env.broker = env.new()                               # reinicio con la posición a medias y el cerrojo activado
+    p = env.broker.positions[story]
+    assert p["locked"] and p["tp1_done"] and p["sl"] == pytest.approx(106.0) and p["hold_until"] == T0 + 168 * H
+    env.at(25 * 60, BTC=108.0)                           # pasadas las 24 h sigue (activada: hasta 7 días)
+    assert story in env.broker.positions and env.broker.positions[story]["sl"] == pytest.approx(106.0)   # no baja
+    env.at(26 * 60, BTC=105.9)                           # toca el seguimiento
+    r, t = env.result(story), env.broker.closed[-1]
+    exp = q / 2 * 6 + q / 2 * 5.9 - fees(q, 100, (106 + 105.9) / 2)
+    assert r["why"] == "Stop de seguimiento tras salida parcial" and r["pnl"] == pytest.approx(exp, abs=1e-4)
+    assert r["R"] == pytest.approx(exp / (q * 2), abs=1e-4) and r["R"] > 2.8
+    assert t["locked"] and t["lock_r"] == 3.0 and len(t["partials"]) == 1 and t["exit_last"] == pytest.approx(105.9)
+
+
+def test_salida_a_sin_activar_cierra_a_las_24_h_y_con_el_stop_inicial(env, monkeypatch):
+    monkeypatch.setattr(config, "USER_RULES", True)
+    assert env.broker.submit(ticket_a(), "n1") and env.broker.submit(ticket_a(coin="ETH"), "n2")
+    env.at(600, BTC=104.0, ETH=99.0)                     # +2R sin llegar a 3R: nada se mueve
+    assert env.broker.positions["n1"]["sl"] == pytest.approx(98.0) and not env.broker.positions["n1"]["locked"]
+    env.at(700, ETH=98.0)                                # el ETH toca el stop inicial: −1R entero
+    assert env.result("n2")["why"] == "Stop de pérdida" and env.result("n2")["R"] == pytest.approx(-1.1, abs=0.01)
+    env.at(24 * 60, BTC=104.0)                           # a las 24 h, sin activar: por tiempo
+    r = env.result("n1")
+    assert r["why"] == "Cierre por tiempo (tope de 24 h)" and r["R"] == pytest.approx(1.9, abs=0.01)
+
+
+def test_salida_a_corto_sale_en_el_suelo_del_cerrojo(env, monkeypatch):
+    monkeypatch.setattr(config, "USER_RULES", True)
+    assert env.broker.submit(ticket_a(side="short", instrument="perp"), "n1")
+    q = _qty(env)
+    env.at(30, BTC=94.0)                                 # −6 %: +3R en el corto
+    p = env.broker.positions["n1"]
+    assert p["tp1_done"] and p["locked"] and p["sl"] == pytest.approx(96.0) and p["sl_kind"] == "cerrojo"
+    env.at(40, BTC=95.0)                                 # vuelve: el stop sigue en +2R
+    assert env.broker.positions["n1"]["sl"] == pytest.approx(96.0)
+    env.at(50, BTC=96.5)                                 # salta por encima del suelo: sale a mercado
+    r = env.result("n1")
+    exp = q / 2 * 6 + q / 2 * 3.5 - fees(q, 100, (94 + 96.5) / 2)
+    assert r["why"] == "Stop del cerrojo tras salida parcial" and r["pnl"] == pytest.approx(exp, abs=1e-4)
+    assert r["R"] > 2.2   # cada mitad gana ≥ 2R (salvo el hueco hasta 96,5)
+
+
+def test_reglas_sin_objetivo_hace_falta_un_cerrojo_que_cumpla(env, monkeypatch):
+    monkeypatch.setattr(config, "USER_RULES", True)
+    assert not env.broker.submit({**ticket_a(), "lockFloorR": 1.5}, "n1")
+    assert _why(env, "n1").startswith("Regla del usuario: sin objetivo fijo y el cerrojo no vale (su suelo")
+    assert env.evs("riskko", "n1")[0]["patch"]["risk"]["motivo_codigo"] == "reglas"
+    assert not env.broker.submit({**ticket_a(), "stopPct": 1.5}, "n2")   # suelo de 2R con stop 1,5 %: 2,76 % neto
+    assert not env.broker.submit({**ticket_a(), "lockR": None}, "n3")
+    assert _why(env, "n3") == "Regla del usuario: sin objetivo fijo ni cerrojo (hace falta al menos 2R)"
+    assert env.broker.submit({**ticket_a(), "tp1R": 1.5}, "n4")          # parcial < 2R: sin parcial, con cerrojo
+    assert env.broker.positions["n4"]["tp1_frac"] == 0.0 and env.broker.positions["n4"]["lock_r"] == 3.0
+
+
+@pytest.mark.parametrize("side", ["long", "short"])
+@pytest.mark.parametrize("case", ["cerrojo", "seguimiento"])
+def test_salida_a_igual_en_paper_y_en_simulate_plan(env, monkeypatch, side, case):
+    """La mitad en 3R y el resto con el cerrojo: mismos números en el paper y en apertura.simulate_plan."""
+    from bot import apertura
+    monkeypatch.setattr(config, "USER_RULES", True)
+    d = 1 if side == "long" else -1
+    px = lambda x: 100 + d * x
+    plan = {"stopPct": 2, "trailPct": None, "tp1R": 3.0, "tp1Frac": 0.5, "beR": None, "tp2R": None, "lockR": 3.0,
+            "lockFloorR": 2.0, "lockTrailR": 2.0}
+    if case == "cerrojo":   # (apertura, favorable, contraria): a +3R y vuelta al suelo de +2R
+        path = [(px(0), px(1), px(-0.5)), (px(1), px(6), px(4.5)), (px(5), px(5.5), px(4.5)),
+                (px(3.8), px(3.9), px(3.7))]
+        ex, why = px(3.8), "Stop del cerrojo tras salida parcial"
+    else:                   # a +5R (el stop sube a +3R) y vuelta: sale en el seguimiento
+        path = [(px(0), px(1), px(-0.5)), (px(1), px(6), px(4.5)), (px(5), px(10), px(8)),
+                (px(6.5), px(6.6), px(6.4)), (px(5.8), px(5.9), px(5.7))]
+        ex, why = px(5.8), "Stop de seguimiento tras salida parcial"
+    tp1 = px(6)
+    exp = (0.5 * d * (tp1 - 100) + 0.5 * d * (ex - 100)) / 100 - FEE * (1 + 0.5 * tp1 / 100 + 0.5 * ex / 100)
+    env.broker.submit(ticket(side=side, stop=2, tp2=None, **{k: plan[k] for k in (
+        "tp1R", "tp1Frac", "beR", "lockR", "lockFloorR", "lockTrailR")}), "n1")
+    for k, (o, fav, adv) in enumerate(path[:-1]):        # en el paper, cada vela: favorable y luego contraria
+        env.at(k + 0.5, BTC=fav)
+        env.at(k + 0.9, BTC=adv)
+    env.at(len(path), BTC=ex)                            # la última abre ya por debajo del stop: sale ahí
+    r = env.result("n1")
+    assert r["why"] == why and r["pnl_pct"] == pytest.approx(exp * 100, abs=1e-4)
+    bars = _bars([(o, max(fav, adv), min(fav, adv), adv) for o, fav, adv in path[:-1]]
+                 + [(path[-1][0], max(*path[-1][1:]), min(*path[-1][1:]), path[-1][0])])
+    sim = apertura.simulate_plan(bars, 0, d, plan, T0 + 60 * MIN, FEE, 0.0, end_active_ms=T0 + 600 * MIN)
+    assert sim["partial"] and sim["locked"] and sim["first"] == "stop" and sim["why"] == case
+    assert sim["ret"] == pytest.approx(exp * 100, abs=1e-9) and sim["R"] == pytest.approx(r["R"], abs=1e-4)
+    assert sim["partial_t"] == T0 + 2 * MIN   # la parcial, al cierre de la vela que llega a +3R
+
+
+# ---------------------------------------------------------------- remate de «6 diarias v2»: lo que encontró la revisión
+
+
+def test_reglas_el_objetivo_final_deja_3_por_ciento_neto(env, monkeypatch):
+    """«Objetivo ≥ 3 % neto de costes» también en el objetivo final: 2R con stop 1,5 % son 3 % brutos y 2,76 % netos."""
+    monkeypatch.setattr(config, "USER_RULES", True)
+    assert not env.broker.submit(ticket(stop=1.5, tp2=2.0), "n1")
+    why = _why(env, "n1")
+    assert why.startswith("Regla del usuario: el objetivo de 2,00 R con stop de 1,50 % deja 2,76 % neto") and "3 %" in why
+    assert env.evs("riskko", "n1")[0]["patch"]["risk"]["motivo_codigo"] == "reglas"
+    assert env.broker.submit(ticket(stop=1.5, tp2=2.2, coin="ETH"), "n2")   # 3,30 % − 0,24 % = 3,06 % neto
+    assert env.broker.submit(ticket(stop=1.5, tp2=3.0, coin="SOL"), "n3")   # «6 diarias»: 4,26 % neto
+
+
+def test_make_ticket_sube_el_objetivo_lo_justo_para_el_3_neto(env, monkeypatch):
+    from bot.claude_agents import make_ticket
+    monkeypatch.setattr(config, "USER_RULES", True)
+    mk = lambda stop, tp2: make_ticket("SOL", "long", "Seguir la tendencia", 0.5, stop, None, 1.0, tp2, "", "", "now",
+                                       "Apertura Londres", datetime.now(timezone.utc), None, 0.5)
+    t = mk(1.5, 2.0)
+    assert t["stopPct"] == 1.5 and t["tp2R"] == 2.16 and t["tp1R"] == 2.16 and paper.rule_win_ok(t["tp2R"], t["stopPct"])
+    assert mk(2.0, 2.0)["tp2R"] == 2.0 and mk(1.5, 3.0)["tp2R"] == 3.0   # lo que ya cumple no se toca
+    assert env.broker.submit({**t, "coin": "BTC"}, "n1")                  # y el paper lo acepta
+
+
+@pytest.mark.parametrize("bad", [float("inf"), float("nan"), "Infinity"])
+def test_valores_no_finitos_no_valen_en_el_ticket(env, monkeypatch, bad):
+    """Un objetivo, parcial o cerrojo «infinito» no se cobraría nunca: cuenta como ausente."""
+    monkeypatch.setattr(config, "USER_RULES", True)
+    a = paper.exit_rules({**ticket_a(), "lockR": bad})
+    assert a["lock_r"] is None and a["floor_r"] is None and a["lock_trail_r"] is None
+    b = paper.exit_rules({**ticket_a(), "tp1R": bad, "lockFloorR": bad, "tp2R": bad})
+    assert b["tp1R"] is None and b["tp1_frac"] == 0.0 and b["lock_r"] is None and b["tp2R"] is None
+    assert not env.broker.submit({**ticket_a(), "lockR": bad}, "n1")      # sin objetivo ni cerrojo de verdad
+    assert _why(env, "n1") == "Regla del usuario: sin objetivo fijo ni cerrojo (hace falta al menos 2R)"
+    assert not env.broker.submit(ticket(stop=2.0, tp2=bad, coin="ETH"), "n2")
+    assert not env.broker.submit({**ticket_a(coin="SOL"), "stopPct": bad}, "n3")
+    assert _why(env, "n3").startswith("Stop no válido")
+    assert not env.broker.positions
+
+
+def test_parcial_o_cerrojo_descartados_por_la_regla_se_dicen(env, monkeypatch):
+    """Lo que el ticket pide y la regla no deja se dice al abrir (texto y exec.descartado): no se calla."""
+    monkeypatch.setattr(config, "USER_RULES", True)
+    assert env.broker.submit({**ticket_a(), "tp1R": 1.5}, "n1")             # parcial < 2R: sin parcial, con cerrojo
+    f = env.evs("filled", "n1")[0]
+    assert "salida parcial en 1,5 R descartada por tu regla (≥ 2R y ≥ 3 % neto)" in f["text"]
+    assert f["patch"]["exec"]["descartado"] == ["salida parcial en 1,5 R descartada por tu regla (≥ 2R y ≥ 3 % neto)"]
+    assert env.broker.positions["n1"]["tp1_frac"] == 0.0 and env.broker.positions["n1"]["lock_r"] == 3.0
+    assert env.broker.submit({**ticket_a(coin="ETH"), "tp2R": 3.0, "lockFloorR": 1.5}, "n2")   # objetivo fijo; cerrojo fuera
+    g = env.evs("filled", "n2")[0]
+    assert "cerrojo con suelo en 1,5 R descartado por tu regla" in g["text"] and env.broker.positions["n2"]["lock_r"] is None
+    assert env.broker.submit(ticket_a(coin="SOL"), "n3")                    # la «A» de verdad: nada descartado
+    h = env.evs("filled", "n3")[0]
+    assert "descartad" not in h["text"] and "descartado" not in h["patch"]["exec"]
+
+
+def test_el_seguimiento_se_guarda_al_momento_y_un_reinicio_no_lo_baja(env, monkeypatch):
+    """Activado el cerrojo, cada subida del stop se guarda ya (aunque sea de menos de 0,25 R y no hayan pasado 30 s)."""
+    monkeypatch.setattr(config, "USER_RULES", True)
+    story = "a-europa-2026-10-23-btc-1"
+    assert env.broker.submit(ticket_a(), story)
+    env.at(180, BTC=106.0)                               # +3R: la mitad sale y el resto con el cerrojo en +2R
+    env.at(300, BTC=110.3)                               # +5,15R: el seguimiento sube el stop a 106,30 (se publica)
+    assert env.broker.positions[story]["sl"] == pytest.approx(106.3)
+    n = len(env.evs("manage", story))
+    env.at(300.2, BTC=110.6)                             # 12 s después, +0,15 R más: no se publica, pero se guarda
+    assert env.broker.positions[story]["sl"] == pytest.approx(106.6) and len(env.evs("manage", story)) == n
+    env.broker = env.new()                               # reinicio
+    p = env.broker.positions[story]
+    assert p["sl"] == pytest.approx(106.6) and p["high_water"] == pytest.approx(110.6) and p["sl_kind"] == "seguimiento"
+    env.at(300.3, BTC=106.5)                             # por debajo del stop guardado: sale
+    assert env.result(story)["why"] == "Stop de seguimiento tras salida parcial"
+
+
+def test_al_parar_el_bot_se_guardan_las_posiciones(env, monkeypatch):
+    """run() cancelado (el bot se para): las posiciones abiertas se guardan con lo último, sin esperar a los 30 s."""
+    assert env.broker.submit(ticket(stop=2.0, tp2=3.0), "n1")
+    env.broker.positions["n1"]["high_water"] = 101.7          # lo que haya cambiado desde el último guardado
+    seen = []
+    real = env.broker._save_trade
+    monkeypatch.setattr(env.broker, "_save_trade", lambda body, closed=None: (seen.append(body["story"]), real(body, closed)))
+    monkeypatch.setattr(paper, "STEP_EVERY_S", 0.01)
+
+    async def go():
+        task = asyncio.create_task(env.broker.run())
+        await asyncio.sleep(0.05)
+        seen.clear()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(go())
+    assert seen == ["n1"]
+    assert env.new().positions["n1"]["high_water"] == pytest.approx(101.7)
+
+
+def test_stop_de_nombre_desconocido_cierra_igual(env):
+    """Un stop con un nombre que esta versión no conoce (p. ej. de una versión más nueva) no deja la posición sin cerrar."""
+    assert env.broker.submit(ticket(stop=2.0, tp2=3.0), "n1")
+    env.broker.positions["n1"]["sl_kind"] = "otro_futuro"
+    env.at(5, BTC=97.0)
+    assert env.result("n1")["why"] == "Stop"

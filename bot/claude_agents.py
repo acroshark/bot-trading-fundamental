@@ -12,6 +12,7 @@ import asyncio
 import inspect
 import json
 import logging
+import math
 import time
 import unicodedata
 from collections import OrderedDict, deque
@@ -20,7 +21,7 @@ from zoneinfo import ZoneInfo
 
 import aiohttp
 
-from . import aprendizaje, config, history, reflejo
+from . import aprendizaje, config, history, paper, reflejo
 from .models import now_ms
 from .local_ai import upcoming_windows
 from .regions import MARKETS, REGIONS
@@ -469,9 +470,12 @@ def make_ticket(coin: str, side: str, mode: str, risk: float, stop: float, trail
     tp1R = round(_clamp(tp1R or 1.5, 0.5, 10.0), 2)
     tp2R = round(max(tp1R, _clamp(tp2R or 3.0, 1.0, 20.0)), 2)
     rules = {}
-    if config.USER_RULES:   # reglas del usuario: stop ≥ 1,5 %, objetivo ≥ 2R y horquilla pura (sin break-even ni dinámico)
+    if config.USER_RULES:   # reglas del usuario: stop ≥ 1,5 %, objetivo ≥ 2R y ≥ 3 % neto y horquilla pura
         stop = round(max(stop, config.RULE_MIN_STOP_PCT), 2)
         tp2R = round(max(tp2R if tp2R >= config.RULE_MIN_RR else config.RULE_DEFAULT_RR, config.RULE_MIN_RR), 2)
+        need = (config.RULE_MIN_NET_PCT + paper.cost_rt_pct()) / stop   # R que deja ≥ 3 % neto (el paper lo exige)
+        if tp2R < need - 1e-9:
+            tp2R = math.ceil(need * 100 - 1e-6) / 100   # hacia arriba: nunca por debajo
         tp1R, trail = tp2R, None
         rules = {"beR": None, "tp1Frac": 0.0}
     return {"coin": coin, "side": side, "mode": mode,
