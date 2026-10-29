@@ -2,7 +2,9 @@
 import asyncio
 import json
 import logging
+import math
 import re
+import threading
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable
@@ -31,6 +33,10 @@ MEDIOS_ORDEN = ("peso", "acierto", "casos", "ruido", "ops", "R")
 APR_POR = ("nivel", "region", "idioma", "tipo", "ventana", "fase", "rol", "moneda")
 HORIZONTES = (15, 60, 240, 1440)
 SEMANA = re.compile(r"\d{4}-W\d{2}")
+# GET /api/velas: tamaños de vela admitidos y tope de velas por respuesta (las más recientes)
+VELAS_TF = {"1m": 60_000, "5m": 300_000, "15m": 900_000}
+VELAS_MAX = 2000
+MIN_MS = 60_000
 
 
 @dataclass
@@ -51,6 +57,10 @@ class Services:
     fiables: Any = None      # Fiables (grupos de noticias que aciertan ≥ 60 % de forma constante)
     entrada_noticias: Any = None   # EntradaNoticias (entrada por noticia fiable confirmada por el precio)
     decisiones: Any = None   # Decisiones (por qué entra o no en cada apertura: tabla decisiones_apertura)
+    # Velas de 1 min que el bot ya tiene: velas(moneda, desde, hasta) -> filas [t, o, h, l, c] que abren en [desde, hasta),
+    # ordenadas y sin repetidas (velas_de: la vigilancia en memoria si llega hasta «desde»; si no, aprendizaje.CacheBars.get,
+    # la caché de HIST_DIR/1m más la vigilancia en memoria).
+    velas: Callable[[str, int, int], Any] | None = None
 
 
 def _hora(ms: int) -> str:
@@ -232,6 +242,62 @@ def state_summary(bus: Bus) -> dict:
             "ia_local": {"encendida": not local.get("off", True), "estado": local.get("note") or local.get("now")},
             "cartera_paper": {"capital": cartera.get("equity"), "pnl_dia": cartera.get("day_pnl"),
                               "posiciones": len(cartera.get("positions", []))} if cartera else None}
+
+
+def agrupar_velas(rows, step: int) -> tuple[list[list], int | None]:
+    """Velas de 1 min [t, o, h, l, c] (ordenadas) agrupadas en velas de step ms: apertura de la primera, máximo, mínimo y
+    cierre de la última de cada tramo (la última puede ir a medias). Se saltan las filas con precios no válidos (un JSON
+    con NaN no lo lee el navegador). Devuelve (velas, apertura de la última vela de 1 min válida o None)."""
+    out: list[list] = []
+    last = None
+    for r in rows:
+        try:
+            t, o, h, lo, c = int(r[0]), float(r[1]), float(r[2]), float(r[3]), float(r[4])
+        except (TypeError, ValueError, IndexError):
+            continue
+        if not all(math.isfinite(x) and x > 0 for x in (o, h, lo, c)):
+            continue
+        h, lo = max(h, o, c), min(lo, o, c)
+        b = t // step * step
+        if out and out[-1][0] == b:
+            v = out[-1]
+            v[2], v[3], v[4] = max(v[2], h), min(v[3], lo), c
+        else:
+            out.append([b, o, h, lo, c])
+        last = t
+    return out, last
+
+
+def velas_de(live, cache):
+    """Fuente de velas de GET /api/velas: velas(moneda, desde, hasta) -> filas [t, o, h, l, c] de 1 min que abren en
+    [desde, hasta). Si las de la vigilancia en memoria (live(moneda): array ordenado [t, o, h, l, c, …]) empiezan en
+    «desde» o antes (guarda semanas: lo normal para una posición abierta), salen de ahí sin leer el disco; si no (vigilancia
+    apagada, arrancando o un tramo más antiguo), de cache (CacheBars.get: la caché de 1 min en disco más las de memoria).
+    Nunca pide nada a la red."""
+    def get(coin: str, a: int, b: int):
+        try:
+            m = live(coin)
+        except Exception:
+            m = None
+        if m is not None and getattr(m, "ndim", 0) == 2 and len(m) and m.shape[1] >= 5 and m[0, 0] <= a:
+            i, j = m[:, 0].searchsorted([a, b])
+            return m[i:j, :5]
+        return cache(coin, a, b)
+    return get
+
+
+def velas_respuesta(get, coin: str, desde: int, hasta: int, tf: str) -> dict | None:
+    """GET /api/velas (contrato §3): las velas que el bot ya tiene de coin entre desde y hasta, agrupadas a tf. Como mucho
+    VELAS_MAX, las más recientes (recortada = true si no caben desde «desde»). None si no hay ninguna."""
+    step = VELAS_TF[tf]
+    a0 = desde // step * step
+    a = max(a0, (hasta - 1) // step * step - (VELAS_MAX - 1) * step)
+    rows, last = agrupar_velas(get(coin, a, hasta), step)
+    rows = rows[-VELAS_MAX:]
+    if not rows:
+        return None
+    return {"coin": coin, "tf": tf, "desde": rows[0][0], "hasta": hasta, "hasta_datos": last + MIN_MS,
+            "recortada": a > a0, "n": len(rows), "velas": rows}
 
 
 BT_BLOCK = re.compile(r'<script type="application/json" id="(?:bt(?:Open)?Data|impulsoData|seis2?Data)">.*?</script>',
@@ -717,6 +783,35 @@ def make_app(bus: Bus, health, services: Services | None = None) -> web.Applicat
             raise web.HTTPNotFound(text="Aún no hay cálculo de noticias fiables (se hace al arrancar y cada hora)")
         return j(res)
 
+    velas_lock = threading.Lock()   # la caché de velas guarda meses leídos en memoria: una lectura a la vez
+
+    def velas_hilo(coin: str, desde: int, hasta: int, tf: str) -> dict | None:
+        with velas_lock:
+            return velas_respuesta(sv.velas, coin, desde, hasta, tf)
+
+    async def api_velas(request: web.Request) -> web.Response:
+        """Velas de una moneda para la gráfica de cada posición (contrato §3): ?coin=BTC&desde=<ms>&tf=1m|5m|15m
+        (&hasta=<ms>, por defecto ahora). Solo las que el bot ya tiene (caché de 1 min y la vigilancia en memoria): no
+        pide nada a la red. Como mucho VELAS_MAX, las más recientes. 400 con un parámetro no válido; 404 sin la fuente de
+        velas o sin ninguna vela en ese tramo."""
+        q = request.query
+        coin = (q.get("coin") or "").upper()
+        if coin not in config.COINS:
+            raise web.HTTPBadRequest(text=f"coin debe ser una de: {', '.join(config.COINS)}")
+        tf = q.get("tf") or "5m"
+        if tf not in VELAS_TF:
+            raise web.HTTPBadRequest(text=f"tf debe ser uno de: {', '.join(VELAS_TF)}")
+        hasta = q_int(request, "hasta", now_ms(), 1, 10 ** 14)
+        desde = q_int(request, "desde", hasta - 3 * 3600_000, 0, 10 ** 14)
+        if desde >= hasta:
+            raise web.HTTPBadRequest(text="desde debe ser anterior a hasta")
+        if not sv.velas:
+            raise web.HTTPNotFound(text="Las velas no están disponibles: el bot en marcha no tiene la caché enganchada")
+        res = await asyncio.to_thread(velas_hilo, coin, desde, hasta, tf)
+        if res is None:
+            raise web.HTTPNotFound(text=f"Sin velas de {coin} en la caché del bot en ese tramo")
+        return j(res)
+
     app = web.Application()
     app.on_shutdown.append(close_ws)
     app.router.add_get("/", index)
@@ -737,6 +832,7 @@ def make_app(bus: Bus, health, services: Services | None = None) -> web.Applicat
     app.router.add_get("/api/backtest/impulso", api_bt_impulso)
     app.router.add_get("/api/noticias_fiables", api_fiables)
     app.router.add_get("/api/decisiones", api_decisiones)
+    app.router.add_get("/api/velas", api_velas)
     app.router.add_get("/api/vigilancia", api_vigilancia)
     app.router.add_get("/api/cripto_aperturas", api_cripto_aperturas)
     app.router.add_get("/api/fuentes_vivas", api_fv)

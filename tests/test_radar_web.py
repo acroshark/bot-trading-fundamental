@@ -2534,3 +2534,126 @@ def test_demostracion_posiciones_y_cerradas_del_motor_simulado():
     assert "Motor «6 diarias v2»" in cer and re.search(r"[-+]\d+,\d\d R · ", cer)
     assert ">Ejemplo</span>" in pos and "Ejemplo inventado: las tarjetas del motor" in r["st"]
     _sin_null(pos, cer, r["st"])
+
+
+# --- Gráfica de cada posición abierta («En posición» y expediente) ---
+
+GRAF = r"""
+const T0 = now - 40*M;
+const posA = {story: "a-tok-btc-1", id: "tq1", coin: "BTC", side: "long", qty: 0.25, entry: 100, sl: 98, sl_initial: 98, trail_pct: null, high_water: 101,
+  opened: T0, riskUsd: 0.5, notional: 25, upnl: 0.2, headline: "Apertura Tokio · Compra BTC <b>", strategy: "impulso-largo", window: "Tokio y Seúl",
+  price: 100.4, R: 0.4, tp2: null, be: false, hold_until: now + 864e5, hold_label: "tope de 24 h <i>", tp1: 106, tp1_frac: 0.5, tp1_done: false,
+  realized: 0, be_r: null, trail_start_r: null, instrument: "spot", funding: 0, tags: {origen: "motor_aperturas", preset: "seis2"},
+  lock_r: 3, floor_r: 2, lock_trail_r: 2, locked: false, floor: 104, hold_active: null, sl_kind: "inicial"};
+const DESDE = Math.floor((T0 - 20*M)/M)*M;
+const BARS = []; for (let t = DESDE; t < now - 2*M; t += M){ const p = 99.9 + 0.2*Math.sin(t/3e5); BARS.push([t, p, p + 0.15, p - 0.15, p + 0.05]); }
+const velasOk = j => ({ok: true, json: async () => j});
+const esperaVelas = async () => { await Promise.all(Object.values(S.velas).map(v => v.p)); };
+const nVelas = () => H.fetches.filter(u => String(u).startsWith("/api/velas")).length;
+"""
+
+
+def test_grafica_de_cada_posicion_con_las_velas_del_bot_y_en_vivo():
+    """En «En posición», justo debajo de cada operación abierta, su gráfica: velas del bot (GET /api/velas, una petición
+    por minuto) desde un poco antes de la entrada, el punto de la entrada, las líneas del stop, de la parcial en 3R y de la
+    entrada, el precio de ahora y las cifras (ganancia de ahora en % y R, distancia al stop y a la parcial y lo que daría
+    cada una). Se mueve con el precio en vivo; en el expediente sale más grande, con el suelo del cerrojo y el plazo."""
+    r = run(FIAB + SEIS2 + GRAF + """H.open(); reset();
+      H.fetchReply = url => url.startsWith("/api/velas") ? velasOk({coin: "BTC", tf: "1m", velas: [...BARS, [now, null, 1, 1, 1], "x"], hasta_datos: now - 2*M}) : {ok: false};
+      H.recv({type: "market", prices: {BTC: 100.4}}, pf({positions: [posA]}));
+      S.tab = "trades"; renderAll(true); const antes = colsOf(H.el("#kanban").innerHTML)["En posición"];
+      await esperaVelas(); renderAll(true); renderAll(true);
+      const kb = colsOf(H.el("#kanban").innerHTML)["En posición"], url = H.fetches.find(u => String(u).startsWith("/api/velas")), n1 = nVelas();
+      H.recv({type: "market", prices: {BTC: 101}}); renderAll(true); const kb2 = colsOf(H.el("#kanban").innerHTML)["En posición"];
+      H.recv(ev("strategy", "a-tok-btc-1", {headline: "Apertura Tokio · Compra BTC <b>", src: "Motor de aperturas", tier: "Plan", t0: T0, coins: ["BTC"],
+               strat: strat("BTC", "long", {stopPct: 2, tp1R: 3, tp2R: null, tp1Frac: 0.5, beR: null, trailPct: null, trailStartR: null, lockR: 3, lockFloorR: 2,
+                                            lockTrailR: 2, tags: {origen: "motor_aperturas", preset: "seis2"}})}),
+             ev("riskok", "a-tok-btc-1", {risk: {checks: [], ok: true}}), ev("humanok", "a-tok-btc-1", {human: {mode: "auto", by: "Automático (paper)", at: now}}),
+             ev("filled", "a-tok-btc-1", {exec: {px: 100, slip: 1, ms: 200, notional: 25, sl: 98, tp1: 106, tp2: null, tp1Frac: 0.5}}));
+      S.sel = "a-tok-btc-1"; renderTrace(); const tr = H.el("#trace").innerHTML;
+      return {antes, kb, kb2, tr, url, n1, desde: DESDE, he: madHM(T0), rects: [...kb.matchAll(/<rect /g)].length};""")
+    kb, kb2, tr = r["kb"], r["kb2"], r["tr"]
+    assert r["url"] == f"/api/velas?coin=BTC&desde={r['desde']}&tf=1m" and r["n1"] == 1   # una sola petición por minuto
+    assert "Cargando las velas del bot" in r["antes"] and '<span class="n">1</span>' in kb
+    assert '<div class="pwrap"><button type="button" class="ticket" data-story="a-tok-btc-1">' in kb
+    assert 'class="pchart" data-story="a-tok-btc-1" title="Abrir el expediente"' in kb and '<svg viewBox="0 0 244 156" role="img"' in kb
+    assert "Apertura Tokio · Compra BTC &lt;b&gt;" in kb and "Compra BTC <b>" not in kb
+    for t in ("SL 98,00", "3R 106,00", "Ent 100,00", ">100,40</text>", f">{r['he']}</text>", 'fill="var(--accent)"'):
+        assert t in kb, t
+    assert r["rects"] > 12   # las velas (más las zonas y la etiqueta del precio)
+    assert '<small>Ahora</small><b class="pos">+0,40 %</b> <b class="pos">+0,40 R</b><span>100,40 · +0,20 USDC</span>' in kb
+    assert '<small>Al stop</small><b>-2,39 %</b><span>daría <span class="neg">-1,00 R</span> · -0,50 USDC</span>' in kb
+    assert '<small>A la parcial 3R</small><b>+5,58 %</b><span>sale la mitad: <span class="pos">+1,50 R</span> · +0,75 USDC</span>' in kb
+    assert "Velas de 3 min del bot y precio en vivo · hora de Madrid" in kb
+    assert '<b class="pos">+1,00 %</b>' in kb2 and ">101,00</text>" in kb2 and "<b>-2,97 %</b>" in kb2   # se mueve con el precio
+    assert '<svg viewBox="0 0 540 220" role="img"' in tr and f"Entrada {r['he']} · 100,00" in tr
+    for t in ("Parcial 3R 106,00", "Suelo +2R 104,00", "Stop 98,00", "Ahora 101,00", "al menos +2,50 R en total", "cierra como tarde el",
+              "(tope de 24 h &lt;i&gt;)", "sin comisiones ni deslizamiento", "Velas de 1 min del bot"):
+        assert t in tr, t
+    assert 'data-close="a-tok-btc-1"' in tr
+    _sin_null(r["antes"], kb, kb2, tr)
+
+
+def test_grafica_sin_velas_del_bot_404_fallo_cerrojo_y_campos_rotos():
+    """Sin la ruta (404, el bot aún no se ha reiniciado) o con la petición fallida, la gráfica sale igual con el precio en
+    vivo y lo dice. Un corto con la mitad cobrada y el stop siguiendo al precio: stop en su sitio, «Al stop (sigue)» con la
+    ganancia que asegura y lo cobrado. Una posición rota (moneda, entrada u hora no válidas, stop en la entrada) sale sin
+    gráfica y sin romper nada; una sin expediente abre al hacer clic su ficha con la gráfica."""
+    r = run(FIAB + SEIS2 + GRAF + """H.open(); reset();
+      H.fetchReply = url => url.includes("coin=ETH") ? {ok: false, status: 404} : {ok: false};
+      const corto = {...posA, story: "a-x-eth-1", id: "tq2", coin: "ETH", side: "short", entry: 100, sl: 95, sl_initial: 102, tp1: 94, tp1_done: true,
+        realized: 0.75, upnl: 2.0, price: 93, locked: true, floor: 96, sl_kind: "seguimiento", opened: now - 30*3600e3, headline: "Venta ETH", hold_label: null};
+      const sol = {...posA, story: "a-x-sol-1", id: "tq3", coin: "SOL", entry: 150, sl: 147, sl_initial: 147, tp1: 159, floor: 156, price: 150, upnl: 0, headline: "Compra SOL"};
+      const rotas = [{story: "r1", coin: "DOGE", side: "long", entry: 1, sl: 0.9, opened: now, riskUsd: 0.5, qty: 1, notional: 1},
+        {story: "r2", coin: "XRP", side: "long", entry: null, sl: 1, opened: "x", riskUsd: 0.5, qty: 1, notional: 1},
+        {story: "r3", coin: "BTC", side: "long", entry: 100, sl: 100, opened: now, riskUsd: 0.5, qty: 1, notional: 1},
+        {story: "r4", coin: "BTC", side: "long", entry: 100, sl_initial: 98, sl: 98, opened: now + 3600e3, riskUsd: 0.5, qty: 1, notional: 1, tp2: 106}];
+      H.recv({type: "market", prices: {ETH: 93, SOL: 150, BTC: 100}}, pf({positions: [corto, sol, ...rotas]}));
+      S.tab = "trades"; renderAll(true); await esperaVelas(); renderAll(true);
+      const kb = colsOf(H.el("#kanban").innerHTML)["En posición"];
+      S.sel = "a-x-eth-1"; renderTrace(); const tr = H.el("#trace").innerHTML;
+      return {kb, tr, wraps: kb.split('<div class="pwrap">').length - 1};""")
+    kb, tr = r["kb"], r["tr"]
+    assert '<span class="n">6</span>' in kb and r["wraps"] == 3   # ETH, SOL y la de hora futura; las tres rotas, sin gráfica
+    assert "El bot aún no da velas de ETH (la ruta llega al reiniciarlo): precio en vivo desde que abriste la web" in kb
+    assert "No se pudieron leer las velas del bot (se reintenta cada minuto)" in kb
+    assert '<small>Ahora</small><b class="pos">+7,00 %</b> <b class="pos">+4,00 R</b>' in kb
+    assert '<small>Al stop (sigue)</small><b>+2,15 %</b><span>daría <span class="pos">+2,75 R</span> · +1,38 USDC</span>' in kb
+    assert '<small>Cobrado</small><b class="pos">+1,50 R</b><span>la mitad en 3R · el resto corre sin objetivo</span>' in kb
+    assert "SL 95,00" in kb and "TP 106,00" in kb
+    assert "Posición paper" in tr and '<svg viewBox="0 0 540 220"' in tr and "SL sigue 95,00" in tr and "Cobrada 3R 94,00" in tr
+    assert "SL inicial 102,00" in tr and 'data-close="a-x-eth-1"' in tr and "Suelo" not in tr
+    _sin_null(kb, tr)
+
+
+def test_grafica_en_la_demostracion_con_velas_simuladas_coherentes():
+    """En la demostración, cada operación abierta del motor simulado («6 diarias v2») y de la simulación de noticias
+    lleva su gráfica con velas SIMULADAS, rotuladas como ejemplo y sin pedir nada al bot. El camino es el mismo en cada
+    pintado y cuadra con lo que pasó: sin la parcial, nunca toca el stop ni llega a 3R; con la mitad cobrada, llega a 3R a
+    esa hora y después no baja del stop del cerrojo."""
+    r = run("""const colsOf = html => Object.fromEntries(html.split('<div class="col">').slice(1).map(c => [c.split("</h3>")[0].split("<h3>")[1], c]));
+      const M = 60e3;
+      S.vnow = Date.UTC(2026, 9, 28, 21, 0); S.decDemoK = null; S.demoMotor = null; S.tab = "trades"; renderAll(true);
+      const kb = colsOf(H.el("#kanban").innerHTML)["En posición"]; renderAll(true); const kb2 = colsOf(H.el("#kanban").innerHTML)["En posición"];
+      const plans = new Map(), by = new Map();
+      for (const x of S.dec){ if (x.fase==="entrada" && x.decision==="entra" && x.datos && x.datos.plan) plans.set(x.ventana_id + "|" + x.coin, x.datos.plan);
+        if (x.trade_id){ const g = by.get(x.trade_id) || {}; g[x.decision] = g[x.decision] || x; by.set(x.trade_id, g); } }
+      const checks = [];
+      for (const g of by.values()){ if (!g.abierta || g.cerrada) continue;
+        const P = demoChartPlan(g.abierta, plans.get(g.abierta.ventana_id + "|" + g.abierta.coin) || {}, g.parcial), d = P.d;
+        const B = demoPathBars(P, M, P.t0 - 60*M, S.vnow), after = B.rows.filter(x => x[0] >= P.t0 + M);
+        const worst = x => d > 0 ? x[3] : x[2], best = x => d > 0 ? x[2] : x[3];
+        if (!P.done) checks.push(after.every(x => d*(worst(x) - P.sl0) > 0 && d*(best(x) - P.tp1) < 0));
+        else { const post = after.filter(x => x[0] >= P.act + M);
+          checks.push(after.some(x => d*(best(x) - P.tp1) >= -P.entry*1e-9) && post.every(x => d*(worst(x) - P.floorPx) > 0)
+            && d*(B.sl - P.floorPx) >= -1e-9 && d*(B.px - B.sl) > 0); }
+        checks.push(demoPathBars(P, M, P.t0 - 60*M, S.vnow) === B);
+        S.demoPaths.clear(); checks.push(JSON.stringify(demoPathBars(P, M, P.t0 - 60*M, S.vnow).rows) === JSON.stringify(B.rows)); }
+      return {kb, kb2, checks, sims: S.positions.filter(p => chartPlan(p)).length,
+        fetches: H.fetches.filter(u => String(u).includes("/api/velas")).length};""", live=False)
+    kb = r["kb"]
+    assert r["checks"] and all(r["checks"]) and r["fetches"] == 0
+    assert kb.count('<div class="pwrap"><button type="button" class="ticket motor"') == kb.count("Motor «6 diarias v2»") > 0
+    assert kb.count('<div class="pwrap">') == kb.count("Motor «6 diarias v2»") + r["sims"]
+    assert "Ejemplo: velas simuladas de" in kb and "del bot" not in kb and kb == r["kb2"]   # el mismo en cada pintado
+    _sin_null(kb)

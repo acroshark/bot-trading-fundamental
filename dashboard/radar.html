@@ -218,6 +218,26 @@ main{padding-block:18px 28px;display:grid;gap:18px}
 /* aperturas del motor en el tablero: programadas y midiendo (una línea por moneda) */
 .ticket.motor{border-left:3px solid var(--accent)}
 .ticket.motor.ctrl{border-left-color:var(--warn)}
+/* Gráfica de cada posición abierta: pegada debajo de su tarjeta en «En posición» y, más grande, en el expediente */
+.col-b.posb{max-height:none}
+.pwrap{display:grid;min-width:0}
+.pwrap>.ticket{border-bottom-left-radius:0;border-bottom-right-radius:0}
+.pchart{background:var(--surface);border:1px solid var(--line);border-top:0;border-radius:0 0 6px 6px;padding:4px 8px 8px;display:grid;gap:5px;min-width:0}
+.pchart[data-story]{cursor:pointer}
+.pchart.big{border-top:1px solid var(--line);border-radius:6px;padding:8px 10px 10px}
+.pchart svg{display:block;width:100%;height:auto;overflow:hidden}
+.plist{list-style:none;margin:0;padding:0;display:grid;gap:3px;font-size:11.5px;color:var(--ink-2);line-height:1.3}
+.plist li{display:flex;flex-wrap:wrap;gap:2px 6px;align-items:baseline;min-width:0}
+.plist small{font-size:10px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);min-width:58px}
+.plist b{font-family:var(--f-mono);font-weight:500}
+.plist span{font-family:var(--f-mono);font-size:11px;overflow-wrap:anywhere}
+.pnums{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px}
+.pnums div{background:var(--surface-2);border:1px solid var(--line);border-radius:5px;padding:5px 8px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.pnums small{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.pnums .pv{font-family:var(--f-mono);font-size:13px;display:flex;gap:8px;flex-wrap:wrap}
+.pnums .pv b{font-weight:500}
+.pnums .ps{font-family:var(--f-mono);font-size:11px;color:var(--ink-2);overflow-wrap:anywhere}
+.pnote{font-size:10.5px;color:var(--muted);margin:0;overflow-wrap:anywhere}
 .ticket .kc{display:block;font-size:12px;line-height:1.35}
 .ticket .kc .note{font-size:11.5px}
 .kpis{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:0}
@@ -1272,7 +1292,9 @@ const S = {
   evoF:{tipo:"", origen:"", dias:30}, evoMF:"todos", evoRev:0, evoDemo:false,
   fiables:null, fiabF:"todos",   // último cálculo de «noticias_fiables» (bot/fiables.py) y filtro de su tabla
   // Por qué entra o no: filas de «decisiones_apertura» (GET /api/decisiones y mensajes «decision_apertura»), la más reciente primero
-  dec:[], decRev:0, decDemo:false, decApi:null
+  dec:[], decRev:0, decDemo:false, decApi:null,
+  // Gráfica de cada posición: precios en vivo cada 2 s por moneda (en directo) y velas del bot por moneda, tamaño y desde
+  ticks:{}, velas:{}
 };
 for (const c of COINS){ S.prices[c]=INFO[c].price; S.p0[c]=INFO[c].price; S.hist[c]=[]; }
 S.prices.USDT = 1;
@@ -1314,6 +1336,7 @@ function ingest(msg){
     if (msg.spread) S.spread = msg.spread;
     if (S.live){ const now = Date.now();
       for (const c of COINS) if (S.prices[c] && !S.p0[c]) S.p0[c] = S.prices[c];
+      tickPush(now);   // la parte en vivo de la gráfica de cada posición
       if (now-(S.lastHist||0) >= 30000){ S.lastHist = now; for (const c of COINS) if (S.prices[c]){ S.hist[c].push(S.prices[c]); if (S.hist[c].length>240) S.hist[c].shift(); } } }
     S.dirty=true;
   }
@@ -1438,7 +1461,7 @@ function resetLive(msg){
     trend:null, criptoAp:null, orderflow:null, predictions:null, srcSummary:null, portfolio:null, results:null,
     evo:null, apr:null, fv:null, fvList:null, fvCand:null, evoHist:null, evoInf:null, evoNews:null, evoMedio:null, evoSel:null,
     evoDemo:false, evoOrdTs:undefined, evoPend:null, fvPend:null, aprPend:null, evoRev:S.evoRev+1, fiables:null,
-    sel:null, pickSel:true, dirty:true});
+    velas:{}, sel:null, pickSel:true, dirty:true});
   // Las decisiones guardadas siguen valiendo tras un reinicio del bot (están en su base); las de ejemplo, no.
   if (S.decDemo) Object.assign(S, {dec:[], decDemo:false, decApi:null});
   S.decRev++;
@@ -2067,6 +2090,15 @@ const GONE_TXT = "Sin datos: este paso quedó fuera del historial que recibió l
 function renderTrace(box = $("#trace")){
   const st = S.sel && S.stories.get(S.sel);
   const head = st && (st.headline || st.title || (st.events.find(e=>e.title)||{}).title);
+  // Posición del paper sin expediente en la web (abierta antes de conectar o tras un reinicio): su gráfica y sus cifras.
+  const sp = !head && S.sel ? S.positions.find(x => x.id===S.sel || paperStory(x).id===S.sel) : null;
+  if (sp){
+    box.innerHTML = `<div class="trace-h"><div class="eyebrow"><span>Posición paper</span>${pill("good", "Abierta")}</div><h3>${esc(sp.headline || `${sp.side==="short" ? "Venta" : "Compra"} ${sp.coin || ""}`)}</h3>
+      <div class="trace-meta"><span>${esc(sp.strategy || sp.window || "paper")}</span><span class="mono">${okT(tsOf(sp.opened)) ? `Abierta ${madDM(tsOf(sp.opened))} ${madHM(tsOf(sp.opened))} Madrid` : ""}</span></div></div>
+      <p class="note">${posMeta(sp)}</p>${posChartHtml(chartPlan(sp), true)}
+      <div class="btns"><button type="button" class="btn no" data-close="${esc(sp.id)}">Cerrar posición paper</button></div>`;
+    return;
+  }
   if (!head){
     box.innerHTML = `<div class="trace-h"><div class="eyebrow">Expediente</div><h3>Elige una fila del cable</h3><p class="note">Aquí verás el viaje completo de una noticia: de dónde salió, cómo se verificó, qué impacto se estimó, cómo estaba el minorista, qué estrategia se propuso, qué dijo Riesgo, tu aprobación y el resultado.</p></div>`;
     return;
@@ -2172,6 +2204,7 @@ function renderTrace(box = $("#trace")){
   if (!r){ const p = S.positions.find(x=>x.id===st.id), u = p ? posPnl(p) : 0;
     const pt = p ? posPartTxt(p) : "";
     h += stepNode("exec","Resultado","todo","", p ? `<span>Posición paper abierta · ahora <b class="mono ${u>=0?"pos":"neg"}">${u>=0?"+":""}${nf(u,2)} ${QUOTE}</b> (${pt ? "R total " : ""}${nf(posR(p),2)} R)${pt ? ` · ${esc(pt)}` : p.be?" · stop ya en break-even":""}</span>`
+      + posChartHtml(chartPlan(p), true)   // la gráfica de la operación: entrada, stop, objetivo y precio de ahora
       + `<div class="btns"><button type="button" class="btn no" data-close="${esc(st.id)}">Cerrar posición paper</button></div>` : ""); }
   else h += stepNode("exec","Resultado", r.pnl>=0?"done":"fail", evTime(st,"closed"), kv([["Motivo",esc(r.why)],["Salida",pricef(r.exit)],["Resultado",`<span class="${r.pnl>=0?"pos":"neg"}">${r.pnl>=0?"+":""}${nf(r.pnl,2)} ${QUOTE}</span>`],["En R",`${r.R>=0?"+":""}${nf(r.R,2)} R`],["Duración",dur(r.closedAt-r.opened)]]));
   box.innerHTML = h+"</ol>";
@@ -2217,6 +2250,8 @@ function posMeta(p){
 const paperStory = r => ({id: fiabStory(r) || r.id || r.story || "", headline: r.headline, events: [],
   strat: {coin: r.coin || "", side: r.side==="short" ? "short" : "long", mode: r.strategy || r.window || "paper", tags: isObj(r.tags) ? r.tags : null}});
 const posTicket = p => ticket(paperStory(p), posMeta(p));
+// Tarjeta de «En posición» con la gráfica de la operación justo debajo (si no se puede dibujar, la tarjeta sola).
+const posWrap = (card, p, story) => { const P = chartPlan(p); return P ? `<div class="pwrap">${card}${posChartHtml(P, false, story)}</div>` : card; };
 const closedTicket = r => ticket(paperStory(r), `${r.pnl>=0?"+":""}${nf(r.pnl,2)} ${QUOTE} · ${isNum(r.R) ? `${sgn(r.R,2)} R · ` : ""}${esc(r.why || r.reason || "")}`);
 // Operación cerrada con salidas parciales (contrato 3.2: partials[] y exit_last): R de lo cobrado en la parcial y del resto.
 function tradeParts(t){
@@ -2265,10 +2300,12 @@ function renderTrades(){
     ["Pasando controles", [...MW.ctrl.map(z => motorCard(z, O, now, true)), ...all.filter(x=>!x.risk).map(x=>ticket(x, "Riesgo revisando"))],
       O ? "Ninguna apertura midiendo ahora." : "Vacía"],
     ["Esperan tu aprobación", all.filter(x=>S.pending.some(p=>p.id===x.id)).map(x=>{const p=S.pending.find(q=>q.id===x.id); return ticket(x, p.mode==="veto"?`Se aprueba sola en ${dur(p.deadline-now)}`:`Caduca en ${dur(p.deadline-now)}`);}), "Vacía"],
-    ["En posición", [...DM.pos, ...inPos.map(x=>ticket(x, posMeta(S.positions.find(q=>q.id===x.id)))), ...S.positions.filter(p=>!posIds.has(p.id)).map(posTicket)], "Vacía"],
+    // cada posición con su gráfica justo debajo (clic en ella: el expediente)
+    ["En posición", [...DM.pos, ...inPos.map(x=>{ const p = S.positions.find(q=>q.id===x.id); return posWrap(ticket(x, posMeta(p)), p, x.id); }),
+      ...S.positions.filter(p=>!posIds.has(p.id)).map(p => posWrap(posTicket(p), p, paperStory(p).id))], "Vacía"],
     ["Cerradas o descartadas", fin.sort((a,b)=>b.t-a.t).slice(0,30).map(x=>x.h), "Vacía"]
   ];
-  $("#kanban").innerHTML = cols.map(([name, items, empty]) => `<div class="col"><div class="col-h"><h3>${name}</h3><span class="n">${items.length}</span></div><div class="col-b">${items.join("") || `<p class="note">${esc(empty)}</p>`}</div></div>`).join("");
+  $("#kanban").innerHTML = cols.map(([name, items, empty]) => `<div class="col"><div class="col-h"><h3>${name}</h3><span class="n">${items.length}</span></div><div class="col-b${name==="En posición" ? " posb" : ""}">${items.join("") || `<p class="note">${esc(empty)}</p>`}</div></div>`).join("");
   const L = S.limits, maxDay = L.max_daily_loss_pct, maxPos = L.max_positions, used = Math.min(S.dayLoss, maxDay), expo = S.positions.reduce((a,p)=>a+posNotional(p),0)/S.equity*100;
   $("#rules").innerHTML = [
     ["Riesgo por operación", `${nf(L.risk_per_trade_pct,2)} % del capital${S.live ? "" : " (0,35 % si va contra el minorista)"}`, 50, false],
@@ -2312,6 +2349,244 @@ function spark(arr, up){
   const pts = arr.map((v,i)=>`${(i/(n-1)*100).toFixed(2)},${(36-(v-lo)/((hi-lo)||1)*32).toFixed(2)}`);
   const col = up?"var(--good)":"var(--bad)";
   return `<svg viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true"><path d="M${pts.join(" L")} L100,40 L0,40 Z" fill="${col}" fill-opacity=".1"/><path d="M${pts.join(" L")}" fill="none" stroke="${col}" stroke-width="1.6" vector-effect="non-scaling-stroke"/></svg>`;
+}
+// ---------- Gráfica de cada posición abierta («En posición» y expediente) ----------
+// Precio desde un poco antes de la entrada hasta ahora: velas, un PUNTO en la entrada (hora y precio), las líneas del stop,
+// del objetivo (con la salida A, la de la parcial en 3R y la del suelo del cerrojo), el precio de ahora y, debajo, la
+// ganancia o pérdida de ahora (% y R), cuánto falta hasta el stop y el objetivo (%) y lo que daría cada uno (R y USDC).
+// En directo, las velas son las que el bot ya tiene (GET /api/velas: su caché de 1 min y la vigilancia en memoria, sin
+// pedir nada a la red; se repiden cada minuto) más los precios en vivo del WebSocket. Sin la ruta (404: el bot aún no se
+// ha reiniciado con ella) o sin velas, solo los precios en vivo desde que se abrió la web. En la demostración, velas
+// SIMULADAS (ejemplo): las de la simulación de precios o, para el motor simulado, un camino con semilla que cuadra con lo
+// que pasó (no toca el stop; si la mitad ya salió, llega a 3R a esa hora).
+const VELA_TF = {"1m":60e3, "5m":300e3, "15m":900e3};
+const TICK_KEEP = 12*3600e3, TICK_STEP = 2000, VELAS_REFRESH = 60e3, VELAS_FORGET = 10*60e3;
+const DISP_MIN = [1, 3, 5, 15, 30, 60, 120, 240, 480, 720, 1440];   // tamaños de vela que se pintan (min)
+// 1 min si la posición tiene menos de 3 h, 5 min hasta 2 días y 15 min después (7 días son 672 velas: caben en las 2.000
+// de la ruta). El margen antes de la entrada es fijo por tamaño: la petición no cambia cada minuto.
+const chartTf = (t0, now) => now - t0 <= 3*3600e3 ? "1m" : now - t0 <= 48*3600e3 ? "5m" : "15m";
+const chartFrom = (t0, tf) => { const s = VELA_TF[tf]; return Math.floor((t0 - (tf==="1m" ? 20 : 24)*s)/s)*s; };
+const okBar = r => Array.isArray(r) && r.length >= 5 && [0, 1, 2, 3, 4].every(i => isNum(r[i])) && r[1] > 0 && r[2] > 0 && r[3] > 0 && r[4] > 0;
+const f1 = v => v.toFixed(1);
+// Medidas de la gráfica (unidades del viewBox): la pequeña de «En posición» y la grande del expediente.
+const CHART = {small:{W:244, H:156, R:84, fs:10.5}, big:{W:540, H:220, R:130, fs:10}};
+// Un precio a su vela: la última se alarga; una nueva abre donde cerró la anterior (sin huecos entre velas).
+function barAdd(rows, t, px, step){
+  const b = Math.floor(t/step)*step, last = rows[rows.length-1];
+  if (last && last[0]===b){ if (px > last[2]) last[2] = px; if (px < last[3]) last[3] = px; last[4] = px; }
+  else if (!last || b > last[0]){ const o = last ? last[4] : px; rows.push([b, o, Math.max(o, px), Math.min(o, px), px]); }
+}
+// Velas más grandes para pintar (s, múltiplo del tamaño de las que hay): apertura, máximo, mínimo y cierre de cada tramo.
+function regroup(rows, s){
+  const out = [];
+  for (const r of rows){ const b = Math.floor(r[0]/s)*s, l = out[out.length-1];
+    if (l && l[0]===b){ if (r[2] > l[2]) l[2] = r[2]; if (r[3] < l[3]) l[3] = r[3]; l[4] = r[4]; } else out.push([b, r[1], r[2], r[3], r[4]]); }
+  return out;
+}
+// En directo: el precio de cada moneda cada 2 s de las últimas 12 h (la parte en vivo de la gráfica).
+function tickPush(now){
+  for (const c of COINS){ const px = S.prices[c]; if (!isNum(px) || px <= 0) continue;
+    const L = S.ticks[c] || (S.ticks[c] = []), last = L[L.length-1];
+    if (last && now - last[0] < TICK_STEP){ last[1] = px; continue; }
+    L.push([now, px]);
+    if (now - L[0][0] > TICK_KEEP + 600e3){ const i = L.findIndex(x => now - x[0] <= TICK_KEEP); L.splice(0, i < 0 ? L.length : i); } }
+}
+// Velas del bot por moneda, tamaño y desde: {rows, upto (hasta dónde llegan sus datos), st: ok|no|fallo|null, p (petición)}.
+function velasGet(coin, tf, from){
+  const k = `${coin}|${tf}|${from}`, now = Date.now(), v = S.velas[k] || (S.velas[k] = {rows:null, upto:null, at:0, st:null, p:null});
+  v.used = now;
+  if (!v.p && now - v.at >= VELAS_REFRESH) v.p = velasLoad(v, coin, tf, from).finally(() => { v.p = null; });
+  return v;
+}
+async function velasLoad(v, coin, tf, from){
+  v.at = Date.now();
+  let r = null;
+  try {
+    r = await fetch(`/api/velas?coin=${encodeURIComponent(coin)}&desde=${Math.floor(from)}&tf=${tf}`);
+    const j = r && r.ok ? await r.json() : null, rows = isObj(j) && Array.isArray(j.velas) ? j.velas.filter(okBar).map(x => x.slice(0, 5)) : [];
+    if (rows.length){ v.rows = rows; v.upto = isNum(j.hasta_datos) ? j.hasta_datos : rows[rows.length-1][0] + VELA_TF[tf]; v.st = "ok"; }
+    else if (!v.rows) v.st = r && (r.ok || r.status===404) ? "no" : "fallo";   // 404: bot sin la ruta o sin velas de ese tramo
+  } catch(e){ if (!v.rows) v.st = "fallo"; /* bot reiniciándose: se reintenta en un minuto */ }
+  for (const [k, x] of Object.entries(S.velas)) if (Date.now() - (x.used || 0) > VELAS_FORGET) delete S.velas[k];
+  S.dirty = true;
+}
+// Demostración: velas de la simulación de precios (un precio por minuto).
+function pxLogBars(coin, step, from, now){
+  const L = S.pxLog || [], rows = [];
+  for (let i = pxIdx(from); i < L.length && L[i][0] <= now; i++){ const px = L[i][1] && L[i][1][coin]; if (isNum(px) && px > 0) barAdd(rows, L[i][0], px, step); }
+  return rows;
+}
+// «Pliega» x dentro de [a, b] (rebota en los bordes): el camino sigue siendo continuo y nunca sale de la banda.
+const fold = (x, a, b) => { let u = (x - a)/(b - a); u = ((u % 2) + 2) % 2; return a + (b - a)*(u <= 1 ? u : 2 - u); };
+// Demostración: camino SIMULADO de una posición del motor simulado, minuto a minuto y con semilla (el mismo en cada
+// pintado y estable al pasar el tiempo). Antes de la entrada, libre; después, entre el stop y la parcial sin tocarlos (sigue
+// abierta) o, si la mitad ya salió, llegando a la parcial a esa hora y luego por encima del stop del cerrojo (suelo y
+// seguimiento). Devuelve las velas, el precio de ahora y el stop de ahora.
+function demoPathBars(P, step, from, now){
+  const M = 60e3, k = `${P.key}|${step}|${from}|${Math.floor(now/M)}`, C = S.demoPaths || (S.demoPaths = new Map());
+  if (C.has(k)) return C.get(k);
+  const d = P.d, e = P.entry, r = P.r, sig = INFO[P.coin].ann/100/Math.sqrt(365*1440);
+  const f = px => d*Math.log(px/e), unf = y => e*Math.exp(d*y);
+  const gs = rnd => Math.sqrt(-2*Math.log(1 - rnd()))*Math.cos(2*Math.PI*rnd());
+  const pts = [], rb = seedRnd(P.key + "|antes");
+  let y = 0;
+  for (let t = P.t0 - M; t >= from - M; t -= M){ y -= sig*gs(rb); pts.push([t, unf(y)]); }
+  pts.reverse(); pts.push([P.t0, e]);
+  const rnd = seedRnd(P.key + "|camino"), act = isNum(P.act) && P.act > P.t0 && P.act <= now ? P.act : null;
+  const n1 = Math.max(0, Math.floor(((act ?? now) - P.t0)/M)), fS = f(P.sl0), fT = f(P.tp1), W = [0];
+  for (let i = 1; i <= n1; i++) W.push(W[i-1] + sig*gs(rnd));
+  for (let i = 1; i <= n1; i++){
+    const v = act ? fold(W[i] - W[n1]*i/n1 + fT*i/n1, fS*0.85, fT) : fold(W[i], fS*0.85, fT*0.96);
+    pts.push([P.t0 + i*M, unf(v)]); }
+  let sl = P.sl0, kind = null;
+  if (act){
+    let best = P.tp1, px = P.tp1; sl = isNum(P.floorPx) ? P.floorPx : P.sl0; kind = "cerrojo";
+    for (let t = P.t0 + (n1 + 1)*M; t <= now; t += M){
+      px *= Math.exp(sig*gs(rnd));
+      const min = sl + d*0.15*r; if (d*(px - min) < 0) px = 2*min - px;   // rebota antes del stop: sigue abierta
+      pts.push([t, px]);
+      if (d*(px - best) > 0){ best = px; const tr = isNum(P.trailR) ? best - d*P.trailR*r : null; if (tr!=null && d*(tr - sl) > 0){ sl = tr; kind = "seguimiento"; } } } }
+  const rows = [];
+  for (const [t, px] of pts) if (t >= from) barAdd(rows, t, px, step);
+  const out = {rows, px:pts[pts.length-1][1], st:"sim", sl, slKind:kind};
+  if (C.size > 60) C.clear();
+  C.set(k, out);
+  return out;
+}
+// Velas de la gráfica desde «from» hasta ahora, con el precio de ahora al final: {rows, px, st, sl, slKind}.
+function chartBars(P, step, tf, from, now){
+  if (isNum(P.act) || P.path) return demoPathBars(P, step, from, now);
+  let rows = [], st = "sim";
+  if (S.live){
+    const v = velasGet(P.coin, tf, from); let upto = from; st = v.st;
+    if (v.rows){ rows = v.rows.filter(r => r[0] >= from).map(r => r.slice()); if (rows.length) upto = v.upto; }
+    const tk = S.ticks[P.coin] || []; let i = 0, j = tk.length;   // el primer precio en vivo desde «upto» (búsqueda binaria)
+    while (i < j){ const m = (i + j) >> 1; if (tk[m][0] < upto) i = m + 1; else j = m; }
+    for (; i < tk.length; i++) barAdd(rows, tk[i][0], tk[i][1], step);
+  } else rows = pxLogBars(P.coin, step, from, now);
+  const px = isNum(S.prices[P.coin]) && S.prices[P.coin] > 0 ? S.prices[P.coin] : numOf(P.price);
+  if (isNum(px)) barAdd(rows, now, px, step);
+  return {rows, px, st, sl:P.sl, slKind:P.slKind};
+}
+// Lo que dibuja la gráfica de una posición del paper (contrato 2.5; en la demostración, las de la simulación).
+function chartPlan(p){
+  if (!isObj(p) || !COINS.includes(p.coin)) return null;
+  const e = numOf(p.entry), t0 = tsOf(p.opened), sl0 = numOf(p.sl_initial, p.sl);
+  if (!(e > 0) || !okT(t0) || !(sl0 > 0) || sl0===e) return null;
+  const d = p.side==="short" ? -1 : 1, r = Math.abs(e - sl0), x = posParts(p), lockR = numOf(p.lock_r), floorR = numOf(p.floor_r);
+  return {key:String(p.id || p.story || p.coin), coin:p.coin, d, t0, entry:e, sl0, sl:numOf(p.sl) || sl0, r,
+    tp:numOf(p.tp2) > 0 ? p.tp2 : null, tp1:x && numOf(x.tp1) > 0 ? x.tp1 : null, frac:x ? x.frac : null, done:!!(x && x.done),
+    tp1R:x && isNum(x.tp1R) ? x.tp1R : null, lockPx:lockR > 0 ? e + d*lockR*r : null, lockR,
+    floorPx:numOf(p.floor) > 0 ? p.floor : floorR > 0 ? e + d*floorR*r : null, floorR, trailR:numOf(p.lock_trail_r),
+    locked:p.locked===true || !!(x && x.locked), slKind:strOk(p.sl_kind), riskUsd:numOf(p.riskUsd), price:numOf(p.price),
+    rNow:p.riskUsd ? posR(p) : null, usdNow:posPnl(p), holdUntil:okT(p.hold_until) && p.hold_until > 0 ? p.hold_until : null,
+    holdLabel:strOk(p.hold_label)};
+}
+// Demostración: la de una posición del motor simulado (filas de ejemplo de «Por qué entra o no»: abierta, plan y parcial).
+function demoChartPlan(a, pl, pa){
+  const e = numOf(pl.entrada), sl0 = numOf(pl.stop), tp1 = numOf(pl.primer_objetivo), t0 = numOf(a.ts);
+  if (!(e > 0 && sl0 > 0 && tp1 > 0) || sl0===e || !okT(t0) || !COINS.includes(a.coin)) return null;
+  const d = a.lado==="corto" ? -1 : 1, r = Math.abs(e - sl0), v = (x, z) => isNum(x) ? x : z;
+  const tp1R = v(pl.primer_objetivo_R, 3), lockR = v(pl.cerrojo_R, tp1R), floorR = v(pl.suelo_R, 2);
+  return {key:String(a.trade_id || a.coin), coin:a.coin, d, t0, entry:e, sl0, sl:sl0, r, tp:null, tp1, frac:v(pl.fraccion, 0.5), done:!!pa, tp1R,
+    lockPx:e + d*lockR*r, lockR, floorPx:e + d*floorR*r, floorR, trailR:v(pl.sigue_R, 2), locked:!!pa, slKind:null,
+    riskUsd:DEMO_EQUITY*0.005, act:pa && okT(pa.ts) ? pa.ts : null, path:true, holdUntil:null};
+}
+// Tamaño de vela que se pinta: el menor de DISP_MIN, múltiplo de las que hay, con el que caben como mucho maxBars.
+function dispStep(step, span, maxBars){
+  for (const m of DISP_MIN){ const s = m*60e3; if (s >= step && s % step===0 && span/s <= maxBars) return s; }
+  return DISP_MIN[DISP_MIN.length-1]*60e3;
+}
+const stepTxt = s => s >= 3600e3 ? `${nf(s/3600e3,0)} h` : `${nf(s/60e3,0)} min`;
+// Rótulos a la derecha sin solaparse (separación mínima gap, dentro de [top, bottom]).
+function spreadLabels(ls, gap, top, bottom){
+  ls.sort((a, b) => a.y0 - b.y0); ls.forEach(l => { l.y = l.y0; });
+  for (let i = 0; i < ls.length; i++) ls[i].y = Math.max(ls[i].y, i ? ls[i-1].y + gap : top);
+  for (let i = ls.length - 1; i >= 0; i--) ls[i].y = Math.min(ls[i].y, i < ls.length - 1 ? ls[i+1].y - gap : bottom);
+  return ls;
+}
+function chartSvg(P, rows, ds, px, sl, slKind, from, now, big){
+  const {W, H, R, fs} = CHART[big ? "big" : "small"], L = 4, T = 8, BM = fs + 6, gap = fs + 2.5;
+  const d = P.d, e = P.entry, xr = W - R, tEnd = Math.max(now, P.t0), tA = from, tB = tEnd + (tEnd - tA)*0.04 + ds;
+  const X = t => L + (t - tA)/((tB - tA) || 1)*(xr - L);
+  const lv = [];   // líneas: precio, rótulo, color, discontinua, opacidad
+  const add = (v, txt, col, dash, op = 1) => { if (isNum(v) && v > 0) lv.push({v, txt, col, dash, op}); };
+  const near = (a, b) => isNum(a) && isNum(b) && Math.abs(a - b) <= P.r*0.02;
+  const t1 = isNum(P.tp1R) ? `${nR(P.tp1R)}R` : "";
+  add(e, big ? "Entrada" : "Ent", "var(--accent)", "1 3");
+  add(sl, big ? (P.locked ? (slKind==="seguimiento" ? "SL sigue" : "SL cerrojo") : "Stop") : "SL", P.locked && d*(sl - e) > 0 ? "var(--warn)" : "var(--bad)", "5 3");
+  if (big && !near(sl, P.sl0)) add(P.sl0, "SL inicial", "var(--bad)", "2 3", 0.45);
+  if (isNum(P.tp)) add(P.tp, big ? "Objetivo" : "TP", "var(--good)", "5 3");
+  if (isNum(P.tp1)) add(P.tp1, big ? `${P.done ? "Cobrada" : "Parcial"}${t1 ? " " + t1 : ""}` : t1 || "TP1", "var(--good)", P.done ? "2 3" : "5 3", P.done ? 0.5 : 1);
+  if (!P.locked && isNum(P.lockPx) && !near(P.lockPx, P.tp1) && !near(P.lockPx, P.tp)) add(P.lockPx, big ? `Cerrojo ${nR(P.lockR)}R` : `${nR(P.lockR)}R`, "var(--warn)", "2 3");
+  if (big && !P.locked && isNum(P.floorPx) && isNum(P.floorR)) add(P.floorPx, `Suelo +${nR(P.floorR)}R`, "var(--warn)", "2 3", 0.7);
+  const vals = [px, ...lv.map(l => l.v)]; for (const r of rows){ vals.push(r[2], r[3]); }
+  let lo = Math.min(...vals), hi = Math.max(...vals); const pad = (hi - lo)*0.07 || e*0.002; lo -= pad; hi += pad;
+  const Y = v => T + (hi - v)/(hi - lo)*(H - T - BM), xe = X(P.t0), xn = X(now);
+  const zone = (a, b, col, op) => isNum(a) && isNum(b) ? `<rect x="${f1(xe)}" y="${f1(Math.min(Y(a), Y(b)))}" width="${f1(Math.max(0, xr - xe))}" height="${f1(Math.abs(Y(a) - Y(b)))}" fill="${col}" fill-opacity="${op}"/>` : "";
+  const loss = d*(sl - e) < 0, tgt = isNum(P.tp) ? P.tp : !P.done && isNum(P.tp1) ? P.tp1 : null;
+  const cw = Math.max(1, Math.min(big ? 10 : 7, ds/(tB - tA)*(xr - L)*0.66));
+  const bars = rows.map(r => { const x = X(r[0] + ds/2), col = r[4] >= r[1] ? "var(--good)" : "var(--bad)", y1 = Y(Math.max(r[1], r[4])), y2 = Y(Math.min(r[1], r[4]));
+    return `<line x1="${f1(x)}" x2="${f1(x)}" y1="${f1(Y(r[2]))}" y2="${f1(Y(r[3]))}" stroke="${col}"/><rect x="${f1(x - cw/2)}" y="${f1(y1)}" width="${f1(cw)}" height="${f1(Math.max(0.8, y2 - y1))}" fill="${col}"/>`; }).join("");
+  const lines = lv.map(l => `<line x1="${L}" x2="${xr}" y1="${f1(Y(l.v))}" y2="${f1(Y(l.v))}" stroke="${l.col}" stroke-dasharray="${l.dash}" stroke-opacity="${l.op}"/>`).join("");
+  const up = d*(px - e) >= 0, nowCol = up ? "var(--good)" : "var(--bad)";
+  const labs = spreadLabels([...lv.map(l => ({y0:Y(l.v), txt:`${l.txt} ${pricef(l.v)}`, col:l.col, op:l.op})), {y0:Y(px), txt:`${big ? "Ahora " : ""}${pricef(px)}`, col:nowCol, now:true}], gap, T + fs/2, H - BM - fs/2);
+  const tags = labs.map(l => (Math.abs(l.y - l.y0) > 1 ? `<line x1="${xr}" x2="${xr + 3}" y1="${f1(l.y0)}" y2="${f1(l.y)}" stroke="${l.col}" stroke-opacity=".6"/>` : "")
+    + (l.now ? `<rect x="${xr + 3}" y="${f1(l.y - fs*0.72)}" width="${R - 4}" height="${f1(fs*1.44)}" rx="2" fill="${l.col}"/><text x="${xr + 6}" y="${f1(l.y + fs*0.35)}" fill="var(--surface)" font-weight="600">${esc(l.txt)}</text>`
+      : `<text x="${xr + 5}" y="${f1(l.y + fs*0.35)}" fill="${l.col}"${l.op < 1 ? ` fill-opacity="${Math.max(0.7, l.op)}"` : ""}>${esc(l.txt)}</text>`)).join("");
+  const tl = t => (madDay(t)!==madDay(now) ? madDM(t) + " " : "") + madHM(t), ye = Y(e);
+  const eTxt = big ? `Entrada ${tl(P.t0)} · ${pricef(e)}` : madHM(P.t0), eLeft = xe < L + (xr - L)*0.6;
+  const eY = ye > (T + H - BM)/2 ? ye - 7 : ye + fs + 4;
+  const aria = `Gráfica de ${P.coin} (${d > 0 ? "compra" : "venta"}): entrada ${pricef(e)} a las ${madHM(P.t0)}, stop ${pricef(sl)}${tgt ? `, ${isNum(P.tp) ? "objetivo" : "parcial"} ${pricef(tgt)}` : ""}, ahora ${pricef(px)}`;
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(aria)}" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="${fs}">
+    ${zone(e, sl, loss ? "var(--bad)" : "var(--good)", loss ? 0.08 : 0.13)}${tgt ? zone(e, tgt, "var(--good)", 0.07) : ""}
+    <line x1="${L}" x2="${xr}" y1="${H - BM}" y2="${H - BM}" stroke="var(--line)"/>
+    <line x1="${f1(xe)}" x2="${f1(xe)}" y1="${T}" y2="${H - BM}" stroke="var(--accent)" stroke-opacity=".35" stroke-dasharray="2 3"/>
+    ${bars}${lines}
+    <line x1="${f1(xn)}" x2="${xr}" y1="${f1(Y(px))}" y2="${f1(Y(px))}" stroke="${nowCol}"/>
+    <circle cx="${f1(xn)}" cy="${f1(Y(px))}" r="${big ? 3.5 : 2.8}" fill="${nowCol}" stroke="var(--surface)" stroke-width="1.2"/>
+    <circle cx="${f1(xe)}" cy="${f1(ye)}" r="${big ? 5 : 4}" fill="var(--accent)" stroke="var(--surface)" stroke-width="1.6"/>
+    <text x="${f1(xe + (eLeft ? 7 : -7))}" y="${f1(eY)}" text-anchor="${eLeft ? "start" : "end"}" fill="var(--accent)" font-weight="600" paint-order="stroke" stroke="var(--surface)" stroke-width="3">${esc(eTxt)}</text>
+    ${tags}
+    <text x="${L}" y="${H - 3}" fill="var(--muted)">${esc(tl(tA))}</text><text x="${xr}" y="${H - 3}" text-anchor="end" fill="var(--muted)">${esc(tl(now))}</text></svg>`;
+}
+// Las cifras de debajo: ganancia o pérdida de ahora (% y R), cuánto tiene que moverse el precio hasta el stop y hasta el
+// objetivo o la parcial, y lo que daría cada uno (R total sobre el riesgo inicial y USDC, sin comisiones ni deslizamiento).
+function chartNums(P, px, sl, slKind, big){
+  const d = P.d, e = P.entry, rest = P.done && isNum(P.frac) ? 1 - P.frac : 1;
+  const banked = P.done && isNum(P.frac) && isNum(P.tp1R) ? P.frac*P.tp1R : 0;
+  const rAt = v => banked + rest*d*(v - e)/P.r, usd = R => isNum(P.riskUsd) ? ` · ${sgn(R*P.riskUsd, 2)} ${QUOTE}` : "";
+  const mv = v => pct((v/px - 1)*100, 2), pl = d*(px/e - 1)*100;
+  const rNow = isNum(P.rNow) ? P.rNow : rAt(px), uNow = isNum(P.usdNow) ? P.usdNow : isNum(P.riskUsd) ? rNow*P.riskUsd : null;
+  const cls = v => v > 0 ? "pos" : v < 0 ? "neg" : "";
+  const slName = P.locked && d*(sl - e) > 0 ? (slKind==="seguimiento" ? "Al stop (sigue)" : "Al stop (cerrojo)") : "Al stop";
+  const rows = [["Ahora", `<b class="${cls(pl)}">${pct(pl, 2)}</b> <b class="${cls(rNow)}">${rT(rNow)}</b>`, `${pricef(px)}${isNum(uNow) ? ` · ${sgn(uNow, 2)} ${QUOTE}` : ""}`],
+    [slName, `<b>${mv(sl)}</b>`, `daría <span class="${cls(rAt(sl))}">${rT(rAt(sl))}</span>${usd(rAt(sl))}`]];
+  if (isNum(P.tp)) rows.push(["Al objetivo", `<b>${mv(P.tp)}</b>`, `daría <span class="${cls(rAt(P.tp))}">${rT(rAt(P.tp))}</span>${usd(rAt(P.tp))}`]);
+  else if (isNum(P.tp1) && !P.done && isNum(P.tp1R)){
+    const part = isNum(P.frac) ? P.frac*P.tp1R : null, worst = part!=null && isNum(P.floorR) ? part + (1 - P.frac)*P.floorR : null;
+    rows.push([`A la parcial ${nR(P.tp1R)}R`, `<b>${mv(P.tp1)}</b>`, `sale ${fracTxt(P.frac)}: ${part!=null ? `<span class="pos">${rT(part)}</span>${usd(part)}` : "–"}${big && worst!=null ? `; el resto queda con el stop en +${nR(P.floorR)}R (al menos ${rT(worst)} en total)` : ""}`]); }
+  else if (P.done) rows.push(["Cobrado", `<b class="pos">${rT(banked)}</b>`, `${fracTxt(P.frac)}${isNum(P.tp1R) ? ` en ${nR(P.tp1R)}R` : ""} · el resto corre sin objetivo`]);
+  else rows.push(["Objetivo", "<b>sin objetivo</b>", "corre hasta el stop o el cierre por tiempo"]);
+  if (big) return `<div class="pnums">${rows.map(([k, v, s]) => `<div><small>${esc(k)}</small><span class="pv">${v}</span><span class="ps">${s}</span></div>`).join("")}</div>`;
+  return `<ul class="plist">${rows.map(([k, v, s]) => `<li><small>${esc(k)}</small>${v}<span>${s}</span></li>`).join("")}</ul>`;
+}
+// La gráfica entera con sus cifras y una nota de dónde salen las velas. story: abre el expediente al hacer clic.
+function posChartHtml(P, big, story){
+  if (!P) return "";
+  const now = S.vnow, tf = chartTf(P.t0, now), step = VELA_TF[tf], from = chartFrom(P.t0, tf), B = chartBars(P, step, tf, from, now);
+  const px = B.px, sl = isNum(B.sl) ? B.sl : P.sl, attr = story ? ` data-story="${esc(story)}" title="Abrir el expediente"` : "";
+  if (!isNum(px) || px <= 0) return `<div class="pchart${big ? " big" : ""}"${attr}><p class="pnote">Sin precio de ${esc(P.coin)} todavía: la gráfica sale en cuanto llegue.</p></div>`;
+  const {W, R} = CHART[big ? "big" : "small"], ds = dispStep(step, Math.max(now, P.t0) - from, (W - 4 - R)/3.4);
+  const rows = ds > step ? regroup(B.rows, ds) : B.rows;
+  const st = B.st, note = !S.live ? `Ejemplo: velas simuladas de ${stepTxt(ds)} · hora de Madrid`
+    : st==="ok" ? `Velas de ${stepTxt(ds)} del bot y precio en vivo · hora de Madrid`
+    : st==="no" ? `El bot aún no da velas de ${esc(P.coin)} (la ruta llega al reiniciarlo): precio en vivo desde que abriste la web, velas de ${stepTxt(ds)}`
+    : st==="fallo" ? `No se pudieron leer las velas del bot (se reintenta cada minuto): precio en vivo desde que abriste la web`
+    : `Cargando las velas del bot… · precio en vivo`;
+  const hold = big && isNum(P.holdUntil) ? ` · cierra como tarde el ${madDM(P.holdUntil)} a las ${madHM(P.holdUntil)}${P.holdLabel ? ` (${esc(P.holdLabel)})` : ""}` : "";
+  return `<div class="pchart${big ? " big" : ""}"${attr}>${chartSvg(P, rows, ds, px, sl, B.slKind || P.slKind, from, now, big)}${chartNums(P, px, sl, B.slKind || P.slKind, big)}
+    <p class="pnote">${note}${hold}${big ? ". R total sobre el riesgo inicial y USDC sin comisiones ni deslizamiento (el paper los descuenta al cerrar)." : ""}</p></div>`;
 }
 const OPEN_STATE = {esperando:"Esperando", midiendo_rango:"Midiendo el rango", armada:"Armada", en_posicion:"En posición", rearmada:"Rearmada", terminada:"Terminada",
   sin_senal:"Sin señal", esperando_apertura:"Esperando la apertura", midiendo_impulso:"Midiendo el impulso", esperando_entrada:"Esperando la entrada"};
@@ -3285,8 +3560,9 @@ function demoMotorTrades(){
     const card = tm => `<button type="button" class="ticket motor" data-tabgo="market" title="${esc(TT)}">${head}${tt}<span class="tm">${tm}</span></button>`;
     if (c){ const R = isObj(c.datos) ? numOf(c.datos.R) : null;
       out.fin.push({t:c.ts, h:card(`${R!=null ? `${sgn(R,2)} R · ` : ""}${esc(short(c.motivo || "Cerrada", 120))}${Rp!=null ? ` (la mitad salió antes en 3R: ${sgn(Rp,2)} R)` : ""}`)}); }
-    else out.pos.push(card(pa ? `La mitad ya salió en 3R${Rp!=null ? ` (${sgn(Rp,2)} R)` : ""}; el resto corre con su stop en +2R (cerrojo)`
-      : `La mitad saldrá en ${isNum(pl.primer_objetivo) ? `${pricef(pl.primer_objetivo)} (3R)` : "3R"}; antes, el stop no se mueve`));
+    else { const h = card(pa ? `La mitad ya salió en 3R${Rp!=null ? ` (${sgn(Rp,2)} R)` : ""}; el resto corre con su stop en +2R (cerrojo)`
+      : `La mitad saldrá en ${isNum(pl.primer_objetivo) ? `${pricef(pl.primer_objetivo)} (3R)` : "3R"}; antes, el stop no se mueve`), P = demoChartPlan(a, pl, pa);
+      out.pos.push(P ? `<div class="pwrap">${h}${posChartHtml(P, false)}</div>` : h); }   // con su gráfica (velas simuladas)
   }
   return out;
 }
@@ -5229,7 +5505,8 @@ document.addEventListener("click", ev => {
 // Mientras el botón de acción está pulsado no se redibuja (ver render): el clic llega al mismo botón. Al soltar quedan
 // 350 ms de margen para que llegue el clic (en táctil puede ir en otra tarea); el propio clic quita la espera.
 const hold = ms => { holdUntil = performance.now() + ms; };
-document.addEventListener("pointerdown", ev => { if (ev.button===0 && ev.target.closest && ev.target.closest(ACT_SEL)) hold(3000); });
+// Igual con la gráfica de una posición (y su tarjeta): se redibuja con cada precio y el clic debe llegar al expediente.
+document.addEventListener("pointerdown", ev => { if (ev.button===0 && ev.target.closest && ev.target.closest(ACT_SEL + ",.pwrap [data-story]")) hold(3000); });
 document.addEventListener("pointerup", () => { if (holdUntil) holdUntil = Math.min(holdUntil, performance.now() + 350); });
 document.addEventListener("pointercancel", () => { holdUntil = 0; });
 document.addEventListener("keydown", ev => {   // Intro o espacio sobre el botón: el navegador lo convierte en clic

@@ -794,3 +794,87 @@ def test_api_estado_resume_la_cripto_en_las_aperturas_y_no_el_indice(tmp_path):
     json.dumps(ap)
     store.close()
 
+
+
+async def test_api_velas_de_la_cache_agrupadas_recortadas_y_sin_red(tmp_path, monkeypatch):
+    """GET /api/velas (gráfica de cada posición): las velas de 1 min que el bot ya tiene (aquí, las de la vigilancia en
+    memoria a través de CacheBars, con la caché en disco vacía) agrupadas a 1m, 5m o 15m, sin filas con precios rotos
+    (NaN) y como mucho VELAS_MAX, las más recientes. 400 con un parámetro no válido; 404 sin velas o sin la fuente. No
+    pide nada a la red: solo llama a la fuente de velas, y solo con el tramo que hace falta."""
+    import numpy as np
+    from bot.aprendizaje import CacheBars
+    T = 1_793_000_000_000 // 3_600_000 * 3_600_000   # una hora en punto
+    live = np.array([[T + i * 60_000, 100 + i, 100.5 + i, 99.5 + i, 100.2 + i, 1, 0] for i in range(30)], float)
+    live[7, 1:5] = np.nan   # una vela rota no se publica (el navegador no lee NaN en JSON)
+    cb, calls = CacheBars(live={"BTC": live}, folder=tmp_path / "vacia"), []
+
+    def velas(c, a, b):
+        calls.append((c, a, b))
+        return cb.get(c, a, b)
+
+    store = Store(tmp_path / "t.db")
+    bus = Bus(store)
+    hasta = T + 30 * 60_000
+    async with TestClient(TestServer(make_app(bus, lambda: {}, Services(velas=velas)))) as client:
+        r = await client.get(f"/api/velas?coin=btc&desde={T}&hasta={hasta}&tf=5m")
+        assert r.status == 200
+        txt = await r.text()
+        j = json.loads(txt)
+        assert "NaN" not in txt and j["coin"] == "BTC" and j["tf"] == "5m" and j["n"] == 6 and j["recortada"] is False
+        assert j["velas"][0] == [T, 100.0, 104.5, 99.5, 104.2]      # apertura de la 1.ª, máximo, mínimo, cierre de la 5.ª
+        assert j["velas"][1] == [T + 300_000, 105.0, 109.5, 104.5, 109.2]   # la rota (minuto 7) no cuenta
+        assert j["desde"] == T and j["hasta"] == hasta and j["hasta_datos"] == T + 30 * 60_000
+        u = await (await client.get(f"/api/velas?coin=BTC&desde={T}&hasta={hasta}&tf=1m")).json()
+        assert u["n"] == 29 and all(v[0] != T + 7 * 60_000 for v in u["velas"])
+        q = await (await client.get(f"/api/velas?coin=BTC&desde={T}&hasta={hasta}&tf=15m")).json()
+        assert q["n"] == 2 and q["velas"][1][4] == 129.2
+        monkeypatch.setattr(server, "VELAS_MAX", 10)   # tope de velas: las 10 más recientes y solo se lee ese tramo
+        calls.clear()
+        c = await (await client.get(f"/api/velas?coin=BTC&desde={T - 30 * 86_400_000}&hasta={hasta}&tf=1m")).json()
+        assert c["n"] == 10 and c["recortada"] is True and c["desde"] == T + 20 * 60_000 and c["velas"][-1][0] == T + 29 * 60_000
+        assert calls == [("BTC", T + 20 * 60_000, hasta)]
+        for bad in ("coin=DOGE", "coin=BTC&tf=1h", "coin=BTC&desde=hoy", f"coin=BTC&desde={hasta}&hasta={T}"):
+            assert (await client.get("/api/velas?" + bad)).status == 400, bad
+        assert (await client.get(f"/api/velas?coin=ETH&desde={T}&hasta={hasta}")).status == 404   # sin velas de ETH
+        assert (await client.get(f"/api/velas?coin=BTC&desde={T - 86_400_000}&hasta={T - 3_600_000}")).status == 404
+    async with TestClient(TestServer(make_app(bus, lambda: {}))) as client:   # sin la fuente de velas (bot sin enganchar)
+        assert (await client.get(f"/api/velas?coin=BTC&desde={T}")).status == 404
+    store.close()
+
+
+def test_velas_agrupadas_saltan_filas_rotas():
+    """agrupar_velas: el máximo y el mínimo cubren la apertura y el cierre, y una fila corta, con texto, cero o
+    infinito se salta sin parar el resto."""
+    rows = [[0, 10, 11, 9, 10.5], [60_000, 10.5, 10.4, 10.6, 10.2], [120_000, "x", 1, 1, 1], [180_000, 0, 1, 1, 1],
+            [240_000, 1, float("inf"), 1, 1], [300_000, 11]]
+    out, last = server.agrupar_velas(rows, 300_000)
+    assert out == [[0, 10.0, 11.0, 9.0, 10.2]] and last == 60_000
+    assert server.agrupar_velas([], 60_000) == ([], None)
+    assert server.velas_respuesta(lambda c, a, b: [], "BTC", 0, 600_000, "1m") is None
+
+
+def test_velas_de_sale_de_la_memoria_si_llega_y_si_no_de_la_cache():
+    """velas_de (fuente de GET /api/velas): si las velas de la vigilancia en memoria empiezan en «desde» o antes, salen
+    de ahí (el tramo [desde, hasta) y solo [t, o, h, l, c]) sin leer el disco; si empiezan después, si no hay o si la
+    vigilancia falla, de la caché (CacheBars.get). Nunca pide nada a la red."""
+    import numpy as np
+    T = 1_793_000_000_000 // 60_000 * 60_000
+    mem = {"BTC": np.array([[T + i * 60_000, 1, 2, 0.5, 1.5, 9, 9] for i in range(10)], float)}
+    disco = []
+
+    def cache(c, a, b):
+        disco.append((c, a, b))
+        return [[a, 1, 1, 1, 1]]
+
+    def live(c):
+        if c == "XRP":
+            raise RuntimeError("vigilancia arrancando")
+        return mem.get(c)
+
+    get = server.velas_de(live, cache)
+    m = get("BTC", T + 2 * 60_000, T + 5 * 60_000)
+    assert m.shape == (3, 5) and m[0, 0] == T + 2 * 60_000 and m[-1, 0] == T + 4 * 60_000 and disco == []
+    assert len(get("BTC", T, T + 3_600_000)) == 10 and disco == []       # hasta donde haya en memoria
+    assert get("BTC", T - 60_000, T + 60_000) == [[T - 60_000, 1, 1, 1, 1]]   # empieza antes de la memoria: la caché
+    assert get("ETH", T, T + 60_000) == [[T, 1, 1, 1, 1]] and get("XRP", T, T + 60_000) == [[T, 1, 1, 1, 1]]
+    assert disco == [("BTC", T - 60_000, T + 60_000), ("ETH", T, T + 60_000), ("XRP", T, T + 60_000)]

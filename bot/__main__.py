@@ -40,7 +40,7 @@ from .paper import PaperBroker
 from .predict import Predictor, results_getter
 from .reaccion import Reaccion
 from .reflejo import Reflejo
-from .server import Services, make_app
+from .server import Services, make_app, velas_de
 from .store import Store, in_batches
 from .trend import Trend
 from .vigilancia import Vigilancia
@@ -200,9 +200,14 @@ async def main() -> None:
                     "local_ai": {"queue": local.q.qsize(), "done": local.done},
                     "clients": len(bus.clients)}
 
+        # Velas de la gráfica de cada posición (GET /api/velas): las de la vigilancia en memoria (guarda semanas) y, si no
+        # llegan, las de la caché de 1 min en disco, sin pedir nada a la red. Con su propia caché de meses (4 monedas × 2
+        # meses; las lee el servidor en un hilo).
         services = Services(feeds=feeds, predictor=predictor, broker=broker, phase2=phase2, backtest=bt, openings=openings,
                             vigilancia=vigil, aprendizaje=learn, evolucion=evo, fuentes_vivas=vivas, reaccion=react,
-                            reflejo=refl, fiables=fiab, entrada_noticias=entrada, decisiones=decs)
+                            reflejo=refl, fiables=fiab, entrada_noticias=entrada, decisiones=decs,
+                            velas=velas_de(lambda c: vigil.bars.get(c),
+                                           CacheBars(live=lambda c: vigil.bars.get(c), keep=8).get))
         runner = web.AppRunner(make_app(bus, health, services))
         await runner.setup()
         await web.TCPSite(runner, config.HOST, config.PORT).start()
