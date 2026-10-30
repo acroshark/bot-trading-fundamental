@@ -91,7 +91,6 @@ PAPER_EQUITY = float(os.environ.get("BOT_PAPER_EQUITY", "10000"))
 USER_RULES = os.environ.get("BOT_USER_RULES", "1") != "0"
 RULE_MIN_STOP_PCT = 1.5
 RULE_MIN_RR = 2.0
-RULE_MIN_NET_PCT = 3.0       # el objetivo deja ≥ 3 % neto de costes (comisiones y deslizamiento de ida y vuelta)
 RULE_DEFAULT_RR = 3.0        # objetivo por defecto cuando el estratega no da uno
 RULE_MIN_NET_PCT = 3.0       # toda parte que gana deja ≥ 3 % neto de comisión y deslizamiento de ida y vuelta
 RISK_PER_TRADE_PCT = float(os.environ.get("BOT_RISK_PER_TRADE_PCT", "0.5"))

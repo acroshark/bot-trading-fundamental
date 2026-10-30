@@ -840,7 +840,7 @@ def cuerpo_triaje(titulo: str, src: str, tier: str, coins: list[str]) -> dict:
     """El cuerpo de la petición de LocalAI.classify, tal cual (lo comprueba la prueba)."""
     from . import local_ai
     return {
-        "model": config.LOCAL_AI_ALIAS, "temperature": 0, "max_tokens": 700,
+        "model": config.LOCAL_AI_ALIAS, "temperature": 0, "max_tokens": local_ai.TRIAGE_MAX_TOKENS,
         "messages": [{"role": "system", "content": local_ai.SYSTEM},
                      {"role": "user", "content": f"Titular: {titulo}\nFuente: {src} (nivel {tier})\n"
                                                  f"Monedas detectadas por reglas: {', '.join(coins) or 'ninguna'}"}],
