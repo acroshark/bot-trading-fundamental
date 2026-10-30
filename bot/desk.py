@@ -8,10 +8,16 @@ Si la historia sube de estado (la confirma o la trae una fuente mejor), vuelve a
 es mayor que la que tuvo (o no entró): sin triaje, la subida no llegaría nunca a la señal.
 
 Clase de cada captada (filters.classify, patch.clase): «cripto» y «macro» van a la IA local; el «contexto» (política,
-empresas, tecnología, sucesos, economía local) se capta y se mide, pero no se tría ni lleva monedas."""
+empresas, tecnología, sucesos, economía local) se capta y se mide, pero no se tría ni lleva monedas.
+
+Saturación de la IA local (hallazgos n.º 1 y 42: la cola, siempre en 115-120): la cripto va SIEMPRE antes que la macro
+(CRIPTO_BONO), así que con la cola llena lo que se pierde es macro; la macro de hace horas (no fresca) ya no se tría,
+porque solo cuenta si la cripto la refleja en los 60 min desde la captura y ese movimiento ya pasó; y la macro de la
+región cuya bolsa abre en las próximas 3 h (o abrió hace menos de 4 h) pasa por delante de la de otras regiones."""
 import logging
 import time
 from collections import Counter, defaultdict, deque
+from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
@@ -19,6 +25,7 @@ from . import config
 from .bus import Bus
 from .filters import Decision, classify, similar, tokens
 from .models import Item, Source, fmt_age, now_ms, story_id
+from .regions import MARKETS, REGIONS, session
 from .store import Store
 
 log = logging.getLogger("desk")
@@ -64,12 +71,38 @@ def outlet_of(item: Item, src: Source) -> str:
     return ".".join(parts[-2:]) or src.name.lower()
 
 
-def priority(d: Decision, tier: str) -> float:
-    """Orden en la cola de la IA local: lo fresco y fuerte primero; el contexto, cuando haya hueco. Lo de cripto, un
-    punto por delante de la macro del mismo nivel y frescura: la macro es unas 2,6 veces más numerosa (muchos partes de
-    guerra rutinarios) y la cola descarta lo menos prioritario y más antiguo."""
-    return ((3 if d.strong else 1) + (1 if d.clase == "cripto" else 0) + {"T0": 1.5, "T1": 1.0}.get(tier, 0)
-            + (3 if d.fresh else 0))
+CRIPTO_BONO = 6.0        # la cripto, siempre antes que la macro: con la cola llena se pierde macro, no cripto
+APERTURA_BONO = 1.0      # macro de la región cuya bolsa abre pronto (o acaba de abrir)
+APERTURA_ANTES_H, APERTURA_DESPUES_H = 3, 4
+
+
+def opening_bonus(region: str | None, now: int | None = None) -> float:
+    """APERTURA_BONO si la bolsa de la región abre en las próximas APERTURA_ANTES_H horas o abrió hace menos de
+    APERTURA_DESPUES_H (la ventana que sigue el motor); si no, o sin bolsa (global), 0."""
+    key = REGIONS.get(region, (None, None))[1] if region else None
+    m = MARKETS.get(key) if key else None
+    if m is None:
+        return 0.0
+    t = datetime.fromtimestamp((now_ms() if now is None else now) / 1000, timezone.utc)
+    s = session(m, t)
+    o, nxt = s.get("open_utc"), s.get("next_open_utc")
+    if o is not None and timedelta(0) <= t - o <= timedelta(hours=APERTURA_DESPUES_H):
+        return APERTURA_BONO
+    if nxt is not None and nxt - t <= timedelta(hours=APERTURA_ANTES_H):
+        return APERTURA_BONO
+    return 0.0
+
+
+def priority(d: Decision, tier: str, region: str | None = None, now: int | None = None) -> float:
+    """Orden en la cola de la IA local: la cripto siempre antes que la macro (CRIPTO_BONO: la macro es unas 2,6 veces
+    más numerosa, con muchos partes de guerra rutinarios, y la cola descarta lo menos prioritario y más antiguo); dentro
+    de cada clase, lo fresco, fuerte y de mejor nivel primero, y la macro de la región cuya bolsa abre pronto, un punto
+    por delante (opening_bonus)."""
+    p = ((3 if d.strong else 1) + (CRIPTO_BONO if d.clase == "cripto" else 0) + {"T0": 1.5, "T1": 1.0}.get(tier, 0)
+         + (3 if d.fresh else 0))
+    if d.clase == "macro":
+        p += opening_bonus(region, now)
+    return p
 
 
 def src_state(item: Item) -> tuple[str, float]:
@@ -182,8 +215,11 @@ class NewsDesk:
             return "corroborated"
 
         contexto = d.clase == "contexto"   # política, empresas, tecnología…: se capta, pero no gasta IA local
+        # la macro de hace horas tampoco: solo contaría si la cripto la reflejara en los 60 min desde la captura, y
+        # ese movimiento ya pasó (n.º 1 y 42). La cripto se tría siempre, también la de hace horas.
+        sin_ia = contexto or (d.clase == "macro" and not d.fresh)
         rec = Recent(now, sid, item.source, title, d.coins, words, {outlet}, estado=estado, name=name, tier=tier,
-                     region=item.region, prio_base=None if contexto else priority(d, tier))
+                     region=item.region, prio_base=None if sin_ia else priority(d, tier, item.region, now))
         self._remember(rec)
         if d.fresh:
             when = f"llegó {fmt_age(age_ms)} después de publicarse" if age_ms is not None else "sin hora de publicación"
@@ -197,7 +233,7 @@ class NewsDesk:
                           "patch": {**base, "filter": {"ok": True, "why": why}}})
         log.log(logging.INFO if d.fresh and not contexto else logging.DEBUG, "%s%s [%s] %s",
                 "Contexto" if contexto else "Relevante", "" if d.fresh else " (de hace horas)", name, title)
-        if self.on_relevant and not contexto:
+        if self.on_relevant and not sin_ia:
             prio = triage_priority(rec.prio_base, estado, sid)
             if prio is not None:   # una retirada se publica (para medirla) pero no gasta IA local
                 rec.enviada = prio

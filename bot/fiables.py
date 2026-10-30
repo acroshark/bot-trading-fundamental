@@ -41,8 +41,11 @@ ningún grupo). Un grupo «fiable» solo se usa para entrar o vetar (opera = Tru
    4,5 %, 24 h; aproximada con lo máximo que subió y bajó en 24 h desde la captura, y el stop primero si tocó los dos)
    da > 0 R de media en ≥ 30 noticias ya medidas a 24 h;
 4. hacia delante y en vivo: en los días completos posteriores a la primera vez que pasó el criterio con solo los días
-   anteriores, con las noticias que el bot usaría (senal = 1: no archivada, importancia suficiente, de esa moneda o
-   global, y confirmada por la cripto si es macro), ≥ 30 noticias distintas con acierto ajustado ≥ 60 % y bruto ≥ 50 %.
+   anteriores, con las noticias que el bot usaría (senal 1 o 2: no archivada, importancia suficiente, de esa moneda o
+   global), ≥ 30 noticias distintas con acierto ajustado ≥ 60 % y bruto ≥ 50 %. La 2 (una macro que la cripto aún no
+   confirmó) cuenta como la 1, como en el aprendizaje: quedarse solo con las confirmadas miraría el futuro, porque
+   «confirmada» quiere decir que la cripto ya se movió a su favor en los 60 min que también mide acc240 (versión 3,
+   revisión del 28-10-2026; antes, senal = 1).
 El acierto ajustado mide información, no lo que gana una horquilla: por eso la puerta exige también el bruto y la
 horquilla. Cada grupo lleva no_opera con lo que le falta.
 
@@ -80,7 +83,9 @@ TICK_S = 3600
 PERMS = max(50, int(os.environ.get("BOT_FIABLES_PERM", "500")))   # nunca menos de 50 (≥ 300 para el valor p)
 VENTANA_D = max(3, int(os.environ.get("BOT_FIABLES_DIAS", "30")))
 SEED = 20261028
-VERSION = 2                           # 2: azar por bloques, noticias distintas, puerta para operar (28-10-2026)
+VERSION = 3                           # 2: azar por bloques, noticias distintas, puerta para operar (28-10-2026)
+                                      # 3: «vivo» y «adelante» con senal 1 o 2 (sin mirar el futuro en las macro)
+SENAL_VIVO = (1, 2)                   # senal de las noticias que usaría en vivo (2 = macro sin confirmar aún)
 Z90 = aprendizaje.Z90                 # 1,645
 MARGEN_MS = 240 * MIN + 2 * H         # un día UTC está completo cuando han pasado sus 4 h de medida y 2 h de margen
 TOP_RESTO = 60                        # grupos que no son fiables que salen en el mensaje (los de más acierto)
@@ -109,9 +114,9 @@ PUERTA = {
     "horquilla_historias_min": 30, "adelante_historias_min": 30, "adelante_acierto_min": 0.60, "adelante_bruto_min": 0.50,
     "texto": ("Para operar (entrar o vetar), además de fiable: el conjunto supera al azar que conserva la hora (p < 0,05); "
               "≥ 30 noticias distintas y cota de Wilson por bloques de 30 min ≥ 50 %; acierto bruto ≥ 50 % y horquilla "
-              "1,5 %/4,5 % a 24 h > 0 R en ≥ 30 noticias; y hacia delante, con las noticias que usaría en vivo, ≥ 30 "
-              "noticias distintas con acierto ≥ 60 % y bruto ≥ 50 %. Fijada el 28-10-2026 tras la revisión, antes de "
-              "tener más datos."),
+              "1,5 %/4,5 % a 24 h > 0 R en ≥ 30 noticias; y hacia delante, con las noticias que usaría en vivo (las "
+              "macro también sin confirmar: contar solo las confirmadas miraría el futuro), ≥ 30 noticias distintas "
+              "con acierto ≥ 60 % y bruto ≥ 50 %. Fijada el 28-10-2026 tras la revisión, antes de tener más datos."),
 }
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS noticias_fiables(id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, json TEXT NOT NULL);
@@ -424,7 +429,7 @@ def calcular(filas: list[dict], now: int, perms: int = PERMS, dias: int = VENTAN
     aj60 = np.array([float(u["acc60"]) - der60.get(k, 0.0) if u.get("acc60") is not None else np.nan
                      for u, k in zip(units, keys)])
     v60 = np.isfinite(aj60)
-    vivo = np.array([u.get("senal") == 1 for u in units], dtype=bool)
+    vivo = np.array([u.get("senal") in SENAL_VIVO for u in units], dtype=bool)
     hq = pu["horquilla"]
     hqR = np.array([np.nan if (x := horquilla_R(int(dd), u.get("max_sube"), u.get("max_baja"), u.get("r1440"),
                                                   hq["stop_pct"], hq["objetivo_pct"])) is None else x
@@ -507,7 +512,7 @@ def calcular(filas: list[dict], now: int, perms: int = PERMS, dias: int = VENTAN
         nhq = _distintos(g_arr, G, s_code, S, vhq.astype(float))
         sum_hq = cnt(np.nan_to_num(hqR))
         n_hq = cnt(vhq)
-        # vivo (exploración): solo las noticias que el bot usaría en vivo (senal = 1)
+        # vivo (exploración): solo las noticias que el bot usaría en vivo (senal 1 o 2)
         gv = np.where(vivo, g_arr, -1)
         mv = gv >= 0
         cv = lambda w: np.bincount(gv[mv], weights=w[mv].astype(float), minlength=G)

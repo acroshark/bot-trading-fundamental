@@ -61,12 +61,20 @@ REGIONS: dict[str, (nombre, clave_bolsa | None)]   # jp, kr, cn, hk, me, de, uk,
 def session(m, now) -> {"state": "abierta|pausa|preapertura|cerrada", "open_utc", "close_utc", "next_open_utc"}
 def closes_before_open(a, b, day) -> bool;  def ordered_by_close(day) -> list[Market]
 
-# bot/market.py  (ya publica "market": {"prices": {coin: float}, "flow": {coin: {ls, funding, funding_h, oi, taker, prem, pctl, label, extreme}}, "spread"})
+# bot/market.py  (ya publica "market": {"prices": {coin: float}, "flow": {coin: {ls, funding, funding_h, oi, taker, prem, pctl, label, extreme, ts}}, "spread"})
+#   ts de cada fila del flujo: cuándo se leyó de Binance. market.fresh_flow(market, now) da solo las de ≤ 5 min (las demás
+#   no se publican ni se usan: predicciones, motor, paper, entrada por noticia, estratega, /api/estado y briefing;
+#   hallazgo n.º 44). Una fila sin ts (de antes del 28-10-2026) se acepta.
 #   funding: última tasa de Binance USDT-M en % de SU periodo; funding_h: horas de ese periodo (GET /fapi/v1/fundingInfo cada
 #   6 h; los símbolos que no lista liquidan cada 8 h). Sin respuesta de Binance no va funding_h y se supone 8 h
 #   (market.funding_8h y paper.funding_8h escalan a % por 8 h). Es la tasa de Binance, no la de OKX X-Perps EU: aproximación.
 
-# Módulos que miden y aprenden (todos solo paper; los arranca __main__ y un fallo en uno no para el resto)
+# Módulos que miden y aprenden (todos solo paper; los arranca __main__ y un fallo en uno no para el resto: si uno no se
+# puede construir, el bot sigue sin él (optional, también la vigilancia: sin ella, las velas salen solo de la caché), y
+# cada bucle del bot corre supervisado: si se cae, se registra y se relanza con espera creciente, de 5 s a 5 min
+# (__main__.supervise; hallazgos n.º 27 y 46). La conexión principal a bot.db espera hasta 30 s a un bloqueo. En Windows,
+# al arrancar, el proceso entra en un Job Object con KILL_ON_JOB_CLOSE (__main__.atar_hijos; n.º 49): si muere, Windows
+# cierra con él los lectores de feeds y llama-server. BOT_JOB_OBJECT=0 lo desactiva)
 # bot/vigilancia.py     Vigilancia(bus, store, session)                          → estado «vigilancia» (2.8)
 # bot/aprendizaje.py    Aprendizaje(bus, store, local_ai, bars=CacheBars(live))  → estado «aprendizaje» (2.10)
 #   source_weight(medio) -> float (1 = neutro, 0 a 1,5) y adjusted_credibility(cred, medio) -> int: síncronas y sin base
@@ -84,7 +92,9 @@ def closes_before_open(a, b, day) -> bool;  def ordered_by_close(day) -> list[Ma
 #   fiable_para(medio, feed, tipo, dir) -> dict del grupo FIABLE que pasa la puerta para operar (opera) o None;
 #   monedas_de(titular, triaje, clase, reflejo) -> (monedas, motivo); hay_fiables() (¿alguno opera?), ultimo(),
 #   usar(msg). Los usan apertura (veto de «6 diarias») y entrada_noticias
-# bot/entrada_noticias.py  EntradaNoticias(bus, store, submit, get_portfolio, bars=CacheBars(live).get)
+# bot/entrada_noticias.py  EntradaNoticias(bus, store, submit, get_portfolio, bars=CacheBars(live).get, get_motor)
+#   get_motor() → parámetros del motor en marcha: los topes del día compartidos son los de su preset (E2: 4 y 2 %;
+#   «6 diarias»: 6 y 3 %), nunca más de 6 entradas y 3 % de riesgo
 #   observe(evento): gancho síncrono del bus → eventos «entrada_noticia» (2.16) y entradas en el paper («strategy» →
 #   riesgo → aprobación → paper, como el motor). BOT_ENTRADA_NOTICIAS=0 la apaga
 # bot/apertura.py       paper_day_entries(cartera, ahora) -> {story: riesgo %}: TODAS las entradas del paper del día de
@@ -148,12 +158,42 @@ def closes_before_open(a, b, day) -> bool;  def ordered_by_close(day) -> list[Ma
 #   tickets solo con BOT_BROKER=real (por defecto, paper: el motor y la entrada por noticia van al paper; la fase 2
 #   siempre al paper). Publica «cuenta_real» (2.18), eventos «real_aviso» y el agente «real»
 
+# bot/agenda.py  (publica "calendar": {"events": [{t, name, src ("BLS"|"Fed"), impact ("alto"|"medio")}], "updated", "aviso"})
+#   aviso: texto si el calendario FOMC escrito a mano se acaba en menos de 90 días (o ya se acabó), o null (n.º 33).
+#   La usan el paper (pausa de 10 min antes de un dato de alto impacto), el briefing de la IA local y el estratega de la
+#   fase 2 (claude_agents.agenda_brief: «agenda_macro», de la última hora a las próximas 24 h; n.º 25)
+
 # bot/local_ai.py (LocalAI: classify(title, src, tier, coins) -> dict; brief(window, when) -> str; puerto 8094, alias qwen-trading)
 ```
 
 Monedas operables: `config.COINS = ["BTC", "ETH", "SOL", "XRP"]`, cotizadas en USDC (`config.QUOTE`) en OKX EU.
 
 ## 2. Mensajes nuevos (bus → web)
+
+### 2.0 `reset` y `conteo` (bus, al principio y al final de la foto inicial del WebSocket)
+```json
+{"type": "reset", "phase": 2, "started": 0, "hueco": {"desde": 0, "hasta": 0, "min": 1980}}
+```
+`reset` abre la foto: la web borra lo simulado. `hueco` (o null) es lo que estuvo parado el bot antes de este arranque: de la
+última señal de vida (el último evento guardado o el latido, `DATA_DIR/latido`, que `bot/salud.py` toca cada minuto; así
+un rato sin red con el bot vivo no cuenta) a la hora de arranque, si pasan 5 min o más (`bus.HUECO_MIN_MS`; hallazgo n.º 0). La web lo enseña
+como aviso durante las 24 h siguientes.
+
+```json
+{"type": "conteo", "desde": 0, "kinds": {"captured": 1420, "filtered": 2462, "corroborated": 310, "triaged": 302, "lowprio": 95}}
+```
+Totales de eventos por tipo desde el arranque del bot (24 h como mucho). La foto solo trae los últimos 1.500 eventos y 300
+descartes, así que la web contaba con ellos una proporción falsa de captadas frente a ruido (hallazgo n.º 8): con este
+mensaje la web cambia sus contadores por los reales y sigue sumando lo que llega después.
+
+### 2.0b `reloj` (bot/reloj.py: la hora de este PC frente a la de los exchanges)
+```json
+{"type": "reloj", "ts": 0, "fuente": "OKX|Binance|null", "desfase_ms": 212, "ida_vuelta_ms": 300, "ok": true, "aviso": null, "error": null}
+```
+Estado (no evento): al arrancar y cada hora (a los 5 min si nadie respondió) compara la hora local con `GET /api/v5/public/time`
+de OKX y, si no responde, con la de Binance. `desfase_ms` > 0: el PC va adelantado (hora local a mitad de la petición menos
+la del servidor). `ok: false` y `aviso` (texto para la web y `bot.log`) si pasa de 2 s; `ok: null` y `error` si no se pudo
+medir o si la mejor de 3 peticiones tardó más de 1 s en ir y volver (la medida no es fiable). La web enseña el aviso arriba; `/health` lo trae en `reloj`. Solo mira: nunca cambia la hora (hallazgo n.º 53).
 
 ### 2.1 `sources_summary` (módulo feeds)
 ```json
@@ -163,6 +203,10 @@ Monedas operables: `config.COINS = ["BTC", "ETH", "SOL", "XRP"]`, cotizadas en U
               "items_last_hour": 260, "relevant_last_hour": 31, "median_lat_s": 140}]}
 ```
 Se publica como mucho cada 10 s y solo si ha cambiado. El detalle por feed sale por `GET /api/fuentes?region=jp`, que devuelve una lista de `FeedState.view()`.
+`totals.sin_red` (hallazgo n.º 44): `true` mientras el PC está sin red. Si en 60 s fallan por la red (sin conexión, tiempo
+agotado, conexión cortada) al menos el 80 % de los hosts sondeados (y al menos 10), no se suman fallos ni pausas, se
+prueba la conexión con un solo feed cada 15 s y, al volver, los fallos y pausas de red se ponen a cero y todos los feeds
+se reprograman repartidos (antes tardaban hasta 30 min en volver).
 
 ### 2.2 `trend` (módulo tendencia: índices de las bolsas)
 ```json
@@ -188,6 +232,11 @@ Se publica como mucho cada 10 s y solo si ha cambiado. El detalle por feed sale 
   "trend": "alcista|bajista|lateral", "venue": "OKX EU (libro) + Binance (operaciones)"}}}
 ```
 - `imbalance` = (volumen comprador − volumen vendedor) / suma, en los 5 primeros niveles del libro de OKX EU. Va de −1 a 1.
+  Es una media exponencial de ~1 min (`trend.IMB_TAU_S`): el libro de BTC en OKX EU es tan fino que el de un instante
+  pasaba de +0,88 a −0,94 en 20 s (hallazgo n.º 12). El del instante va en `imbalance_inst`.
+- `price` es el último precio de las operaciones de Binance en USDT: solo de referencia (va unos 10 pb por encima del
+  USDC por la base USDC/USDT). El precio con que opera el paper es el de OKX EU en USDC (`market.prices`), el único que
+  enseña la web.
 - `cvd_*` es la diferencia entre compras y ventas agresivas, en unidades de la moneda. Sale de las operaciones al contado de Binance (`wss://data-stream.binance.vision/stream?streams=btcusdt@aggTrade/...`).
 - `vol_ratio` es el volumen de los últimos 5 minutos frente a la media de 5 minutos de la última hora.
 - Se publica cada 5 s.
@@ -229,7 +278,7 @@ Se publica como mucho cada 10 s y solo si ha cambiado. El detalle por feed sale 
  "positions": [{"story": "n…", "coin": "SOL", "side": "long|short", "qty": 3.1, "entry": 104.9, "sl": 103.2,
                 "trail_pct": 1.2, "high_water": 105.6, "opened": 0, "riskUsd": 50, "notional": 3250,
                 "headline": "…", "strategy": "seguir-bolsa-anterior", "window": "Apertura Londres",
-                "instrument": "spot|perp", "funding": 0.0, "tags": {},
+                "instrument": "spot|perp", "funding": 0.0, "tags": {}, "reconstruyendo": false, "huecos": null,
                 "tp1": 106.0, "tp1_frac": 0.5, "tp1_done": false, "realized": 0.0, "qty0": 3.1,
                 "lock_r": 3.0, "floor_r": 2.0, "lock_trail_r": 2.0, "locked": false, "floor": 104.0,
                 "hold_until": 0, "hold_label": "tope de 24 h", "hold_active": 0, "sl_kind": "inicial",
@@ -242,7 +291,7 @@ Se publica como mucho cada 10 s y solo si ha cambiado. El detalle por feed sale 
  "closed": [ /* últimas 50 operaciones, formato de 3.2 */ ],
  "limits": {"risk_per_trade_pct": 0.5, "max_daily_loss_pct": 3, "max_positions": 4, "day_loss_pct": 0.4,
             "halted": false, "halt_until": null},
- "mode": "auto|veto|manual", "halted": false, "caps": ["halt", "cancel", "comisiones"],
+ "mode": "auto|veto|manual", "halted": false, "caps": ["halt", "cancel", "comisiones"], "cuenta": null,
  "comisiones": {"perfil": "okx_eu_con_xperps", "nombre": "OKX EU con cuenta X-Perps", "elegido": "okx_eu_con_xperps",
                 "config": "okx_eu_con_xperps", "por_defecto": "okx_eu_con_xperps", "cuenta": false,
                 "spot": {"creador": 0.08, "tomador": 0.10}, "perp": {"creador": 0.02, "tomador": 0.05}, "cortos": true,
@@ -272,6 +321,25 @@ Se publica como mucho cada 10 s y solo si ha cambiado. El detalle por feed sale 
 - `tags`: las etiquetas del ticket (2.6), tal cual.
 - **Gráfica de cada posición** (web, 29-10-2026): con `entry`, `opened`, `sl`, `sl_initial`, `tp2`, `tp1`/`tp1_frac`/`tp1_done`, `lock_r`/`floor_r`/`lock_trail_r`/`floor`/`locked`/`sl_kind`, `riskUsd`, `upnl` y `hold_until` la web dibuja, justo debajo de cada operación de «En posición» y en su expediente, el precio desde un poco antes de la entrada con un punto en la entrada, las líneas del stop, del objetivo (o de la parcial y el suelo del cerrojo) y el precio de ahora, y debajo la ganancia de ahora (% y R), lo que falta hasta el stop y el objetivo (%) y lo que daría cada uno (R total sobre el riesgo inicial y USDC, sin costes). Velas: `GET /api/velas` (§3; por defecto las de OKX EU del par, `fuente: "okx"`, y la nota «velas de OKX EU, BTC-USDC»; si OKX falla, las del bot con `fuente: "bot"` y `aviso`) de 1 min si la posición tiene menos de 3 h, de 5 min hasta 2 días y de 15 min después, desde 20 velas (1 min) o 24 velas antes de la entrada, repedidas cada minuto; encima, el precio de `market` que llega por el WebSocket. Sin la ruta (404) o sin velas, solo el precio en vivo desde que se abrió la web. Una posición sin `entry`, `opened` o stop válidos sale sin gráfica.
 - **Parcial y cerrojo** («6 diarias v2», 28-10-2026): `tp1`/`tp1_frac`/`tp1_done` (la salida parcial y si ya se hizo; `realized` = lo cobrado en ella), `qty0` (cantidad inicial; `qty` es lo que queda: la posición «a medias» sigue siendo LA posición de esa moneda), `lock_r`/`floor_r`/`lock_trail_r` (activación, suelo y seguimiento en R; null sin cerrojo), `locked` (activado), `floor` (precio del suelo), `sl_kind` (`inicial|be|dinamico|cerrojo|seguimiento`), `hold_until` y `hold_label` (el cierre por tiempo de ahora: al activarse el cerrojo pasa a `hold_active`, p. ej. de 24 h a 7 días desde la entrada).
+- **Reglas del usuario en el propio paper** (con `config.USER_RULES`, para TODOS los orígenes: motor, entrada por noticia
+  y fase 2): stop ≥ 1,5 %, objetivo ≥ 2R y ≥ 3 % neto de costes (`stopPct × tp2R − coste de ida y vuelta` ≥
+  `config.RULE_MIN_NET_PCT`, con el perfil de comisiones en uso: al contado con X-Perps el coste es 0,24 % y 1,5 % × 2R
+  deja 2,76 %: se rechaza; hallazgo n.º 23) o, sin objetivo fijo, un cerrojo cuyo suelo cumpla lo mismo; y los topes del
+  día de Madrid (`paper.day_caps`: los del preset del motor en marcha, E2 4 entradas y 2 %, «6 diarias» y las que salen
+  de ella 6 y 3 %, nunca más de 6 y 3 %), contando todas las entradas del paper del día. Antes la fase 2 podía
+  saltárselos (revisión del 28-10-2026). Lo que no las cumple sale `riskko` con el motivo (`motivo_codigo`: `reglas`,
+  `tope_dia` o `riesgo_dia`).
+- `cuenta`: la cartera de prueba con nombre que deja `scripts/nueva_cartera_paper.py` (`{nombre, eur, eur_usdc, usdc,
+  desde, ficticia}`; su `usdc` manda sobre `BOT_PAPER_EQUITY`) o `null`. Va también en `GET /api/resultados` (3.2).
+- **Huecos** (hallazgo n.º 47): cada posición guarda la última vez que se gestionó con precio (`seen`, en la tabla
+  `trades`; las guardadas antes, la hora del último evento de la base). Si pasa más de 2 min sin gestionarse (el bot
+  parado o caído, o sin precios), no se gestiona (`reconstruyendo: true`) hasta reconstruir el hueco con las velas de
+  1 min de Binance al contado (pasadas a la escala de OKX EU con el cociente de los dos precios al empezar el hueco):
+  si tocó el stop, el objetivo o el tope de tiempo, se cierra a ese nivel y a esa hora (el stop con su deslizamiento y,
+  si la vela abre más allá, a su apertura; si toca stop y objetivo en la misma vela, el stop), con el funding de las
+  liquidaciones de por medio al precio de su hora. Si no, sigue en vivo y lo apunta en `huecos`
+  `[{desde, hasta, velas, factor, completo, fuente}]` (y un `manage` «hueco revisado»). Sin velas completas tras 10
+  intentos (uno por minuto), sigue en vivo con `completo: false`.
 
 ### 2.6 Eventos nuevos o ampliados (`"type": "event"`)
 
@@ -291,7 +359,7 @@ Todos llevan `kind`, `agent`, `story` (salvo `flow` y `brief`), `title`, `text`,
 | `scheduled`, `order`, `filled`, `manage`, `blocked` | `exec` | `exec{scheduled?, sent?, px, slip (pb), ms, notional, sl, tp1?, tp2?, trail?, stopLossUsd?, blocked?, why?, motivo_codigo? (blocked, 2.17), instrument, funding?, funding_n?, lockR?, floorR?, lockTrailR?, floor?, holdUntil?, holdActive?, locked?, comision?, feeOpen?}` (un `manage` con `funding` es una liquidación de funding de un perpetuo; `filled` trae `comision {perfil, creador, tomador}`, las tasas con que se abre, y `feeOpen`, la comisión de entrada en USDC, que también dice su texto: «comisión de entrada 3,25 USDC (0,10 % tomador)»); `filled` lleva además `trade_id` en el patch (el `id` de la operación de 3.2). Dos `manage` llevan además, solo ellos, un campo propio en el patch: el que activa el cerrojo, `lock{at, lock_r, floor_r, trail_r, floor, hold_until}` (título «BTC: cerrojo a +2,0 R»), y el de la salida parcial, `partial{qty, px, at, pnl, fee, why, R (de la posición entera), tp1R, frac, qty_left, locked, sl, floor, hold_until}` (lo usa el registro de decisiones, 2.17). El seguimiento del cerrojo publica `manage` «BTC: stop de seguimiento a X» cada vez que sube 0,25 R; en la tabla `trades` la posición se guarda en cada subida, por pequeña que sea, y todas las abiertas al parar el bot: un reinicio no baja el stop |
 | `closed` | `exec` | `result{coin, side, qty, entry, exit, why, pnl, pnl_pct, R, fees, opened, closedAt, riskUsd, notional, headline, strategy, window, costes, bruto}` (`costes` y `bruto` como en 3.2; el texto acaba en «· bruto +X USDC») y `trade_id` (el `id` de la operación); el evento lleva `tone: "good"` o `"bad"` |
 | `real_aviso` | `real` | `aviso{…}` y `real{modo, demo}`: avisos del modo real (cambios de modo, parada hecha con `aviso.resultado {canceladas, cerradas, fallidas, errores}`, reconciliación, posiciones fuera del bot o apartadas, stop que no se pudo poner, orden en duda, cierre parcial). `aviso.sin_stop: true` marca una posición SIN STOP en OKX (aviso fuerte, en rojo); `false`, que ya lo tiene. `story` = `real` o la de la posición. Todo evento del modo real (también `riskok`, `filled`, `closed`…) lleva `patch.real` (2.18) |
-| `reflejo` | `flow` | `reflejo{estado ("pendiente"\|"confirmada"\|"contraria"\|"sin_reflejo"), mov_pct, min, ref ("BTC"\|"media"), umbral_pct}` (ver abajo) |
+| `reflejo` | `flow` | `reflejo{estado ("pendiente"\|"confirmada"\|"contraria"\|"sin_reflejo"), mov_pct, min, ref ("BTC"\|"media"), umbral_pct, tarde?}` (ver abajo) |
 | `entrada_noticia` | `strat` | `entrada_noticia{estado ("esperando"\|"confirmada"\|"caducada"\|"vetada"), motivo, motivo_codigo? (caducada y vetada con moneda: el catálogo de 2.17), moneda (o null: toda la noticia), dir (±1), lado, grupo{clave, tipo, nombre, sentido, n, n_historias, dias, acierto, acierto_bruto, ic90_bajo, opera}, ta, expira?, ts_triaje?, umbral_pct?, mov_pct?, min?, paper_story?, entrada?, stop?, objetivo?, instrumento?, riesgo_pct?}`; `story` = la de la noticia (ver 2.16) |
 
 Prefiltro (`bot/filters.py`, 28-10-2026; `clase` en la captada y en la descartada relevante):
@@ -317,12 +385,16 @@ que no lo son); sin clase (historias de antes del 28-10-2026), solo el titular (
 **Nunca el tipo, los temas ni el resumen del triaje** (revisión del 28-10-2026, hallazgo n.º 1: la IA local pone el tema
 «cripto» o el tipo «seguridad» a noticias de la Fed o de guerra, y el 12 % de las macro con dirección se colaba sin
 confirmar). Se mide desde la captura, con el cierre de cada vela de 1 min frente al de la última vela cerrada antes de la
-captura, la media de las cuatro monedas (o BTC si falta alguna); manda el primer toque. El umbral (`umbral_pct`) es el
+captura, la media de las cuatro monedas (o BTC si falta alguna o si una se queda sin velas nuevas más de 2 min por
+detrás de BTC); manda el primer toque. El umbral (`umbral_pct`) es el
 mayor de 0,5 % y 2σ del movimiento de 60 min de esa misma referencia en las 24 h anteriores a la captura (sin 24 h de
 velas, 0,5 %):
 - `confirmada`: a favor de la dirección de la noticia, al menos el umbral, en los 60 min siguientes;
 - `contraria`: al menos el umbral en contra;
-- `sin_reflejo`: pasados 60 min, ninguna de las dos (y, sin velas en 3 h, `mov_pct: null`);
+- `sin_reflejo`: pasados 60 min con sus velas completas, ninguna de las dos; sin los 60 min completos (hueco de velas o
+  reinicio) sigue `pendiente` hasta 3 h después de la captura y entonces se cierra con lo que haya (sin velas,
+  `mov_pct: null`). Con `tarde: true`: se trió más de 60 min después de captarla y lo que hizo la cripto ya había pasado
+  cuando el bot pudo usarla (revisión del 28-10-2026);
 - `pendiente`: dentro de los 60 min (se publica una vez; luego el estado final, una vez). Puede llevar `ref` y
   `umbral_pct` nulos si aún no hay velas.
 `mov_pct` es el movimiento (con signo, + = sube) en el momento del estado y `min` los minutos desde la captura. Solo las
@@ -349,7 +421,7 @@ Estado de la fuente (`srcState`, `srcWeight`; lo decide `bot/fuentes_vivas.py` y
 
 Campos del ticket para el paper:
 - `instrument`: `spot` o `perp` (2.5). La fase 2 lo pone siempre (`perp` en los cortos); el motor de aperturas, según `long_instrument` y `short_instrument`.
-- `tags` (motor de aperturas): `lado`, `instrumento`, `noticia` (`a_favor|en_contra|sin_noticia`), `noticia_fuerza`, `noticia_fiable` (`a_favor|en_contra|ninguna`: noticias de un grupo fiable de las 6 h previas, 2.15) y `noticia_fiable_grupo` (nombre del grupo o null), `apertura_anterior`, `apertura_anterior_pct`, `btc`, `volatilidad_pct`, `impulso_pct`, `medida_min`, `rvol`, `estrategia_firma` (la versión de la estrategia que la abrió, `evolucion.firma_motor`), `origen: "motor_aperturas"` y `preset` (`impulso|seis|seis2|ruptura3|seis4r|null`: el preset de `apertura.preset_of`, null con cambios de la evolución; el ranking reparte por él las operaciones del paper, `ranking.PRESET_FILA`). El paper las copia en la posición y en la operación de 3.2.
+- `tags` (motor de aperturas): `lado`, `instrumento`, `noticia` (`a_favor|en_contra|neutral`: neutral sin señal clara, fuerza < `min_strength`), `noticia_fuerza`, `noticia_fiable` (`a_favor|en_contra|ninguna`: noticias de un grupo fiable de las 6 h previas, 2.15) y `noticia_fiable_grupo` (nombre del grupo o null), `apertura_anterior`, `apertura_anterior_pct`, `btc`, `volatilidad_pct`, `impulso_pct`, `medida_min`, `rvol`, `estrategia_firma` (la versión de la estrategia que la abrió, `evolucion.firma_motor`), `origen: "motor_aperturas"` y `preset` (`impulso|seis|seis2|ruptura3|seis4r|null`: el preset de `apertura.preset_of`, null con cambios de la evolución; el ranking reparte por él las operaciones del paper, `ranking.PRESET_FILA`). El paper las copia en la posición y en la operación de 3.2.
 - **Origen de las operaciones** (`origen` en el ticket y en sus `tags`, desde el 28-10-2026): `motor_aperturas` (motor de aperturas, story `a-<ventana>-<fecha>-<moneda>-<n>`, estrategia `impulso-…`) o `noticia_fiable` (entrada por noticia confirmada, 2.16: story `nf-<story de la noticia>-<moneda>`, estrategia `noticia-fiable-largo|noticia-fiable-corto`, ventana «Noticia fiable», `noticia` = la story de la noticia). Sin `origen`: la fase 2 o lo anterior al 28-10-2026.
 - `tags` (entrada por noticia): `origen`, `story` (la de la noticia), `grupo` (clave), `grupo_nombre`, `grupo_tipo`, `acierto`, `ic90_bajo`, `umbral_pct`, `mov_pct`, `min_confirmacion`, `lado` e `instrumento`.
 
@@ -445,7 +517,8 @@ Estado (no evento) de `bot/apertura.py`, cada 3 s como mucho y solo si cambia. D
             "preset": "impulso|seis|seis2|ruptura3|seis4r|seis4r3|null", "nombre": "E2 · impulso|6 diarias|6 diarias v2|Ruptura V3: …|6 diarias 4R: …|<nombre de la evolución>|null", "descripcion": "…|null"},
  "salida": "stop 3 % y objetivo 3R (+9 %), sin tope (7 días de seguridad)", "salida_corta": "stop 3 % y objetivo 3R",
  "params_source": "preset_impulso|preset_impulso+entorno|manual|evolucion|usuario", "notice": null, "paused": false,
- "estrategia_cargada": {"firma": "3f2a…", "ts": 0, "pausada": false, "fuente": "evolucion", "registro": "v…", "preset": "seis"},
+ "estrategia_cargada": {"firma": "3f2a…", "ts": 0, "pausada": false, "fuente": "evolucion", "registro": "v…", "preset": "seis",
+                        "motivo": "solo si pausada: el motivo de la pausa (n.º 20)"},
  "states": ["esperando_apertura", "midiendo_impulso", "esperando_entrada", "en_posicion", "terminada"],
  "day": {"date": "2026-10-27", "entries": 1, "risk_pct": 0.5, "max_entries": 4, "max_risk_pct": 2.0},
  "windows": [{"id": "europa-2026-10-27", "name": "Europa", "markets": ["frankfurt", "londres", "madrid"], "open_utc": 0,
@@ -455,7 +528,7 @@ Estado (no evento) de `bot/apertura.py`, cada 3 s como mucho y solo si cambia. D
               "regimen": {"zona": "RISK_ON", "puntos": 91.5, "peso_disponible": 0.85, "funding_8h": {"BTC": 0.0001}},
               "coins": {"BTC": {"state": "esperando_entrada", "step": "hora|retroceso|reanudacion|ruptura|null", "signal": 1,
                                 "why": "…", "instrument": "spot|perp|null", "rvol": 3.0, "range": {"hi": 0, "lo": 0},
-                                "news": {"dir": 0, "strength": 0.0, "why": "…", "label": "a_favor|en_contra|sin_noticia"},
+                                "news": {"dir": 0, "strength": 0.0, "why": "…", "label": "a_favor|en_contra|neutral"},
                                 "tags": {}, "levels": {"apertura": 0, "impulso_pct": 0.3, "maximo": 0, "minimo": 0, "extremo": 0,
                                                        "retroceso": null, "ruptura": null, "hora_entrada": 0, "rvol": 3.0,
                                                        "entrada": 0, "stop": 0, "objetivo": 0, "parcial": null, "suelo": null,
@@ -545,7 +618,7 @@ Estado (no evento) de `bot/evolucion.py`, solo si cambia. Todo solo paper.
  "ultima_evaluacion": 0, "proxima_evaluacion": 0, "ultimo_cambio": 0, "automatico_desde": null,
  "ultima_orden": {"accion": "aplicar", "id": "p…", "ok": true, "why": null, "ts": 0}}
 ```
-- **Historial (`evolution_log`):** todo lo que cambia el sistema, con fecha, tipo, sujeto, antes, después, motivo en español, evidencia (cifras y tamaño de muestra), origen y, si deshace otro, `revierte`. Solo se añade: SQLite impide borrar o modificar filas. Tipos: `fuente_añadida`, `fuente_silenciada`, `fuente_retirada`, `fuente_restaurada`, `peso_cambiado`, `estrategia_promovida`, `estrategia_degradada`, `parametro_cambiado` (también el cambio de modo), `informe_semanal`, `propuesta_descartada` (una propuesta que descartaste desde la web; lo descartado queda bloqueado), `veredicto_medio` (el aprendizaje confirma otro veredicto de un medio sin cambiar su peso: filas `tipo='veredicto'` de `medios_peso_hist`), `estrategia_cambiada` (origen `usuario`: la estrategia que cambia el usuario con `scripts/activar_estrategia.py`, p. ej. «Estrategia cambiada por decisión del usuario el 28-10-2026: 6 diarias (…)», con la estrategia entera antes y después; se revierte como las de la evolución, y su reversión es otra `estrategia_cambiada` con `revierte`) y `filtro_cambiado` (origen `codigo`: un cambio del código que altera lo que filtra la estrategia en paper; `evolucion.CAMBIOS_CODIGO`, apuntado una sola vez al arrancar con su id fijo; el del 28-10-2026 es `codigo-noticias-2026-10-28`, el filtro de noticias y las predicciones de los índices, y `codigo-entrada-noticias-2026-10-28`, la entrada por noticia fiable y los topes del día compartidos; no se revierten desde la web). Las operaciones con `tags.origen` `noticia_fiable` nunca cuentan como del campeón (`evolucion.ORIGENES_AJENOS`), aunque no lleven firma y el campeón sea el preset. Cada entrada leída lleva `etiqueta` y `revertida_por`; las del mensaje y de `/api/evolucion/historial` llevan además `reversible` (la web solo ofrece «Revertir» entonces: estrategia y modo, y lo de fuentes_vivas y aprendizaje; nunca el informe, un veredicto ni una propuesta descartada). Una reversión de peso desde la web (`revertir_peso`) lleva «n.º N» en el motivo y queda enlazada (`revierte`).
+- **Historial (`evolution_log`):** todo lo que cambia el sistema, con fecha, tipo, sujeto, antes, después, motivo en español, evidencia (cifras y tamaño de muestra), origen y, si deshace otro, `revierte`. Solo se añade: SQLite impide borrar o modificar filas. Tipos: `fuente_añadida`, `fuente_silenciada`, `fuente_retirada`, `fuente_restaurada`, `peso_cambiado`, `estrategia_promovida`, `estrategia_degradada`, `parametro_cambiado` (también el cambio de modo), `informe_semanal`, `propuesta_descartada` (una propuesta que descartaste desde la web; lo descartado queda bloqueado), `veredicto_medio` (el aprendizaje confirma otro veredicto de un medio sin cambiar su peso: filas `tipo='veredicto'` de `medios_peso_hist`), `estrategia_cambiada` (origen `usuario`: la estrategia que cambia el usuario con `scripts/activar_estrategia.py`, p. ej. «Estrategia cambiada por decisión del usuario el 28-10-2026: 6 diarias (…)», con la estrategia entera antes y después; se revierte como las de la evolución, y su reversión es otra `estrategia_cambiada` con `revierte`) y `filtro_cambiado` (origen `codigo`: un cambio del código que altera lo que filtra la estrategia en paper; `evolucion.CAMBIOS_CODIGO`, apuntado una sola vez al arrancar con su id fijo; el del 28-10-2026 es `codigo-noticias-2026-10-28`, el filtro de noticias y las predicciones de los índices, `codigo-entrada-noticias-2026-10-28`, la entrada por noticia fiable y los topes del día compartidos, y `codigo-auditoria-2026-10-28`, los arreglos de la auditoría que tocan la cartera paper (huecos reconstruidos con velas, 3 % neto para todas las entradas y la fase 2 en los topes); su etiqueta es «Cambio del código en el paper»; no se revierten desde la web). Las operaciones con `tags.origen` `noticia_fiable` nunca cuentan como del campeón (`evolucion.ORIGENES_AJENOS`), aunque no lleven firma y el campeón sea el preset. Cada entrada leída lleva `etiqueta` y `revertida_por`; las del mensaje y de `/api/evolucion/historial` llevan además `reversible` (la web solo ofrece «Revertir» entonces: estrategia y modo, y lo de fuentes_vivas y aprendizaje; nunca el informe, un veredicto ni una propuesta descartada). Una reversión de peso desde la web (`revertir_peso`) lleva «n.º N» en el motivo y queda enlazada (`revierte`).
 - **Campeón:** la estrategia que opera el motor (`impulso-…` en el paper). Su referencia es su gemelo virtual de la vigilancia (misma salida, reglas y costes que los aspirantes); el paper es una segunda comprobación. Hasta que el motor confirma la versión del archivo (`openings.estrategia_cargada`, 2.9) sale `pendiente_reinicio` (la web dice «Pendiente de carga»: el motor la carga solo en ≤ 1 min, sin ninguna apertura en curso; no hace falta reiniciar) y no se evalúan su degradación ni sus ajustes. `desde` es cuando se aplicó esa versión (`estrategia_activa.json`) o, con el preset, su primera operación; la hora de carga del motor solo confirma la versión.
 - **Aspirantes:** las estrategias de la vigilancia que el motor sabe operar con su salida. Para sustituir al campeón: ≥ 40 operaciones nuevas y completas, ventaja con p < 0,05 corregida por Holm, gemelo con ≥ 20 operaciones, reglas del usuario y confirmación con datos posteriores. Pausa propuesta: R contraído < −0,3 con ≥ 30 operaciones y evidencia clara.
 - **Modo `proponer`** (por defecto): nada se aplica solo. **Modo `automatico`** (`BOT_EVOLUCION_MODO` o desde la web): promociones (una cada 14 días como mucho) y pausas se aplican solas; los ajustes de parámetros son siempre propuestas. Lo aplicado se escribe en `DATA_DIR/estrategia_activa.json`, que el motor carga entre aperturas (2.9).
@@ -556,7 +629,7 @@ Estado (no evento) de `bot/evolucion.py`, solo si cambia. Todo solo paper.
 Estado (no evento) de `bot/fuentes_vivas.py`: tras cada revisión (cada hora) y al momento tras cada acción, solo si cambia.
 ```json
 {"type": "fuentes_vivas", "ts": 0, "auto": true, "descubrir": true,
- "feeds": {"activa": 5600, "prueba": 3, "silenciada": 100, "retirada": 11}, "medios": {"activa": 0, "prueba": 0, "silenciada": 2, "retirada": 0},
+ "feeds": {"activa": 5600, "prueba": 3, "silenciada": 100, "retirada": 11}, "medios": {"activa": 5100, "prueba": 0, "silenciada": 2, "retirada": 0},
  "candidatos": {"pendiente": 0, "verificado": 0, "anadido": 0, "sin_rss": 0, "bloqueado": 0, "en_registro": 0, "error": 0},
  "ruido_medio": 0.6, "sugerencias": 0, "revision": {"ultima": 0, "s": 2.1, "medidas": 0, "cambios": 0, "anadidas": 0, "nota": null},
  "cambios": [{"ts": 0, "id": "jp-nhk-…|medio:dominio", "nombre": "…", "accion": "anadir|silenciar|retirar|restaurar|activar|a_prueba",
@@ -565,9 +638,10 @@ Estado (no evento) de `bot/fuentes_vivas.py`: tras cada revisión (cada hora) y 
  "aviso": "…"}
 ```
 - **Ciclo de vida:** `prueba` → `activa` → `silenciada` → `retirada` (y vuelta con `restaurar`). Una retirada no se sondea; una silenciada se sondea menos y sus noticias llegan con peso 0; una en prueba, con peso 0,5. Un **medio** (`medio:<dominio>`) vale para todos sus canales (feed propio, Google News y relays). El acierto se juzga por medio; un feed solo por la técnica y el ruido.
-- **Reglas** (cada hora, con casos independientes = horas distintas en ≥ 7 días, acierto ajustado al mercado y contraído): silenciar con ≥ 30 casos y acierto claramente bajo lo neutro, o ruido ≥ 90 %, o caída técnica de ≥ 72 h; restaurar con ≥ 20 casos sin malos resultados; retirar tras ≥ 30 días silenciada solo si se confirma otra vez. Como mucho 3 bajadas por revisión y 10 en 24 h; las oficiales (T0) solo por caída técnica o a mano; lo que decides a mano se respeta 30 días. `BOT_FUENTES_AUTO=0`: las reglas solo sugieren.
+- **Reglas** (cada hora, con casos independientes = horas distintas en ≥ 7 días, acierto ajustado al mercado y contraído): silenciar con ≥ 30 casos y acierto claramente bajo lo neutro, o ruido ≥ 90 %, o caída técnica (≥ 10 fallos seguidos y ≥ 72 h reales desde el primer fallo visto de la racha, contando el tiempo con el bot parado si fallaba al parar y sigue fallando al volver; `source_health` guarda la racha; hallazgo n.º 5); restaurar con ≥ 20 casos sin malos resultados; retirar tras ≥ 30 días silenciada solo si se confirma otra vez. Como mucho 3 bajadas por revisión y 10 en 24 h; las oficiales (T0) solo por caída técnica o a mano; lo que decides a mano se respeta 30 días. `BOT_FUENTES_AUTO=0`: las reglas solo sugieren.
 - **Descubrimiento:** medios que llegan por agregadores con ≥ 10 casos medidos que dan las noticias antes que nadie o aciertan; se busca y verifica su RSS (robots.txt, como mucho 12 peticiones por hora) y se añade en `prueba`. `BOT_FUENTES_DESCUBRIR=0`: sin peticiones.
 - Cada cambio queda en `source_status_log` y en `evolution_log` con su motivo y sus cifras, y se deshace volviendo exactamente al estado de antes. No toca las reglas de operación: solo decide qué noticias cuentan.
+- **Contadores:** `feeds`, los canales del registro por estado; `medios`, los medios conocidos (los medidos en la ventana y los que tienen fila por algún cambio): uno sin cambio de estado cuenta como `activa`. Los dominios `.invalid` (reservados, RFC 2606: restos de pruebas) no cuentan ni salen en la lista; su fila y su historial se quedan como están.
 - Una orden a mano solo vale para una fuente conocida: un feed del registro, una fila guardada o un `medio:<dominio>` con dominio válido y ya visto (con cifras, con feed propio, con estado en los feeds, en `fv_noticias`, en `medios_info` o candidato). Si no, `orden_web` con `ok: false` y «No conozco esa fuente».
 
 ### 2.13 `orden_web` (resultado de una orden de la web sobre fuentes o pesos)
@@ -697,9 +771,11 @@ Versión 2 (28-10-2026, tras la revisión estadística): azar que conserva la ho
   24 h (`n_horquilla`; la horquilla del usuario, stop 1,5 % y objetivo 4,5 % a 24 h, aproximada desde la captura con
   `max_sube`, `max_baja` y `r1440`: −1 si tocó el stop, también si tocó los dos; +3 si tocó el objetivo; si no, el cierre
   a 24 h; sin costes); y `adelante` (desde el primer día en que pasó el criterio con solo los días anteriores, con las
-  noticias que el bot usaría en vivo, `senal` = 1) con ≥ 30 noticias distintas, acierto ≥ 60 % y bruto ≥ 50 %.
-  `no_opera` dice lo que le falta (vacía si opera). `vivo` (exploración): el mismo grupo solo con `senal` = 1 en todos
-  los días. `base_sentido` (información): lo que acertaban todas las noticias del mismo sentido en esas monedas y días.
+  noticias que el bot usaría en vivo, `senal` 1 o 2) con ≥ 30 noticias distintas, acierto ≥ 60 % y bruto ≥ 50 %.
+  `no_opera` dice lo que le falta (vacía si opera). `vivo` (exploración): el mismo grupo solo con `senal` 1 o 2 en todos
+  los días. Desde la versión 3 (28-10-2026) la 2 (una macro que la cripto aún no confirmó) cuenta como la 1, como en el
+  aprendizaje: con solo las confirmadas se miraría el futuro, porque «confirmada» quiere decir que la cripto ya se movió
+  a su favor en los 60 min que también mide `acc240` (antes, `senal` = 1). `base_sentido` (información): lo que acertaban todas las noticias del mismo sentido en esas monedas y días.
 - **`fiable_para(medio, feed, tipo, dir)`** devuelve solo grupos con `opera: true`; un cálculo sin ese campo (de antes de
   la versión 2) no pone ninguno. `hay_fiables()` = hay alguno que opera.
 - Mismos datos de entrada (`firma_datos`: días, filas medidas y sus sumas, criterios, puerta, versión y permutaciones) =
@@ -960,16 +1036,32 @@ importan; las que vaya sacando el agente entran solas en su puesto, lleguen o no
   enseña el bot y las rehace `scripts/ranking_importar.py --demo`; las que empiezan por «Ejemplo» son inventadas. En
   directo el servidor quita el bloque de la página (`server.BT_BLOCK`).
 
+### 2.17 `backtest` (resumen del backtest general)
+
+Estado (no evento) de `bot/backtest.py`: al arrancar (el último `resultados.json`), tras cada cálculo y si otro proceso regenera el archivo.
+```json
+{"type": "backtest", "generated": 0, "n": 690,
+ "counts": {"funciona": 0, "dudosa": 0, "solo_correlacion": 0, "no_funciona": 0, "pocos_datos": 0},
+ "counts_operables": {"funciona": 0, "…": 0},
+ "best": [{"id": "…", "family": "…", "name": "…", "n": 0, "hit_rate": 0.0, "base_rate": 0.0, "lift_pp": 0.0, "avg_ret_pct": 0.0, "verdict": "dudosa"}]}
+```
+- `best`: hasta 5 operables con veredicto `funciona` o `dudosa`. El detalle sale por `GET /api/backtest` (3.1).
+- La web no lo procesa: relee `/api/backtest` cada 30 min.
+
 ## 3. API de solo lectura (servidor en 127.0.0.1:8765)
 
 | Ruta | Devuelve |
 |---|---|
+| `GET /health` | Salud del proceso: `phase`, `sources` (cazadores), `market {ok, err, prices}`, `trend {ok, err}`, `feeds` (2.1), `local_ai {queue, done, dropped}` (cola del triaje, triadas y sin triar por cola llena), `db {mb, wal_mb, copias, ultima_copia}` (tamaño de `bot.db` y su WAL y las copias diarias de `DATA_DIR/copias`, hallazgos n.º 39 y 51), `arranque` (ms), `en_marcha_s`, `hueco_al_arrancar` (el `hueco` de 2.0 o null; hallazgo n.º 0), `reloj` (el último mensaje de 2.0b o null), `proceso {mem_mb, privada_mb, handles, hilos}` y `retraso_bucle {ms, max_ms}` (cuánto se pasa una espera de 1 s del bucle; el máximo es el del tramo de 5 min), `congelado` (`{desde, hasta, min}` del último tramo de 5 min o más con el proceso congelado en hora real, p. ej. el PC suspendido, o null) y `clients`. Cada 5 min `bot/salud.py` apunta una fila con todo eso en `DATA_DIR/logs/salud.csv` (`;` y coma decimal; columnas en `salud.COLUMNAS`) para la prueba de 24-72 h (hallazgo n.º 40) La usa `scripts/vigilante-bot.ps1` |
 | `GET /api/estado` | Resumen para la IA local (precios, flujo, libro, agenda, fuentes, IA local y cartera). Desde el 28-10-2026, en lugar de `bolsas` (la variación de cada índice) lleva `aperturas_cripto`: por bolsa, `{nombre, estado, apertura (Madrid), minutos_desde_apertura, medida ("desde la apertura"\|"a las 4 h"\|"última apertura, a las 4 h"), cripto {moneda: {pct, rango_pct}} \| null, media_pct}` del último `cripto_aperturas` |
-| `GET /api/noticias?horas=&min=&bolsa=` | Noticias con su triaje. Cada una lleva además `medio`, `estado_fuente`, `peso_fuente`, `peso_medio`, `clase` (`cripto\|macro\|contexto`, del prefiltro) y `reflejo` (el último del evento `reflejo`, o `null`); `credibilidad_ajustada` = la del nivel y las confirmaciones × peso del medio × peso de la fuente (0 si está silenciada, y 0 si es macro o geopolítica sin reflejo confirmado en la cripto); `confirmaciones` no cuenta las de fuentes silenciadas |
+| `GET /api/noticias?horas=&min=&bolsa=&limite=` | Las `limite` más recientes (60 por defecto, 500 como mucho; hallazgo n.º 11: con 60 fijas, `horas=48` devolvía solo el último minuto) de las `horas` últimas (3 por defecto, 48 como mucho) con importancia ≥ `min`. Noticias con su triaje. Cada una lleva además `medio`, `estado_fuente`, `peso_fuente`, `peso_medio`, `clase` (`cripto\|macro\|contexto`, del prefiltro) y `reflejo` (el último del evento `reflejo`, o `null`); `credibilidad_ajustada` = la del nivel y las confirmaciones × peso del medio × peso de la fuente (0 si está silenciada, y 0 si es macro o geopolítica sin reflejo confirmado en la cripto); `confirmaciones` no cuenta las de fuentes silenciadas |
 | `GET /api/fuentes?region=&estado=` | Lista de feeds (2.1) con `estado` y `peso` de su ciclo de vida (2.12); `estado=` filtra |
 | `GET /api/tendencia` | Último `trend` y `orderflow` |
 | `GET /api/predicciones` | Último `predictions` |
 | `GET /api/backtest` | Contenido de `BACKTEST_DIR/resultados.json` (3.1) |
+| `GET /api/predicciones/evaluadas?n=50` | Las últimas n predicciones ya evaluadas (hasta 500), con su acierto |
+| `GET /api/cartera` | La cartera del paper ahora (`portfolio`, 2.5) |
+| `GET /api/fase2` | Estado de la fase 2: `{claude, estado ("ok"\|"nokey"\|"apagada"…), presupuesto {limite_usd, gastado_usd}, planes}` |
 | `GET /api/backtest/aperturas` | `BACKTEST_DIR/aperturas.json`: el motor anterior (v2 «ruptura»), solo como referencia (404 sin archivo) |
 | `GET /api/backtest/impulso` | `{impulso, lab}` (`bot/resumen_backtest.py`): `impulso` = `BACKTEST_DIR/impulso_7d.json` (lo escribe `controles/compara_impulso.py`), la variante de 7 días que opera el motor, con `fuera` y `dentro` = `{n, mean_R, win_rate, salidas, horas_media, largos, cortos, desde, hasta, total_R, max_dd_R, curva_R [[ms, R acumulado]] (≤ 151 puntos)}` y, si la curva del archivo trae un punto por operación, `max_R` y `min_R` (la mejor y la peor), `ganadoras_n`, `ganadoras_bajo_2R` y `ganadoras_bajo_1R` (cuántas ganadoras ganan menos de 2R y de 1R: el cierre por tiempo sale con lo que haya), calculados con la curva completa (`resumen_backtest.per_trade`) y `nota`; `lab` = resumen de `laboratorio.json` (`summary`, `promising`, `robust`, `avance` = cuenta honesta en avance trimestral con 0,5 % de riesgo); `seis` = `BACKTEST_DIR/seis_diarias_resumen.json` (la réplica del motor con el preset «6 diarias»), con la misma forma que `impulso` más `nombre` y `params`; `seis2` = `BACKTEST_DIR/seis2_resumen.json` (la réplica del motor con el preset «6 diarias v2»: la mitad en 3R y el resto con el cerrojo; `salidas` con `stop`, `tiempo`, `cerrojo`, `seguimiento` y, si las hay, `tiempo (activada)` y `fin de datos`), con la misma forma que `seis`; `ruptura3` = `BACKTEST_DIR/ruptura3_resumen.json` (29-10-2026, lo escribe `scripts/replica_ruptura3.py`: la réplica del motor con el preset «Ruptura V3», operación a operación igual que `controles/selectiva/medir_selectiva.py`), con la forma de `seis2` y además, en `fuera` y `dentro`, `op_jornada`, `stop_medio_pct`, `paper_R_funding` y `antes_de_costes {n, R_bruto, deslizamiento_R, comisiones_R, funding_R, R_neto, costes_R, gana_bruto_pct, gana_neto_pct, stop_medio_pct, cuenta_jornada_bruto_pct, cuenta_jornada_costes_pct, cuenta_jornada_neto_pct, op_jornada}` (las mismas operaciones sin comisiones ni deslizamiento ni funding y cuánto se lleva cada coste, en R por operación y en % de la cuenta por jornada con 0,5 % de riesgo). Cada resumen y la respuesta entera llevan `costes` (29-10-2026, `resumen_backtest.costes`): `{perfil ("okx_eu_con_xperps" si la comisión es la de tomador del contado con X-Perps; si no, null), comision_pct, comision_perp_pct?, deslizamiento_bps, coste_rt_pct, texto, aviso, perfil_en_uso}`: las réplicas y el laboratorio van con 0,10 % por lado (también en los perpetuos de las réplicas; el laboratorio, 0,05 % en perpetuos) y 2 pb; el aviso dice que sin cuenta X-Perps (0,35 % y sin cortos) serían peores. `seis4r` = `BACKTEST_DIR/seis4r_resumen.json` (29-10-2026, lo escribe `scripts/replica_seis4r.py`: la réplica del motor con el preset «6 diarias 4R», operación a operación igual que la variante «F0 stop 2 % · objetivo 4R · tope 7d» de `controles/salidas_motor.py`), con la forma de `ruptura3` (`salidas` con `stop`, `objetivo` y `tiempo`; `params.preset` `seis4r`) y además, en `fuera` y `dentro`, `perfiles {sin_costes, backtest, okx_eu_con_xperps, okx_eu_sin_xperps}` = `{n, R, gana_pct, op_dia, pct_dia, pct_dia_natural, R_total}` (las claves de `ranking.PERFILES_TEXTO`: las mismas operaciones sin costes, con los del backtest y con los de OKX EU con X-Perps; sin X-Perps, el libro rehecho solo con las compras), y `dentro.largos`/`dentro.cortos`. Lo que falte va como `null`; 404 si faltan los seis. La demostración (sin bot) los lleva incrustados en `<script type="application/json" id="seisData">`, `id="seis2Data"`, `id="ruptura3Data"` e `id="seis4rData"` (`scripts/incrustar_backtest.py`); en vivo, la web los quita y los pide aquí |
 | `GET /api/noticias_fiables` | Último `noticias_fiables` (2.15); 404 si aún no hay ningún cálculo |
@@ -987,18 +1079,19 @@ importan; las que vaya sacando el agente entran solas en su puesto, lleguen o no
 | `GET /api/lab_vivo/generador?limite=10` | `{notas, n}`: las últimas notas del agente generador (`generador\*.json`, de la más reciente a la más vieja, con `archivo`; `limite` de 1 a 50) |
 | `GET /api/aperturas` | Último `openings` (2.9) |
 | `GET /api/cripto_aperturas` | Último `cripto_aperturas` (2.14), o `{"estado": "apagado"}` sin el módulo |
+| `GET /api/reflejo` | Reflejo de las macro desde el arranque (`bot/reflejo.py`): `{type: "reflejo", estado: "encendido\|apagado", pendientes, finales: {confirmada, contraria, sin_reflejo}, tasa_confirmada, azar_confirmada_pct}`; la tasa real frente a la del azar |
 | `GET /api/aprendizaje` | Último `aprendizaje` (2.10) más `medios` (ranking de 60), `postmortems` (20), `cambios` (30 cambios de peso) y `noticias` `{mejores, peores}` (las que mejor y peor funcionaron a 4 h, 20 de cada) |
 | `GET /api/aprendizaje/medios?orden=peso\|acierto\|casos\|ruido\|ops\|R&limit=&veredicto=&min_casos=&q=` | Ranking de medios del último cálculo |
 | `GET /api/aprendizaje/medio?id=dominio` | Todo lo medido de un medio (404 sin datos) |
 | `GET /api/aprendizaje/noticias?cuales=mejores\|peores&horizonte=15\|60\|240\|1440&dias=30&limit=20&solo_senal=1` | Noticias con titular, medio, rendimientos, `explicacion` y `operaciones` [{operacion, postmortem}] |
 | `GET /api/aprendizaje/estadisticas?por=nivel\|region\|idioma\|tipo\|ventana\|fase\|rol\|moneda` | Acierto por esa dimensión |
-| `GET /api/aprendizaje/postmortems?limit=&origen=paper\|vigilancia` | Post-mortems: `resumen` (sin IA), `texto` (IA local o null), `estado` (`pendiente\|hecho\|error`) y `hechos` |
+| `GET /api/aprendizaje/postmortems?limit=&origen=paper\|vigilancia` | Post-mortems: `resumen` (sin IA), `texto` (IA local o null), `estado` (`pendiente\|hecho\|error`) y `hechos`. La IA local los escribe en baja prioridad, pero con la cola de triaje llena uno cada 10 min pasa por delante (hueco reservado, hallazgos n.º 15 y 4) |
 | `GET /api/aprendizaje/cambios?limit=&medio=` | Cambios de peso de medios (`id, ts, outlet, antes, despues, tipo, motivo, cuerpo`) |
 | `GET /api/evolucion` | Último `evolucion` (2.11) más `informe_semanal`: el último informe entero (`secciones` [{titulo, lineas}], `texto`, `cifras`) |
 | `GET /api/evolucion/historial?tipo=a,b&sujeto=&origen=&desde=&hasta=&limite=` | `{cambios, tipos}`: la línea de tiempo de `evolution_log`, de la más reciente a la más antigua |
 | `GET /api/evolucion/informes?semana=AAAA-Wss&limite=12` | `{informes}`: los informes semanales completos |
 | `GET /api/evolucion/propuestas?estado=pendiente\|aplicada\|descartada\|caducada\|revertida&limite=` | `{propuestas}` |
-| `GET /api/fuentes_vivas?region=&estado=&tipo=feed\|medio&limite=300` | Último `fuentes_vivas` (2.12) más `lista` (las fuentes filtradas: silenciadas y retiradas primero) y `candidatos` (50) |
+| `GET /api/fuentes_vivas?region=&estado=&tipo=feed\|medio&limite=300` | Último `fuentes_vivas` (2.12) más `lista` (las fuentes filtradas: silenciadas y retiradas primero) y `candidatos`: aquí es la **lista** de los 50 últimos (como en `/candidatos`), no los contadores del mensaje del bus, que van en `candidatos_cuenta` |
 | `GET /api/fuentes_vivas/lista?region=&estado=&tipo=&limite=` | Fuentes con `id, tipo, nombre, estado, peso, motivo, cambio, desde, manual, manual_hasta, origen, cifras, nota, sugerencia, acciones[]` y, los feeds, `region, tier, url, medio, estado_medio, tecnico` |
 | `GET /api/fuentes_vivas/candidatos?limite=` | Medios candidatos a feed propio con `estado_texto`, `nota`, `rss`, `cifras` y `acciones` |
 | `GET /api/fuentes_vivas/historial?id=&n=` | Cambios de estado con `deshacer {accion, id}` |
@@ -1028,7 +1121,7 @@ Las órdenes de la web al bot (aprobar, cerrar, cambiar el modo, detener, reanud
 
 ### 3.2 Resultados (`GET /api/resultados`)
 ```json
-{"start_equity": 10000, "equity": 10012.3,
+{"start_equity": 10000, "equity": 10012.3, "cuenta": null,
  "trades": [{"id": "t…", "story": "n…", "strategy": "…", "window": "Apertura Londres", "market": "londres", "coin": "SOL",
              "side": "long", "qty": 3.1, "entry": 104.9, "exit": 106.0, "sl_initial": 103.2, "trail_pct": 1.2,
              "opened": 0, "closed": 0, "reason": "Stop dinámico", "pnl": 3.4, "pnl_pct": 1.05, "R": 0.7, "fees": 0.65,
@@ -1047,6 +1140,10 @@ Las órdenes de la web al bot (aprobar, cerrar, cambiar el modo, detener, reanud
 
 - **Comisiones (29-10-2026):** cada operación lleva `costes` (comisión de `entrada`, de `salidas` —parciales y la última—, `funding` + cobrado / − pagado y `total` = comisiones − funding, en USDC y en R; `perfil` con que se abrió; `salida_tipo` de la última salida: `creador` en el objetivo, `tomador` a mercado) y `bruto` (`pnl` + `total`: el resultado antes de comisiones y funding, con el deslizamiento en los precios). Las cerradas antes de esa fecha no guardaban el detalle: se calcula al leerlas (`estimado: true`; pagaron 0,10 % a la entrada, el resto fue la salida) sin reescribirlas. Arriba: `comisiones_total` (lo pagado en comisiones), `funding_total`, `costes_total`, `bruto`, `neto` (Σ `pnl`, el de verdad; `bruto` − `costes_total` = `neto`), `costes_estimados` (cuántas van estimadas) y `comisiones` (el perfil en uso).
 
+- `cuenta` (2.5). Una operación cerrada al reconstruir un hueco (2.5, «Huecos») lleva `hueco` `{desde, hasta, velas,
+  factor, completo, fuente}`, su `closed` es la hora de la salida reconstruida (el evento `closed` sale al reconstruirla,
+  con `result.closedAt` = esa hora) y `reason` termina en «con el bot sin gestionarla (a las HH:MM Madrid, reconstruido
+  con velas de 1 min de Binance)»; una que pasó huecos sin salir lleva `huecos`.
 - `instrument`, `funding` (USDC; + cobrado, − pagado) y `commissions` (las comisiones de entrada y salida). `fees` = `commissions` − `funding`: el funding entra en el resultado, en `pnl` y en R. Las operaciones del motor de aperturas llevan `tags` (2.6, con `origen: "motor_aperturas"`) y su estrategia es `impulso-<largo|corto>-<noticia-a-favor|noticia-en-contra|sin-noticia>` (también con «6 diarias»: la versión la dice `tags.estrategia_firma` y el preset `tags.preset`). Las de la entrada por noticia (2.16) llevan `tags.origen: "noticia_fiable"` y `tags.story` (la de la noticia), ventana «Noticia fiable» y estrategia `noticia-fiable-<largo|corto>`. El evento `closed` mantiene sus campos de siempre.
 
 ### 3.3 Órdenes de la web al bot (WebSocket `/events`)

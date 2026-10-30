@@ -67,7 +67,9 @@ import logging
 import math
 import os
 import re
+import statistics
 import time
+from collections import deque
 from datetime import date, datetime, time as dtime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -76,6 +78,7 @@ import aiohttp
 import numpy as np
 
 from . import comisiones, config, paper, reflejo, regions, ruptura3
+from .market import fresh_flow
 from .models import now_ms
 
 log = logging.getLogger("apertura")
@@ -85,6 +88,11 @@ MIN = 60_000
 H = 3600_000
 KLINES = "https://data-api.binance.vision/api/v3/klines"
 PAIRS = {c: f"{c}USDT" for c in config.COINS}
+BASIS_N = 30                 # base Binance (USDT) / OKX EU (USDC): mediana de los últimos 30 cierres de 1 min (modo v2)
+BASIS_FRESH_MS = 15_000      # ... con el cierre y el precio de OKX de hace menos de 15 s
+BASIS_MIN_N = 10             # sin 10 muestras no se usa (con pocas, la mediana se come el movimiento del momento)
+BASIS_MAX = 0.005            # la base USDC/USDT es de unos 10 pb: una de más del 0,5 % es un error y no se usa
+BASIS_MAX_AGE_MS = 12 * H    # las muestras de hace más de 12 h no cuentan (la base se mueve despacio, pero se mueve)
 SRC = "Motor de aperturas"
 MODE = "Ruptura de apertura"          # uno de claude_agents.MODES
 STRATEGY = "motor-aperturas"
@@ -1294,7 +1302,7 @@ def signal_getter(bus, clock=now_ms, params: dict | None = None, cache_s: float 
     de fuentes silenciadas no cuentan. Cada una lleva también su último «reflejo» (bot/reflejo.py): una macro sin
     reflejo confirmado no cuenta."""
     p = _params(params)
-    memo = {"at": -1e18, "plans": [], "news": [], "err_at": -1e18}
+    memo = {"at": -1e18, "plans": [], "news": [], "err_at": -1e18, "sin_medio": False}
 
     def load(now: int) -> None:
         if time.monotonic() - memo["at"] < cache_s:
@@ -1306,9 +1314,11 @@ def signal_getter(bus, clock=now_ms, params: dict | None = None, cache_s: float 
                 if e.get("kind") == "reflejo" and e.get("story")}   # el último de cada historia
         news = [{**e, "reflejo": refl[e["story"]]} if e.get("story") in refl else e
                 for e in evs if e.get("kind") == "triaged"]
+        memo["sin_medio"] = False
         try:   # sin pesos (fallo de la base o del aprendizaje) la señal sigue como antes
             news = weigh_news(news, story_sources(bus.store, [e.get("story") for e in news]))
         except Exception:
+            memo["sin_medio"] = True   # sin medio ni feed: el veto de las fiables no puede mirar sus grupos
             if time.monotonic() - memo["err_at"] > 600:
                 memo["err_at"] = time.monotonic()
                 log.exception("Aperturas: no pude leer el medio y el estado de las noticias; van sin ese peso")
@@ -1318,8 +1328,11 @@ def signal_getter(bus, clock=now_ms, params: dict | None = None, cache_s: float 
     def get_signal(coin: str, window: dict) -> dict:
         now = clock()
         load(now)
-        return signal_from(coin, window["markets"], window["open_ms"], memo["plans"], memo["news"],
-                           bus.state.get("predictions"), now, p)
+        out = signal_from(coin, window["markets"], window["open_ms"], memo["plans"], memo["news"],
+                          bus.state.get("predictions"), now, p)
+        if memo["sin_medio"]:
+            out["sin_dato"] = True
+        return out
 
     return get_signal
 
@@ -1345,11 +1358,6 @@ def load_recommendation() -> tuple[dict, str | None]:
     if not isinstance(rec, dict) or not rec:
         return {}, "aperturas.json no trae parámetros recomendados"
     return {k: v for k, v in rec.items() if k in PARAMS}, None
-
-
-def recommended_params() -> dict:
-    """Parámetros recomendados por el backtest de 24 meses ({} si no hay una recomendación válida)."""
-    return load_recommendation()[0]
 
 
 # ---------------------------------------------------------------- modo impulso (operativa del usuario, 26-10-2026)
@@ -2069,7 +2077,9 @@ def impulse_tags(d: int, mom: float, ctx: dict | None, sig: dict | None, params:
     out = {"lado": "largo" if d > 0 else "corto", "instrumento": impulse_instrument(d, p),
            "noticia": news_label(d, sig, p["min_strength"]),
            "noticia_fuerza": round(_f((sig or {}).get("strength"), 0.0), 3),
-           "noticia_fiable": "en_contra" if contra else "a_favor" if favor else "ninguna",
+           # sin_dato: la señal no se pudo leer (o sin el medio de las noticias): el veto no puede saber si hay alguna
+           "noticia_fiable": ("en_contra" if contra else "a_favor" if favor
+                              else "sin_dato" if (sig or {}).get("sin_dato") else "ninguna"),
            "noticia_fiable_grupo": top.get("nombre"),
            "apertura_anterior": "sin_dato" if not pr else "a_favor" if pr * d > 0 else "en_contra",
            "apertura_anterior_pct": round(pr, 3) if pr is not None else None,
@@ -2116,12 +2126,24 @@ def impulse_filter(d: int, tags: dict, ctx: dict | None, params: dict | None = N
     if nm == "corroboradas" and tags.get("noticia_corroborada") == "en_contra":
         return (f"una noticia corroborada va en contra ({tags.get('noticia_corroborada_txt') or 'sin detalle'}, en las "
                 f"{_n(p['news_hours'], 0)} h previas): no se opera", "veto_noticia")
+    if nm == "fiables" and tags.get("noticia_fiable") == "sin_dato" and _hay_fiables():
+        # el veto falla en cerrado: con grupos que operan y sin poder leer las noticias, no se entra a ciegas
+        return "sin las noticias para el veto de las fiables (no se pudieron leer): no se opera", "veto_noticia"
     return None, None
 
 
 def impulse_filters(d: int, tags: dict, ctx: dict | None, params: dict | None = None) -> str | None:
     """Motivo para no seguir el impulso, o None (impulse_filter sin el código)."""
     return impulse_filter(d, tags, ctx, params)[0]
+
+
+def _hay_fiables() -> bool:
+    """¿Hay grupos de noticias fiables que pasan la puerta para operar? (perezoso: fiables importa el aprendizaje)"""
+    try:
+        from . import fiables
+        return fiables.hay_fiables()
+    except Exception:
+        return False
 
 
 def impulse_strategy(d: int, tags: dict | None) -> str:
@@ -2955,6 +2977,7 @@ class OpeningEngine:
         self._activa_mt = self._mtime()
         self._activa_at = time.monotonic()
         self.windows: dict[str, dict] = {}
+        self.basis: dict[str, deque] = {}   # moneda → cocientes Binance / OKX (hallazgo n.º 61)
         if params is not None:
             params = {k: v for k, v in params.items() if k != "estrategia"}
         if self.impulso:
@@ -3026,6 +3049,8 @@ class OpeningEngine:
         self.preset = preset_info(self.p, self.activa)   # {preset: «impulso» | «seis» | None, nombre, descripcion}
         self.loaded = {"firma": self.firma, "ts": now, "pausada": self.paused, "fuente": self.source,
                        "registro": (self.activa or {}).get("registro"), "preset": self.preset["preset"]}
+        if self.paused:   # el motivo real de la pausa, para el aviso de la web (hallazgo n.º 20)
+            self.loaded["motivo"] = _cut((self.activa or {}).get("motivo") or "sin motivo", 300)
 
     def _session_busy(self, now: int) -> bool:
         """¿Hay alguna apertura armándose o en su sesión de entrada? Entonces no se cambian los parámetros."""
@@ -3080,7 +3105,7 @@ class OpeningEngine:
                 return s
         except Exception as e:
             log.warning("Aperturas: señal de %s en %s no disponible: %s", coin, w["name"], e)
-        return {"dir": 0, "strength": 0.0, "drivers": [], "why": "Señal no disponible"}
+        return {"dir": 0, "strength": 0.0, "drivers": [], "why": "Señal no disponible", "sin_dato": True}
 
     async def _arm(self, w: dict, at_open: bool, now: int) -> None:
         """15 min antes (y otra vez en la apertura): señal de cada moneda; se arman las que la tienen. Una moneda que se
@@ -3503,6 +3528,34 @@ class OpeningEngine:
             return
         new = await self.fetch_klines(coin, start, (now - start) // MIN + 2)
         bars.extend(b for b in new if not bars or b[T] > bars[-1][T])
+        self._basis_note(coin, bars, now)
+
+    def _okx_live(self, coin: str, now: int) -> float | None:
+        """Precio de OKX EU de ahora (USDC) si es de hace menos de 15 s; si no, None."""
+        m = (getattr(self.bus, "state", None) or {}).get("market") or {}
+        live = _f((m.get("prices") or {}).get(coin))
+        upd = _f((m.get("updated") or {}).get(coin))
+        return live if live and (upd is None or now - upd <= BASIS_FRESH_MS) else None
+
+    def _basis_note(self, coin: str, bars: list, now: int) -> None:
+        """Apunta el cociente Binance (USDT) / OKX EU (USDC) con el último cierre de 1 min y el precio de OKX de ahora,
+        si los dos son de hace menos de 15 s. La mediana de los últimos BASIS_N quita el movimiento de esos segundos."""
+        live = self._okx_live(coin, now)
+        if bars and live and now - (bars[-1][T] + MIN) <= BASIS_FRESH_MS:
+            xs = self.basis.setdefault(coin, deque(maxlen=BASIS_N))
+            if not xs or xs[-1][0] != bars[-1][T]:   # una muestra por vela
+                xs.append((bars[-1][T], bars[-1][C] / live))
+
+    def basis_of(self, coin: str, now: int | None = None) -> float | None:
+        """Base Binance / OKX de la moneda (≈ 1,001 con USDC/USDT a 1,0010), o None con menos de BASIS_MIN_N muestras
+        de las últimas 12 h o si se va más del 0,5 % de 1. Cada muestra lleva el movimiento de los segundos entre el
+        cierre y el precio de OKX: la mediana lo reduce, pero en una apertura con tendencia puede quedar algún pb."""
+        now = self.clock() if now is None else now
+        xs = [x for x in self.basis.get(coin) or () if now - x[0] <= BASIS_MAX_AGE_MS]
+        if len(xs) < BASIS_MIN_N:
+            return None
+        k = statistics.median(x[1] for x in xs)
+        return k if abs(k - 1) <= BASIS_MAX else None
 
     # ---- decisiones
 
@@ -3558,12 +3611,13 @@ class OpeningEngine:
     def _entry_price(self, coin: str, act: dict, now: int) -> float:
         """Entrada con la que se mide el R:R: la peor entre el cierre que confirma y el precio actual de OKX EU (si es
         de hace menos de 15 s), para que un plan viejo no infravalore el riesgo. Si el precio actual ya ha cruzado el
-        stop, ese (y entry_plan rechaza la entrada)."""
+        stop, ese (y entry_plan rechaza la entrada). El cierre y el stop salen de Binance en USDT: el precio de OKX en
+        USDC se pasa a esa escala con la base del momento (basis_of; sin muestras, tal cual). Sin eso, con unos 10 pb
+        de base, el R:R de los largos salía más prudente y el cruce del stop se veía antes de tiempo (hallazgo n.º 61)."""
         px = act["price"]
-        m = (getattr(self.bus, "state", None) or {}).get("market") or {}
-        live = _f((m.get("prices") or {}).get(coin))
-        upd = _f((m.get("updated") or {}).get(coin))
-        if live and (upd is None or now - upd <= 15_000):
+        live = self._okx_live(coin, now)
+        if live:
+            live *= self.basis_of(coin, now) or 1.0
             if act["dir"] * (live - act["stop_px"]) <= 0:
                 return live
             px = max(px, live) if act["dir"] > 0 else min(px, live)
@@ -3707,7 +3761,7 @@ class OpeningEngine:
     def _funding_now(self, coin: str) -> float | None:
         """Tasa de funding de ahora en % por 8 h (paper.funding_8h de market.flow[moneda]) o None sin dato."""
         m = (getattr(self.bus, "state", None) or {}).get("market") or {}
-        return paper.funding_8h((m.get("flow") or {}).get(coin))
+        return paper.funding_8h(fresh_flow(m).get(coin))
 
     def _risk_imp(self) -> float:
         return float(self.p.get("risk_pct") or config.RISK_PER_TRADE_PCT)

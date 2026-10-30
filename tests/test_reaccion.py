@@ -369,3 +369,28 @@ async def test_api_cripto_aperturas_con_y_sin_el_modulo(tmp_path):
     # El mensaje va también en el estado inicial del WebSocket (bus.snapshot)
     assert any(m.get("type") == "cripto_aperturas" for m in bus.snapshot())
     store.close()
+
+
+def test_medida_completa_exige_las_4_h_sin_huecos():
+    """Revisión del 28-10: un hueco de 2 h en medio de las 4 h no da un rango a medias; y la última vela tiene que abrir
+    como mucho 5 min antes del final, como _ret en la historia."""
+    t0 = ms(2026, 10, 26, 8, 0)
+    full = bars(t0, t0 + 4 * H, price=lambda t: 100 + (t - t0) / H)   # sube 1 por hora: rango 4 %
+    assert R.medida(full, t0, t0 + 4 * H, completa=True)["range_pct"] == pytest.approx(4.0, abs=0.01)
+    hueco = full[(full[:, 0] < t0 + H) | (full[:, 0] >= t0 + 3 * H)]
+    assert R.medida(hueco, t0, t0 + 4 * H, completa=True) is None
+    assert R.medida(hueco, t0, t0 + 4 * H) is not None   # en curso se enseña lo que haya
+    corta = full[full[:, 0] < t0 + 4 * H - 6 * MIN]        # la última abre 6 min antes del final: no vale
+    assert R.medida(corta, t0, t0 + 4 * H, completa=True) is None
+    casi = full[full[:, 0] < t0 + 4 * H - 4 * MIN]         # 5 min antes: vale
+    assert R.medida(casi, t0, t0 + 4 * H, completa=True) is not None
+
+
+def test_si_falla_el_guardado_la_historia_se_usa_igual(tmp_path, monkeypatch, caplog):
+    now = ms(2026, 10, 26, 9, 0)
+    monkeypatch.setattr(R, "periodo", lambda today: (date(2026, 10, 19), date(2026, 10, 23)))
+    monkeypatch.setattr(R, "guardar_archivo", lambda path, res: 1 / 0)
+    r = R.Reaccion(Bus(Store(tmp_path / "t.db")), bars=lambda c, a, b: None, clock=lambda: now,
+                   loader=lambda c, d: _series(c), index_loader=lambda: {}, path=tmp_path / "h.json")
+    res = r.compute_hist(now)
+    assert res["total"]["n"] > 0 and "no pude guardar la historia" in caplog.text

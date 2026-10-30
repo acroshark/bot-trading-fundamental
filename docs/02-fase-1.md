@@ -73,9 +73,11 @@ Descartadas en las pruebas:
 M:\BotFundamental-runtime\venv\Scripts\python.exe -X utf8 -m pytest -q
 ```
 
-Son 23 pruebas: filtro, lectores de cada fuente con muestras reales, mesa de noticias (repetidas y confirmaciones) y servidor con WebSocket.
+Empezaron siendo 23 (filtro, lectores de cada fuente con muestras reales, mesa de noticias y servidor con WebSocket). El 28-10-2026 son más de 1.100 casos de todo el bot: las cifras al día salen al ejecutarlas. Ninguna usa la red.
 
-## Qué falta (fase 2)
+## Fase 2 (hecha; falta tu clave)
+
+> El 28-10-2026 la fase 2 ya está escrita (`bot/claude_agents.py`, docs/05 sección 9) y probada, pero está apagada porque no hay clave de API. Lo de abajo es lo que se planeó; lo único pendiente de verdad es la clave (y Telegram, que sigue sin hacer).
 
 - **Verificador (Haiku 5.5):**
   - Puntúa cada noticia relevante con su nivel, las confirmaciones y las señales de alarma.

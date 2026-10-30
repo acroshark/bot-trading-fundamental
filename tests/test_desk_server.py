@@ -2,6 +2,7 @@ import asyncio
 import functools
 import json
 import logging
+import os
 import random
 import sqlite3
 import threading
@@ -82,13 +83,19 @@ def test_contexto_region_idioma_y_temas(tmp_path):
     assert p["region"] == "es" and p["lang"] == "es" and p["fresh"] is False and "elecciones" in p["topics"]
     assert "Contexto" in p["filter"]["why"] and p["clase"] == "contexto" and ev["coins"] == []
     assert got == []   # política: se capta (y se mide), pero ya no gasta IA local
-    # Una macro de hace horas sí va a la IA local, detrás de lo fresco.
+    # Una macro de hace horas se capta, pero ya no gasta IA local (n.º 1 y 42): solo contaría si la cripto la reflejara
+    # en los 60 min desde la captura, y ese movimiento ya pasó
     assert desk.handle(Item("elpais", "y", "El BCE sube los tipos de interés medio punto", "https://elpais.com/b", t,
                             region="es", lang="es"), ES, warm=False) == "captured"
     [ev] = events(q)
-    assert ev["patch"]["clase"] == "macro" and ev["patch"]["macro"] is True and ev["coins"] == []
-    (args, kw), = got
-    assert args[0] == ev["story"] and kw["region"] == "es" and kw["prio"] < 6   # el contexto va detrás de lo fresco
+    assert ev["patch"]["clase"] == "macro" and ev["patch"]["macro"] is True and ev["coins"] == [] and got == []
+    # La misma macro, fresca, sí va; y la cripto de hace horas también (la cripto se tría siempre)
+    assert desk.handle(Item("elpais", "z", "Rusia lanza misiles contra Kiev", "https://elpais.com/c",
+                            now_ms(), region="es", lang="es"), ES, warm=False) == "captured"
+    assert desk.handle(Item("elpais", "w", "Bitcoin cae un 5 % tras el ataque", "https://elpais.com/d", t,
+                            region="es", lang="es"), ES, warm=False) == "captured"
+    (a1, k1), (a2, k2) = got
+    assert k1["region"] == "es" and k2["prio"] > k1["prio"]   # la cripto, aunque sea de hace horas, va antes
 
 
 def test_mismo_medio_por_otro_feed_no_confirma(tmp_path):
@@ -224,6 +231,18 @@ def test_noticias_eligen_lo_mismo_que_antes(tmp_path):
                 assert _ids(got) == _old_recent_news(bus, hours, min_imp, bolsa), (hours, min_imp, bolsa)
     got = recent_news(bus, 48, 0)
     assert len(got) == 60 and all("credibilidad_ajustada" in n for n in got)
+    assert len(recent_news(bus, 48, 0, limit=75)) == 75   # hallazgo n.º 11: ?limite= (hasta 500)
+    store.close()
+
+
+async def test_api_noticias_acepta_limite(tmp_path):
+    store, bus, _, _ = setup(tmp_path)
+    _fill_news(bus, n=80)
+    async with TestClient(TestServer(make_app(bus, lambda: {}))) as client:
+        assert len(await (await client.get("/api/noticias?horas=48")).json()) == 60
+        assert len(await (await client.get("/api/noticias?horas=48&limite=70")).json()) == 70
+        assert len(await (await client.get("/api/noticias?horas=48&limite=9999")).json()) == 80   # tope 500
+        assert (await client.get("/api/noticias?limite=x")).status == 400
     store.close()
 
 
@@ -629,6 +648,8 @@ async def test_api_aprendizaje_evolucion_y_fuentes_con_los_modulos_reales(tmp_pa
         r = await get("/api/fuentes_vivas")
         assert r["type"] == "fuentes_vivas" and r["feeds"]["silenciada"] == 1 and r["aviso"]
         assert r["lista"][0]["id"] == "jp-b" and r["candidatos"] == []
+        assert r["candidatos_cuenta"]["pendiente"] == 0 and set(r["candidatos_cuenta"]) == set(fv.estado()["candidatos"])
+        assert r["medios"]["activa"] == 0 and r["feeds"]["activa"] == 1   # n.º 9: sin medios medidos, 0 de verdad
         assert [x["id"] for x in await get("/api/fuentes?estado=silenciada")] == ["jp-b"]
         assert [x["id"] for x in await get("/api/fuentes_vivas/lista?estado=activa&tipo=feed")] == ["jp-a"]
         hist = await get("/api/fuentes_vivas/historial?id=jp-b")
@@ -755,6 +776,72 @@ def test_arranque_temporales_en_m_gancho_del_bus_y_modulos_opcionales(tmp_path, 
     store.close()
 
 
+async def test_supervise_relanza_un_bucle_caido_sin_parar_al_resto(caplog):
+    """Hallazgo n.º 46: un fallo suelto en un bucle ya no tumba el proceso: se registra y se relanza con espera
+    creciente; si termina sin error, no se relanza; y la cancelación (apagado) se respeta."""
+    import asyncio
+    from bot import __main__ as main
+    caplog.set_level("INFO")
+    calls, waits = [], []
+
+    async def cae_dos_veces():
+        calls.append(1)
+        if len(calls) < 3:
+            raise RuntimeError("database is locked")
+
+    real_sleep = asyncio.sleep
+
+    async def fake_sleep(s):
+        waits.append(s)
+        await real_sleep(0)
+
+    main.asyncio.sleep = fake_sleep
+    try:
+        await main.supervise("Prueba", cae_dos_veces, min_s=5, max_s=300)
+    finally:
+        main.asyncio.sleep = real_sleep
+    assert len(calls) == 3 and waits == [5, 10] and "Prueba se cayó" in caplog.text and "Prueba terminó" in caplog.text
+    # el resto sigue: otra tarea a la vez no se entera de los fallos
+    otra = []
+
+    async def bien():
+        otra.append(1)
+
+    async def siempre_falla():
+        raise ValueError("x")
+
+    t = asyncio.ensure_future(main.supervise("Mala", siempre_falla, min_s=0.01, max_s=0.01))
+    await asyncio.gather(main.supervise("Buena", bien), real_sleep(0.05))
+    assert otra == [1] and not t.done()
+    t.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await t
+
+
+def test_store_espera_30_s_si_la_base_esta_ocupada(tmp_path):
+    """Hallazgo n.º 46: la conexión principal espera hasta 30 s a un bloqueo de otra conexión (antes, 5 s)."""
+    import sqlite3
+    store = Store(tmp_path / "t.db")
+    other = sqlite3.connect(tmp_path / "t.db", timeout=0)
+    other.execute("BEGIN IMMEDIATE")
+    t0 = time.monotonic()
+    with pytest.raises(sqlite3.OperationalError):
+        other2 = sqlite3.connect(tmp_path / "t.db", timeout=0.2)
+        other2.execute("BEGIN IMMEDIATE")
+    assert time.monotonic() - t0 < 5
+    other.rollback()
+    store.db.execute("BEGIN IMMEDIATE")
+    store.db.rollback()
+    assert store.db.execute("PRAGMA busy_timeout").fetchone()[0] == 30000
+    other.close()
+    store.close()
+
+
+def ms_utc(*a) -> int:
+    from datetime import datetime, timezone
+    return int(datetime(*a, tzinfo=timezone.utc).timestamp() * 1000)
+
+
 def test_cripto_va_antes_que_la_macro_en_la_cola_de_la_ia_local():
     """Hallazgo n.º 7 de la revisión: la macro es unas 2,6 veces más numerosa; la cripto del mismo nivel y frescura va
     un punto por delante (la cola descarta lo menos prioritario y más antiguo)."""
@@ -764,10 +851,16 @@ def test_cripto_va_antes_que_la_macro_en_la_cola_de_la_ia_local():
     macro = classify("Russia launches missiles at Kyiv", "x", 60, lang="en")
     contexto = classify("Apple unveils new iPhone with AI features", "x", 60, lang="en")
     assert cripto.clase == "cripto" and macro.clase == "macro" and contexto.clase == "contexto"
+    lejos = ms_utc(2026, 10, 28, 19, 0)   # ninguna bolsa de Asia abre en 3 h ni abrió hace menos de 4 h
     for tier in ("T0", "T1", "T2"):
-        assert priority(cripto, tier) == priority(macro, tier) + 1 > priority(contexto, tier)
+        assert priority(cripto, tier) > priority(macro, "T0", "jp", lejos) + 1 > priority(contexto, tier)
     viejo = classify("Bitcoin ETF sees record inflows", "x", 5 * 3600, lang="en")   # de hace horas
-    assert priority(macro, "T2") > priority(viejo, "T0")   # lo fresco sigue mandando
+    # n.º 1 y 42: la cripto, siempre antes que la macro (con la cola llena se pierde macro, no cripto)
+    assert priority(viejo, "T2") > priority(macro, "T0", "jp", ms_utc(2026, 10, 28, 23, 30)) > priority(macro, "T0")
+    # la macro de la región cuya bolsa abre pronto (Tokio abre a las 00:00 UTC) o abrió hace poco, un punto por delante
+    assert priority(macro, "T1", "jp", ms_utc(2026, 10, 28, 22, 0)) == priority(macro, "T1", "jp", lejos) + 1
+    assert priority(macro, "T1", "jp", ms_utc(2026, 10, 29, 3, 0)) == priority(macro, "T1", "jp", lejos) + 1
+    assert priority(macro, "T1", "global", ms_utc(2026, 10, 28, 22, 0)) == priority(macro, "T1", "jp", lejos)
 
 
 def test_api_estado_resume_la_cripto_en_las_aperturas_y_no_el_indice(tmp_path):
@@ -1160,3 +1253,152 @@ def test_el_registro_del_bot_enmascara_las_claves_en_todos_los_modulos(tmp_path,
             h.close()
     txt = (tmp_path / "bot.log").read_text(encoding="utf-8")
     assert "Mensaje de la web no procesado" in txt and "RuntimeError" in txt and secreto not in txt and "***" in txt
+def test_copia_diaria_en_caliente_comprobada_y_7_copias(tmp_path):
+    """Hallazgo n.º 39: copia en caliente con la API backup de sqlite3 (con el bot escribiendo a la vez), comprobada y
+    renombrada al final; se conservan 7."""
+    from bot.store import copia_diaria
+    store = Store(tmp_path / "bot.db")
+    for k in range(50):
+        store.add_event({"id": f"e{k}", "ts": k, "kind": "triaged", "story": f"s{k}", "agent": "local"})
+    otra = sqlite3.connect(tmp_path / "bot.db")
+    otra.execute("BEGIN IMMEDIATE")   # alguien escribiendo a la vez: la copia no espera ni falla
+    otra.execute("INSERT INTO events VALUES ('x', 99, 'sx', 'local', 'triaged', '{}')")
+    carpeta = tmp_path / "copias"
+    dest = copia_diaria(tmp_path / "bot.db", carpeta, "2026-10-28")
+    otra.commit()
+    otra.close()
+    assert dest.name == "bot-2026-10-28.db" and not list(carpeta.glob("*.tmp"))
+    c = sqlite3.connect(dest)
+    assert c.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 50 and c.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+    c.close()
+    assert copia_diaria(tmp_path / "bot.db", carpeta, "2026-10-28") is None   # la de ese día ya está
+    for d in range(1, 10):
+        copia_diaria(tmp_path / "bot.db", carpeta, f"2026-11-{d:02d}")
+    names = sorted(p.name for p in carpeta.glob("bot-*.db"))
+    assert len(names) == 7 and names[0] == "bot-2026-11-03.db" and names[-1] == "bot-2026-11-09.db"
+    from bot import __main__ as main
+    h = main.db_health(tmp_path / "bot.db", carpeta)
+    assert h["copias"] == 7 and h["ultima_copia"] == "bot-2026-11-09.db" and h["mb"] is not None
+    store.close()
+
+
+async def test_limpieza_poda_las_captadas_a_los_7_dias_y_hace_la_copia(tmp_path, monkeypatch):
+    """Hallazgos n.º 51 y 39: las captadas, confirmaciones y subidas de estado se podan a los 7 días (antes 30); los
+    triajes nunca. La copia diaria se hace en la misma ronda."""
+    import asyncio
+    from bot import __main__ as main
+    store = Store(tmp_path / "bot.db")
+    now = now_ms()
+    for k, (kind, dias) in enumerate([("captured", 8), ("captured", 6), ("corroborated", 8), ("triaged", 40),
+                                      ("verified", 8), ("verified", 31)]):
+        store.add_event({"id": f"e{k}", "ts": now - dias * 86_400_000, "kind": kind, "story": f"s{k}", "agent": "x"})
+    monkeypatch.setattr(config, "COPIAS_DIR", tmp_path / "copias")
+
+    real_sleep = asyncio.sleep
+
+    async def para(s):   # la espera de una hora corta la prueba; las de 0 s entre lotes, no
+        if s >= 3600:
+            raise asyncio.CancelledError
+        await real_sleep(0)
+
+    monkeypatch.setattr(main.asyncio, "sleep", para)
+    with pytest.raises(asyncio.CancelledError):
+        await main.maintenance(store)
+    left = sorted((e["kind"], e["id"]) for e in store.events_since(0, ("captured", "corroborated", "triaged", "verified")))
+    assert left == [("captured", "e1"), ("triaged", "e3"), ("verified", "e4")]
+    assert len(list((tmp_path / "copias").glob("bot-*.db"))) == 1
+    store.close()
+
+
+def test_llama_server_log_rota_al_pasar_de_50_mb(tmp_path):
+    """Hallazgo n.º 50: llama-server.log se abría en «ab» en cada arranque y crecía sin límite."""
+    from bot.local_ai import rotate_log
+    log_ = tmp_path / "llama-server.log"
+    log_.write_bytes(b"x" * 2_000)
+    assert rotate_log(log_, 0.001) and not log_.exists() and (tmp_path / "llama-server.log.1").stat().st_size == 2_000
+    log_.write_bytes(b"y" * 10)
+    assert not rotate_log(log_, 0.001) and log_.exists()
+    assert not rotate_log(tmp_path / "no-existe.log", 1)
+
+
+def test_foto_inicial_lleva_los_totales_reales(tmp_path):
+    """Hallazgo n.º 8: la foto trae 1.500 eventos y 300 descartes; el mensaje «conteo» (al final) da los totales reales
+    desde el arranque para que la web no muestre una proporción falsa de captadas frente a ruido."""
+    store = Store(tmp_path / "t.db")
+    bus = Bus(store)
+    t = bus.started
+    for k in range(5):
+        bus.publish({"type": "event", "kind": "captured", "story": f"c{k}", "ts": t + k})
+    for k in range(12):
+        bus.publish({"type": "event", "kind": "filtered", "story": f"f{k}", "ts": t + k})
+    bus.publish({"type": "event", "kind": "captured", "story": "viejo", "ts": t - 3_600_000})   # antes del arranque
+    snap = bus.snapshot()
+    assert snap[-1] == {"type": "conteo", "desde": t, "kinds": {"captured": 5, "filtered": 12, "corroborated": 0,
+                                                               "triaged": 0, "lowprio": 0}}
+    assert bus.conteo(t + 30 * 3_600_000)["desde"] == t + 6 * 3_600_000   # 24 h como mucho
+    store.close()
+
+
+def test_hueco_al_arrancar(tmp_path, monkeypatch):
+    """Hallazgo n.º 0: al arrancar, el bus mira el último evento guardado; si pasan 5 min o más, el «reset» de la foto
+    (y /health) dicen cuánto estuvo parado el bot."""
+    import bot.bus as busmod
+    store = Store(tmp_path / "t.db")
+    assert Bus(store).hueco is None                                   # base vacía: nada que decir
+    t = 1_800_000_000_000
+    store.add_event({"type": "event", "kind": "captured", "story": "a", "ts": t - 33 * 3_600_000, "id": "a"})
+    monkeypatch.setattr(busmod, "now_ms", lambda: t)
+    bus = Bus(store)
+    assert bus.hueco == {"desde": t - 33 * 3_600_000, "hasta": t, "min": 1980}
+    assert bus.snapshot()[0] == {"type": "reset", "phase": bus.snapshot()[0]["phase"], "started": t, "hueco": bus.hueco}
+    store.add_event({"type": "event", "kind": "filtered", "story": "b", "ts": t - 4 * 60_000, "id": "b"})
+    assert Bus(store).hueco is None                                   # 4 min: un reinicio normal
+    # Revisión: con el PC sin red no se guardan eventos, pero el latido de bot/salud.py sigue: no estuvo parado.
+    store.db.execute("DELETE FROM events WHERE id = 'b'")
+    store.db.commit()
+    latido = tmp_path / "latido"
+    latido.write_text("x")
+    os.utime(latido, (t / 1000 - 120, t / 1000 - 120))               # vivo hasta hace 2 min
+    assert Bus(store, latido=latido).hueco is None
+    os.utime(latido, (t / 1000 - 3600, t / 1000 - 3600))              # el latido, 1 h antes; el evento, 33 h antes
+    assert Bus(store, latido=latido).hueco == {"desde": t - 3_600_000, "hasta": t, "min": 60}
+    assert Bus(store, latido=tmp_path / "no-existe").hueco["min"] == 1980
+    store.close()
+
+
+def test_job_object_ata_los_hijos(monkeypatch, caplog):
+    """Hallazgo n.º 49: en Windows el bot entra en un Job Object con KILL_ON_JOB_CLOSE (sus lectores y llama-server
+    mueren con él). Aquí con un kernel32 de mentira: en Linux, sin él, no hace nada; si Windows no deja, el bot sigue."""
+    import ctypes
+    import bot.__main__ as m
+
+    class K32:
+        def __init__(self, ok=True):
+            self.ok, self.calls = ok, []
+
+        def CreateJobObjectW(self, attrs, name):
+            self.calls.append(("create", attrs, name))
+            return 123
+
+        def SetInformationJobObject(self, job, clase, ref, size):
+            info = ref._obj
+            self.calls.append(("set", job, clase, info.BasicLimitInformation.LimitFlags, size, ctypes.sizeof(info)))
+            return self.ok
+
+        def GetCurrentProcess(self):
+            return -1
+
+        def AssignProcessToJobObject(self, job, proc):
+            self.calls.append(("assign", job, proc))
+            return True
+
+    monkeypatch.setattr(m, "_JOB", None)
+    if os.name != "nt":   # en Windows, sin el kernel32 de mentira, ataría el propio proceso de pytest
+        assert m.atar_hijos() is False and m._JOB is None                  # Linux: nada
+    k = K32()
+    assert m.atar_hijos(k) is True and m._JOB == 123
+    assert k.calls == [("create", None, None), ("set", 123, 9, 0x2000, 144, 144), ("assign", 123, -1)]
+    monkeypatch.setattr(m, "_JOB", None)
+    assert m.atar_hijos(K32(ok=False)) is False and m._JOB is None and "pueden quedar abiertos" in caplog.text
+    monkeypatch.setenv("BOT_JOB_OBJECT", "0")
+    assert m.atar_hijos(K32()) is False

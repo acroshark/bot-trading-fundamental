@@ -110,9 +110,11 @@ def test_confirmada_contraria_sin_reflejo_y_pendiente():
     b = bars({c: (lambda m: 0.2 if m > 0 else 0.0) for c in COINS}, t_to=T0 + 20 * MIN - 20_000)   # la última cierra a 19 min 40 s
     r = RF.medir(b, T0, 1, T0 + 20 * MIN)
     assert r["estado"] == "pendiente" and r["min"] == 20 and r["mov_pct"] == pytest.approx(0.2)
-    # Si las velas no llegan, pasados los 60 min y 10 de margen se cierra con lo que hay
+    # Si las velas no llegan, sin los 60 min completos no se cierra hasta 3 h después de la captura (pueden llegar
+    # tarde: un hueco de velas o un reinicio); entonces, con lo que hay
     assert RF.medir(b, T0, 1, T0 + 69 * MIN)["estado"] == "pendiente"
-    assert RF.medir(b, T0, 1, T0 + 71 * MIN)["estado"] == "sin_reflejo"
+    assert RF.medir(b, T0, 1, T0 + 71 * MIN)["estado"] == "pendiente"
+    assert RF.medir(b, T0, 1, T0 + 3 * H + MIN)["estado"] == "sin_reflejo"
 
 
 def test_media_de_las_cuatro_o_btc_si_faltan_datos():
@@ -128,6 +130,14 @@ def test_media_de_las_cuatro_o_btc_si_faltan_datos():
     b["SOL"] = b["SOL"][b["SOL"][:, 0] > T0 + 30 * MIN]   # SOL sin precio de referencia en la captura: BTC
     assert RF.medir(b, T0, 1, now)["ref"] == "BTC"
     assert RF.medir({}, T0, 1, now) is None and RF.medir({"ETH": bars({"ETH": step_at(1, 1)})["ETH"]}, T0, 1, now) is None
+    # Una moneda que se queda sin velas nuevas (se paró su descarga) no corta la media: se mide con BTC sola
+    caen = bars({c: step_at(-2.0, 5) for c in COINS})
+    caen["XRP"] = caen["XRP"][caen["XRP"][:, 0] + MIN <= T0 + MIN]   # XRP se para en la captura
+    r = RF.medir(caen, T0, -1, now)
+    assert (r["estado"], r["ref"]) == ("confirmada", "BTC") and r["mov_pct"] == pytest.approx(-2.0)
+    caen["XRP"] = bars({"XRP": step_at(-2.0, 5)})["XRP"]
+    caen["XRP"] = caen["XRP"][caen["XRP"][:, 0] + MIN <= T0 + 4 * MIN]   # ... o a los 3 min
+    assert RF.medir(caen, T0, -1, now)["ref"] == "BTC"
 
 
 def _ruido(sd_pct_1m: float, n_min: int, seed: int = 1, t_end=T0 - MIN):
@@ -387,4 +397,57 @@ def test_contexto_del_estratega_sin_macro_no_confirmada(tmp_path):
     news = p.recent_news()
     assert [n["resumen"] for n in news] == ["EE. UU. impone aranceles del 100 % a China"]
     assert news[0]["reflejo_cripto"] == "confirmada"
+    store.close()
+
+
+async def test_triada_mas_de_60_min_despues_de_captarla_queda_sin_reflejo_tarde(tmp_path):
+    """Revisión del 28-10: lo que hizo la cripto en los 60 min tras la captura ya había pasado cuando el bot pudo usar la
+    noticia (triada tarde): no se «confirma» ni pesa como fresca en la señal."""
+    store, bus, rf, box = _world(tmp_path, bars({c: step_at(-0.9, 10) for c in COINS}, t_to=T0 + 5 * H))
+    bus.publish({"type": "event", "kind": "captured", "agent": "hunter", "story": "m1", "ts": T0, "title": "Rusia",
+                 "coins": [], "text": "", "patch": {"headline": "Rusia", "clase": "macro"}})
+    bus.publish({"type": "event", "kind": "triaged", "agent": "local", "story": "m1", "ts": T0 + 5 * H, "title": "Rusia",
+                 "coins": [], "text": "", "patch": {"triage": MACRO}})
+    box["now"] = T0 + 5 * H + MIN
+    assert await rf.step() == 1
+    [ev] = store.events_since(0, ("reflejo",))
+    assert ev["patch"]["reflejo"]["estado"] == "sin_reflejo" and ev["patch"]["reflejo"]["tarde"] is True
+    assert "triada más de 60 min después" in ev["text"]
+    store.close()
+
+
+async def test_una_triada_que_llega_mientras_se_piden_las_velas_espera_a_la_ronda_siguiente(tmp_path):
+    """Revisión del 28-10: la foto de las pendientes se hace antes de pedir las velas; la triada que llega durante la
+    espera no se mide con velas que no cubren sus 24 h previas (su umbral se quedaría fijo en el 0,5 %)."""
+    store, bus, rf, box = _world(tmp_path, {})
+    _story(bus, "m1", "Rusia lanza misiles", MACRO, T0)
+    box["now"] = T0 + 6 * MIN
+    orig = rf._bars
+
+    def lento(a, b):
+        _story(bus, "m2", "Irán cierra Ormuz", MACRO, T0 + 3 * MIN)   # llega mientras se leen las velas
+        rf._bars = orig
+        return orig(a, b)
+
+    rf._bars = lento
+    await rf.step()
+    assert "m2" in rf.pending and rf.pending["m2"]["umbral"] is None and not rf.pending["m2"]["sent"]
+    store.close()
+
+
+async def test_api_reflejo_compara_con_el_azar(tmp_path):
+    from aiohttp.test_utils import TestClient, TestServer
+    from bot.server import Services, make_app
+    store, bus, rf, box = _world(tmp_path, {})
+    rf.counts.update({"confirmada": 1, "sin_reflejo": 3})
+    for sv, estado in ((Services(reflejo=rf), "encendido"), (Services(), "apagado")):
+        client = TestClient(TestServer(make_app(bus, lambda: {}, sv)))
+        await client.start_server()
+        try:
+            res = await (await client.get("/api/reflejo")).json()
+        finally:
+            await client.close()
+        assert res["estado"] == estado and res["azar_confirmada_pct"] == RF.AZAR["umbral_2sigma_pct"]
+        if estado == "encendido":
+            assert res["tasa_confirmada"] == 0.25 and res["finales"] == {"confirmada": 1, "sin_reflejo": 3}
     store.close()

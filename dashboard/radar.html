@@ -590,6 +590,7 @@ body.world-mode{background:var(--w-bg)}
 .wlist i{width:8px;height:8px;border-radius:50%;margin-top:4px;background:rgb(var(--c))}
 .wlist .t{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .wlist .t small{color:var(--w-muted);margin-left:6px}
+.pmlist{list-style:none;margin:0;padding:0;display:grid;gap:8px}.pmlist li{border-bottom:1px solid var(--line);padding:6px 0;display:grid;gap:4px}
 .wpend{border:1px solid var(--w-warn);border-radius:6px;padding:8px 10px;display:grid;gap:6px;margin-bottom:6px;background:rgba(255,195,90,.06)}
 .wpend .btns .btn{background:transparent;color:var(--w-ink)}
 .wpend .btns .btn.ok{background:var(--w-good);border-color:var(--w-good);color:#06101f}
@@ -793,6 +794,8 @@ tr[data-lv-sel]{cursor:pointer}
     <button type="button" role="tab" data-tab="ai" aria-selected="false">Consumo de IA</button>
   </nav></div>
 </header>
+<div class="aviso-demo" id="avisoParado" role="status" hidden></div>
+<div class="aviso-demo" id="avisoReloj" role="status" hidden></div>
 <div class="aviso-demo" id="avisoDemo" hidden>Esto es una <b>copia de demostración con datos de ejemplo</b>: no puede ver tu PC. Lo real (noticias, precios y tu cartera de prueba de 100 €) está en el acceso directo «Radar Fundamental» de tu PC (http://127.0.0.1:8765).</div>
 
 <main class="wrap">
@@ -1036,8 +1039,10 @@ tr[data-lv-sel]{cursor:pointer}
     <div class="panel"><div class="panel-h"><h2>Propuestas</h2><p>Cambios que el sistema propone con sus pruebas. En modo «proponer» los aplicas tú; los ajustes de parámetros siempre.</p></div><div class="panel-b" id="evoProps"></div></div>
     <div class="panel"><div class="panel-h"><h2>Campeón frente a aspirantes</h2><p>El campeón es la estrategia que opera el paper; los aspirantes, las que vigila la prueba en avance. Curva: R acumulado por semana.</p></div><div class="panel-b" id="evoChamp"></div><div class="tbl-wrap" id="evoAsp"></div></div>
     <div class="panel"><div class="panel-h"><h2>Línea de tiempo</h2><p>Todo lo que ha cambiado: medios añadidos, silenciados, retirados o restaurados, pesos, estrategia e informes. Solo se añade: nada se borra.</p></div><div class="filters" id="evoFilters"></div><div class="panel-b" id="evoTimeline"></div></div>
-    <div class="panel" id="fiabPanel"><div class="panel-h"><h2>Noticias fiables</h2><p>Grupos de noticias (medio, canal, tipo y sentido, medio y sentido) que aciertan el sentido a 4 h al menos un 60 % de las veces, de forma constante día a día, con su cuenta frente al azar. Solo ellos vetan entradas en contra y abren entradas por noticia.</p></div><div class="panel-b" id="fiabHead"></div><div class="filters" id="fiabF"></div><div class="tbl-wrap" id="fiabTbl"></div></div>
+    <div class="panel" id="fiabPanel"><div class="panel-h"><h2>Noticias fiables</h2><p>Grupos de noticias (medio, canal, tipo y sentido, medio y sentido) que aciertan el sentido a 4 h al menos un 60 % de las veces, de forma constante día a día, con su cuenta frente al azar. Solo los que además pasan la puerta para operar vetan entradas en contra y abren entradas por noticia.</p></div><div class="panel-b" id="fiabHead"></div><div class="filters" id="fiabF"></div><div class="tbl-wrap" id="fiabTbl"></div></div>
     <div class="panel"><div class="panel-h"><h2>Medios: qué acierta y qué es ruido</h2><p>Acierto ajustado al mercado (lo que acertaría una moneda al aire con la tendencia del día no cuenta) y contraído hacia el 50 % con poca muestra. Pulsa un medio para verlo por horizonte.</p></div><div class="panel-b" id="evoMediaHead"></div><div class="filters" id="evoMediaF"></div><div class="tbl-wrap" id="evoMedia"></div><div class="panel-b" id="evoMedio" hidden></div></div>
+    <div class="panel"><div class="panel-h"><h2>Acierto por nivel, región, idioma, tipo, ventana, fase, rol y moneda</h2><p>Acierto ajustado al mercado a 1-4 h, con su intervalo del 90 % y los casos independientes (bloques sin solape): cien noticias de las mismas horas no valen como cien pruebas. Solo mide, no opera.</p></div><div class="filters" id="aprDimF"></div><div class="tbl-wrap" id="aprDim"></div></div>
+    <div class="panel"><div class="panel-h"><h2>Post-mortems: por qué ganó o perdió cada operación</h2><p>Cada operación cerrada (paper y vigilancia) con sus hechos, sin IA, y la explicación de la IA local cuando la escribe (en baja prioridad, con un hueco reservado aunque la cola de triaje esté llena). Es explicación, nunca decisión.</p></div><div class="panel-b" id="evoPM"></div></div>
     <div class="two">
       <div class="panel"><div class="panel-h"><h2>Noticias que mejor funcionaron</h2><p>Dirección prevista × movimiento a +4 h, últimos 30 días.</p></div><div class="panel-b" id="evoBest"></div></div>
       <div class="panel"><div class="panel-h"><h2>Noticias que peor funcionaron</h2><p>Las que más fallaron, con la explicación de por qué.</p></div><div class="panel-b" id="evoWorst"></div></div>
@@ -1440,7 +1445,7 @@ const S = {
   approval:"veto", execStop:false, source:"sim", ws:null, dirty:true,
   // Evolución: mensajes «evolucion», «aprendizaje» y «fuentes_vivas» más lo que llega por /api/... (evoRev cambia al llegar algo)
   evo:null, apr:null, fv:null, fvList:null, fvCand:null, evoHist:null, evoInf:null, evoNews:null, evoMedio:null, evoSel:null,
-  evoF:{tipo:"", origen:"", dias:30}, evoMF:"todos", evoRev:0, evoDemo:false,
+  evoF:{tipo:"", origen:"", dias:30}, evoMF:"todos", aprDim:"nivel", evoRev:0, evoDemo:false,
   fiables:null, fiabF:"todos",   // último cálculo de «noticias_fiables» (bot/fiables.py) y filtro de su tabla
   // Por qué entra o no: filas de «decisiones_apertura» (GET /api/decisiones y mensajes «decision_apertura»), la más reciente primero
   dec:[], decRev:0, decDemo:false, decApi:null,
@@ -1480,6 +1485,10 @@ function ingest(msg){
   if (msg.type==="sources") { S.sources = msg.sources; S.dirty=true; }
   if (msg.type==="calendar") { S.calendar = msg.events; S.dirty=true; }
   if (msg.type==="sources_summary") { S.srcSummary = msg; S.dirty=true; }
+  // Totales reales desde el arranque (al final de la foto): sustituyen lo contado con los eventos de la foto (n.º 8)
+  if (msg.type==="reloj") { const el = $("#avisoReloj"), a = typeof msg.aviso === "string" && msg.aviso ? msg.aviso : "";
+    el.hidden = !(msg.ok === false && a); if (!el.hidden) el.textContent = a; }   // hallazgo n.º 53: el reloj del PC se desvía
+  if (msg.type==="conteo" && isObj(msg.kinds)) { for (const [k, n] of Object.entries(msg.kinds)) if (isNum(n) && k in S.counts) S.counts[k] = n; S.dirty=true; }
   if (msg.type==="trend") { S.trend = msg.markets; S.dirty=true; }   // índices: ya no se pintan (solo interesa la cripto)
   if (msg.type==="cripto_aperturas") { S.criptoAp = msg; S.dirty=true; }
   if (msg.type==="orderflow") { S.orderflow = msg.coins; S.dirty=true; }
@@ -1639,7 +1648,20 @@ function resetLive(msg){
   for (const c of COINS) S.flow[c] = {};
   lastFeedSig = "";
   const tag = $("#modeTag"); tag.textContent = `En vivo · paper · fase ${msg.phase}`; tag.className = "mode live";
+  avisoParado(msg.hueco);
+  $("#avisoReloj").hidden = true;   // la foto trae después el último «reloj»
   liveControls();
+}
+// Hallazgo n.º 0: si el bot estuvo parado antes de este arranque (5 min o más sin ningún evento), que se vea durante
+// las 24 h siguientes.
+function avisoParado(h){
+  const el = $("#avisoParado");
+  const ok = isObj(h) && isNum(h.desde) && isNum(h.hasta) && h.hasta > h.desde && Date.now() - h.hasta < 24*3600e3;
+  el.hidden = !ok;
+  if (!ok) return;
+  const min = (h.hasta - h.desde) / 60e3, dur = min < 90 ? `${nf(min, 0)} min` : `${nf(min / 60, 1)} h`;
+  el.textContent = `El bot estuvo parado ${dur} (del ${madWhen(h.desde)} al ${madWhen(h.hasta)}): en ese tiempo no siguió ` +
+    `aperturas ni noticias. Las posiciones paper que estaban abiertas se reconcilian con las velas de 1 min del hueco.`;
 }
 function onEvent(e){
   e.id = e.id || "e"+(++S.seq); e.ts = e.ts || S.vnow;
@@ -1815,7 +1837,7 @@ function demoFiables(){
     probados:58, con_muestra:21, pasan:2, operan:1, por_azar:1.6, por_azar_p95:4, por_azar_max:6, p_azar:0.21,
     azar_bloques:{media:2.1, p95:5, max:7, p:0.04, bloque_min:60},
     familias:{medio:{probados:24, pasan:0, por_azar:0.5}, fuente:{probados:15, pasan:0, por_azar:0.3}, tipo_sentido:{probados:12, pasan:2, por_azar:0.5}, medio_sentido:{probados:7, pasan:0, por_azar:0.3}},
-    nota:"Ejemplo: 2 de 21 grupos con la muestra mínima pasan los criterios fijados de antemano con 2140 historias×moneda de 3 días; con la dirección barajada pasarían 1,6 de media y, barajando noticias enteras dentro de cada hora, 2,1 (p = 0,04). Solo 1 pasa también la puerta para operar; el otro tiene 9 noticias distintas. Es un ejemplo: con los datos reales del 25 al 27 de octubre no pasa ninguno.",
+    nota:"Ejemplo: 2 de 21 grupos con la muestra mínima pasan los criterios fijados de antemano con 2140 historias×moneda de 3 días; con la dirección barajada pasarían 1,6 de media y, barajando noticias enteras dentro de cada hora, 2,1 (p = 0,04). Solo 1 pasa también la puerta para operar; el otro tiene 9 noticias distintas. Es un ejemplo: con los datos reales del 25 al 27 de octubre pasan 6 grupos los criterios, como por azar (p = 0,19), y ninguno la puerta para operar.",
     grupos:[
       g({clave:"tipo_sentido:regulatorio:1", tipo:"tipo_sentido", nombre:"regulatorio · alcista", sentido:1, tipo_noticia:"regulatorio", n:44, n_historias:38, dias:3, dias_validos:3, acierto:0.659, acierto_bruto:0.614, acierto_1h:0.55, n_1h:40, ic90_bajo:0.535, bloques:31, ic90_bajo_bloques:0.52, por_dia:pd([0,12,8],[1,19,12],[2,13,9]), estado:"fiable", opera:true, no_opera:[]}),
       g({clave:"tipo_sentido:seguridad:-1", tipo:"tipo_sentido", nombre:"seguridad · bajista", sentido:-1, tipo_noticia:"seguridad", n:36, n_historias:9, dias:3, dias_validos:3, acierto:0.667, acierto_bruto:0.722, acierto_1h:0.58, n_1h:33, ic90_bajo:0.53, bloques:7, ic90_bajo_bloques:0.41, por_dia:pd([0,9,6],[1,15,9],[2,12,9]), estado:"fiable", opera:false, no_opera:["9 noticias distintas (hacen falta 30)", "cota de Wilson por bloques de 30 min 41 % (7 bloques; hace falta 50 %)"]}),
@@ -2102,6 +2124,8 @@ function equityNow(){
   return S.equity + S.positions.reduce((a,p)=>a+posPnl(p),0);
 }
 const eqBase = () => (S.live && S.portfolio && S.portfolio.start_equity) || DEMO_EQUITY;   // capital inicial de la cuenta paper
+// En directo, antes de la primera cartera del bot no hay capital que enseñar (el de la demostración no es del bot).
+const sinCartera = () => S.live && !S.portfolio;
 // Resultado latente de una posición: en directo, el que calcula el bot (con la comisión de entrada).
 // En la demostración, con la comisión de entrada pagada, como el bot.
 function posPnl(p){ return S.live && p.upnl!=null ? p.upnl : ((S.prices[p.coin]||p.entry)-p.entry)*p.qty*(p.side==="long"?1:-1) - (!S.live && isObj(p.costes) && isNum(p.costes.entrada) ? p.costes.entrada : 0); }
@@ -2280,8 +2304,9 @@ function entradaStep(st){
     if (x.dir) facts.push(["Sentido", x.dir > 0 ? '<span class="pos">▲ Largo (contado)</span>' : '<span class="neg">▼ Corto (perpetuo)</span>']);
     if (isNum(x.umbral)) facts.push(["Umbral", `${nf(x.umbral,2)} % a favor`]);
     if (isNum(x.mov)) facts.push(["Movimiento", `<span class="${x.mov>=0?"pos":"neg"}">${pct(x.mov,2)}</span>`]);
-    if (okT(x.hasta) && x.estado==="esperando") facts.push(["Espera hasta", `${hms(x.hasta)} UTC`]);
-    return `<div>${pill(x.tone, x.label)} <b>${esc(x.coin || "")}</b></div>${x.motivo ? `<span${x.estado==="vetada" || x.estado==="caducada" ? ' class="reason"' : ""}>${esc(x.motivo)}</span>` : ""}${facts.length ? kv(facts) : ""}`; }).join("");
+    if (okT(x.hasta) && x.estado==="esperando") facts.push(["Espera hasta", `${madHM(x.hasta)} Madrid`]);
+    const op = x.estado==="confirmada" ? strOk(x.P.paper_story) : null;
+    return `<div>${pill(x.tone, x.label)} <b>${esc(x.coin || "")}</b></div>${x.motivo ? `<span${x.estado==="vetada" || x.estado==="caducada" ? ' class="reason"' : ""}>${esc(x.motivo)}</span>` : ""}${facts.length ? kv(facts) : ""}${op ? `<div class="btns"><button type="button" class="btn" data-story="${esc(op)}">Abrir la operación (paper)</button></div>` : ""}`; }).join("");
   return stepNode("strat", "Entrada por noticia fiable", status, when, rows
     + `<span class="note">La noticia es de un grupo que acierta ≥ 60 % de forma constante y que además pasa la puerta para operar (azar que conserva la hora, noticias distintas, acierto bruto y horquilla, y hacia delante con lo que usaría en vivo). Se espera hasta 60 min desde el triaje a que el precio se mueva a su favor al menos el umbral (el mayor de 0,5 % y 2σ del movimiento de 60 min); si lo hace, entra por el mismo camino que el motor (riesgo → aprobación → paper) con stop 1,5 % y objetivo 3R, como mucho 24 h, sin break-even ni stop dinámico. Comparte con el motor los topes del día: con «6 diarias» y «6 diarias v2», 6 entradas y 3 % de riesgo; con E2, el motor cuenta también estas entradas en su tope de 4 y 2 %. El acierto del grupo no es lo que dará la horquilla: se mide en paper.</span><span class="llm">Reglas de código, sin coste de IA · solo paper</span>`);
 }
@@ -2304,8 +2329,10 @@ function renderTrace(box = $("#trace")){
     box.innerHTML = `<div class="trace-h"><div class="eyebrow">Expediente</div><h3>Elige una fila del cable</h3><p class="note">Aquí verás el viaje completo de una noticia: de dónde salió, cómo se verificó, qué impacto se estimó, cómo estaba el minorista, qué estrategia se propuso, qué dijo Riesgo, tu aprobación y el resultado.</p></div>`;
     return;
   }
+  // Operación de la entrada por noticia fiable (nf-…): la disparó una noticia, que tiene su propio expediente.
+  const nfOf = fiabStory(st.strat) || (/^nf-/.test(st.id||"") ? strOk(st.noticia) : null);
   // Planes de ventana del estratega (w-…) y del motor de aperturas (a-…): no hay noticia que triar, verificar ni medir.
-  const plan = st.tier==="Plan" || /^[wa]-/.test(st.id||"");
+  const plan = !nfOf && (st.tier==="Plan" || /^[wa]-/.test(st.id||""));
   // En directo, el principio de la historia puede haber quedado fuera del historial recibido: se sigue con lo que hay.
   const gone = S.live && !!(st.strat || st.exec || st.result);
   const fiab = (st.events || []).some(x => x.kind==="entrada_noticia");   // entrada por noticia fiable: no espera a verificación ni impacto
@@ -2319,8 +2346,10 @@ function renderTrace(box = $("#trace")){
     : fiab && !st.strat ? (x => pill(x.tone, `Noticia fiable · ${x.label}`))(entInfo([...st.events].reverse().find(e => e.kind==="entrada_noticia")))
     : pill("info", plan ? "Plan en curso" : S.live && !st.strat && !st.triage ? "Relevante · espera a la IA local" : S.live && !st.strat && !st.verify ? "Relevante · espera al verificador" : "En curso");
   let h = `<div class="trace-h"><div class="eyebrow"><span>Expediente ${esc(st.id)}</span>${status}</div><h3>${esc(head)}</h3>
-    <div class="trace-meta"><span>${esc(st.src||"–")} · ${esc(st.tier||"–")}</span><span class="mono">${plan?"Creado":"Captada"} ${st.t0 ? hms(st.t0)+" UTC" : "–"}</span><span class="mono">IA: ${usd(st.cost,4)} · ${nf(st.tokens,0)} tokens</span>${coinTags(st.coins)}</div></div><ol class="steps">`;
-  if (plan) h += stepNode("strat","Plan de apertura","done", st.t0 ? hms(st.t0) : "", `<span>Plan creado por ${esc(st.src || "el estratega")} para una apertura, sin noticia que lo dispare.</span>`);
+    <div class="trace-meta"><span>${esc(st.src||"–")} · ${esc(st.tier||"–")}</span><span class="mono">${plan || nfOf?"Creado":"Captada"} ${st.t0 ? hms(st.t0)+" UTC" : "–"}</span><span class="mono">IA: ${usd(st.cost,4)} · ${nf(st.tokens,0)} tokens</span>${coinTags(st.coins)}</div></div><ol class="steps">`;
+  if (nfOf){ const nst = S.stories.get(nfOf), nh = nst && (nst.headline || nst.title);
+    h += stepNode("strat","Disparada por una noticia fiable","done", st.t0 ? hms(st.t0) : "", `<span>Entrada de ${esc(st.src || "la entrada por noticia fiable")}: una noticia de un grupo fiable que el precio confirmó.${nh ? ` «${esc(short(nh, 120))}».` : ""}</span><div class="btns"><button type="button" class="btn" data-story="${esc(nfOf)}">Abrir el expediente de la noticia</button></div>`); }
+  else if (plan) h += stepNode("strat","Plan de apertura","done", st.t0 ? hms(st.t0) : "", `<span>Plan creado por ${esc(st.src || "el estratega")} para una apertura, sin noticia que lo dispare.</span>`);
   else {
   if (!st.t0 && !st.src) h += stepNode("hunter","Captura","todo","", `<span>${GONE_TXT}</span>`);
   else h += stepNode("hunter","Captura","done", st.t0 ? hms(st.t0) : "",
@@ -2474,11 +2503,13 @@ function renderTrades(){
   const avgR = S.closed.length ? S.closed.reduce((a,x)=>a+x.R,0)/S.closed.length : 0;
   let peak=base, mdd=0; for (const p of S.eqHist){ peak=Math.max(peak,p.v); mdd=Math.max(mdd,(peak-p.v)/peak*100); }
   const cu = S.live ? ((S.results && S.results.cuenta) || (S.portfolio && S.portfolio.cuenta)) : {nombre:"Cartera de prueba de 100 € (ejemplo)", eur:100};
-  $("#eqNote").textContent = cu && cu.eur ? `${cu.nombre || "Cartera de prueba"}: ${nf(cu.eur,0)} € ficticios (${nf(base,2)} ${QUOTE} al empezar). Pasa el ratón para ver cada punto.`
+  const sc = sinCartera();
+  $("#eqNote").textContent = sc ? "Esperando la cartera paper del bot (dinero ficticio)."
+    : cu && cu.eur ? `${cu.nombre || "Cartera de prueba"}: ${nf(cu.eur,0)} € ficticios (${nf(base,2)} ${QUOTE} al empezar). Pasa el ratón para ver cada punto.`
     : `Cuenta paper (dinero ficticio) de ${nf(base,2)} ${QUOTE}. Pasa el ratón para ver cada punto.`;
   $("#kpis").innerHTML = [
-    ["Capital paper", nf(eq,2), QUOTE],
-    [S.live ? "Resultado total" : "Resultado sesión", `<span class="${pnl>=0?"pos":"neg"}">${pnl>=0?"+":""}${nf(pnl,2)}</span>`, `${pct(pnl/base*100,2)} sobre ${nf(base,0)}`],
+    ["Capital paper", sc ? "–" : nf(eq,2), sc ? "esperando la cartera del bot" : QUOTE],
+    [S.live ? "Resultado total" : "Resultado sesión", sc ? "–" : `<span class="${pnl>=0?"pos":"neg"}">${pnl>=0?"+":""}${nf(pnl,2)}</span>`, sc ? "–" : `${pct(pnl/base*100,2)} sobre ${nf(base,0)}`],
     ["Acierto", S.closed.length?`${nf(wins/S.closed.length*100,0)} %`:"–", `${wins} de ${S.closed.length} operaciones`],
     ["R medio", S.closed.length?`${avgR>=0?"+":""}${nf(avgR,2)}`:"–", "por operación cerrada"],
     ["Caída máxima", `${nf(mdd,2)} %`, "desde el máximo de la sesión"]
@@ -2522,6 +2553,7 @@ function renderTrades(){
   renderEquity();
 }
 function renderEquity(){
+  if (sinCartera()){ $("#equity").innerHTML = `<p class="note">Sin cartera del bot todavía: la curva sale con el primer mensaje «portfolio».</p>`; return; }
   const base = eqBase(), d = S.eqHist.length ? [...S.eqHist, {t:S.vnow, v:equityNow()}] : [{t:S.vnow-60000,v:base},{t:S.vnow,v:equityNow()}];
   const W=640, H=190, L=58, R=12, T=12, B=26;
   let lo = Math.min(base, ...d.map(p=>p.v)), hi = Math.max(base, ...d.map(p=>p.v)); const pad=(hi-lo)*0.15||20; lo-=pad; hi+=pad;
@@ -3002,11 +3034,15 @@ const OPEN_SRC = {backtest:["good","Backtest","elegidos por el backtest de 24 me
 // Modo impulso (motor v3): fases, paso de la entrada, instrumento y etiqueta de las noticias
 const OPEN_SUB = {impulso:"Modo impulso (paper): mide el movimiento de los primeros minutos de cada apertura y entra una sola vez a favor (largos al contado, cortos en perpetuo) con stop y objetivo fijos, sin break-even ni stop dinámico y como mucho 7 días.",
   seis:"Modo impulso «6 diarias» (paper, por tu decisión): mide el movimiento de los 15 primeros minutos de cada apertura y entra a +15 min a favor, sin filtros (largos al contado, cortos en perpetuo), con stop 1,5 % y objetivo 3R, sin break-even ni stop dinámico y como mucho 24 h; veta la entrada si hay una noticia fiable en contra.",
-  ruptura:"Señal de las noticias → confirmación en los primeros minutos de la apertura (ruptura del rango con volumen y presión a favor) → entrada → stop dinámico → reentradas mientras el volumen acompañe.",
+  otra:"Modo impulso (paper) con una variante que no es ninguno de los presets: mide el movimiento de los primeros minutos de cada apertura y entra a favor con stop y objetivo fijos, sin break-even ni stop dinámico.",
+  nada:"El motor de aperturas aún no ha publicado qué estrategia opera.",
+  ruptura:"Modo ruptura (v2, anterior a tus reglas): señal de las noticias → confirmación en los primeros minutos de la apertura (ruptura del rango con volumen y presión a favor) → entrada → reentradas mientras el volumen acompañe. Con tus reglas activas, el paper la opera con horquilla pura: sin break-even ni stop dinámico.",
   // Ruptura V3 (preset ruptura3 de bot/apertura.py)
   ruptura3:"Ruptura V3 (paper, por tu decisión): solo mira la moneda con el régimen cripto a favor (largos en RISK_ON, cortos en RISK_OFF) y su tendencia diaria y de 4 h en ese sentido con ADX ≥ 25; entra si una vela de 5 min cierra fuera del rango de los 15 primeros minutos con volumen ≥ 1,5 × el del rango y expansión ≥ 1,5 ATR, antes de +240 min. Stop 2-3 % (el otro lado del rango), como mucho 2 por apertura; la mitad sale en 3R y el resto corre con el cerrojo (sin break-even). Veta la entrada si hay una noticia corroborada en contra.",
   // «6 diarias 4R» (preset seis4r de bot/apertura.py)
-  seis4r:"Modo impulso «6 diarias 4R» (paper, por tu decisión): mide el movimiento de los 15 primeros minutos de cada apertura y entra a +15 min a favor, sin filtros (largos al contado, cortos en perpetuo), con stop 2 % y objetivo 4R (+8 %): horquilla pura, sin parcial, cerrojo, break-even ni stop dinámico, y como mucho 7 días; veta la entrada si hay una noticia fiable en contra. No llega a 6 al día: en el backtest hizo ≈ 2,5 operaciones por jornada fuera de muestra (3,3 dentro), porque cada posición ocupa su moneda hasta 7 días."};
+  seis4r:"Modo impulso «6 diarias 4R» (paper, por tu decisión): mide el movimiento de los 15 primeros minutos de cada apertura y entra a +15 min a favor, sin filtros (largos al contado, cortos en perpetuo), con stop 2 % y objetivo 4R (+8 %): horquilla pura, sin parcial, cerrojo, break-even ni stop dinámico, y como mucho 7 días; veta la entrada si hay una noticia fiable en contra. No llega a 6 al día: en el backtest hizo ≈ 2,5 operaciones por jornada fuera de muestra (3,3 dentro), porque cada posición ocupa su moneda hasta 7 días.",
+  // «6 diarias 4R · stop 3 %» (preset seis4r3 de bot/apertura.py)
+  seis4r3:"Modo impulso «6 diarias 4R · stop 3 %» (paper, por tu decisión): mide el movimiento de los 15 primeros minutos de cada apertura y entra a +15 min a favor, sin filtros (largos al contado, cortos en perpetuo), con stop 3 % y objetivo 4R (+12 %): horquilla pura, sin parcial, cerrojo, break-even ni stop dinámico, y como mucho 7 días; veta la entrada si hay una noticia fiable en contra."};
 const STEP_TXT = {hora:"entra a la hora fijada", retroceso:"espera el retroceso", reanudacion:"espera la reanudación", ruptura:"espera la ruptura"};
 const INST_TXT = {spot:"contado", perp:"perpetuo"}, INST_A = {spot:"al contado", perp:"en perpetuo"};
 const NEWS_TAG = {a_favor:["good","Noticia a favor"], neutral:["muted","Sin noticia clara"], en_contra:["bad","Noticia en contra"]};
@@ -3237,7 +3273,7 @@ function subSeis2(P){
 function renderOpenings(){
   const box = $("#openings"), O = motorO(), head = isObj(O) ? openHead(O) : "", imp = isObj(O) && O.strategy==="impulso", pre = motorPreset().preset;
   const wins = isObj(O) && Array.isArray(O.windows) ? O.windows.filter(isObj) : [];
-  $("#openSub").textContent = !imp ? OPEN_SUB.ruptura : pre==="seis2" ? subSeis2(O.params) : OPEN_SUB[pre==="seis" || pre==="ruptura3" || pre==="seis4r" ? pre : "impulso"];
+  $("#openSub").textContent = !isObj(O) ? OPEN_SUB.nada : !imp ? OPEN_SUB.ruptura : pre==="seis2" ? subSeis2(O.params) : OPEN_SUB[pre==="seis" || pre==="ruptura3" || pre==="seis4r" || pre==="seis4r3" || pre==="impulso" ? pre : "otra"];
   const demo = isObj(O) && O.demo ? `<p class="note"><span class="pill warn">Ejemplo inventado</span> En la demostración el motor es simulado, con «${esc(motorPreset().nombre || "6 diarias v2")}» como ejemplo (no es por fuerza la estrategia que tiene el bot): aperturas de verdad, pero impulsos y decisiones de mentira. Lo que hizo en las aperturas pasadas está en «Por qué entra o no».</p>` : "";
   if (!wins.length){ box.innerHTML = demo + head + `<p class="note">${S.live ? (imp ? "El motor de aperturas aún no ha publicado ninguna ventana: arma cada apertura antes de que abra y mide el impulso de sus primeros minutos." : "El motor de aperturas aún no ha publicado ninguna ventana: se arma 15 min antes de cada apertura con señal.") : "En las próximas 24 h no hay ninguna apertura que opere el motor simulado."}</p>`; return; }
   if (imp){ box.innerHTML = demo + head + impTable(wins, O); return; }
@@ -3403,7 +3439,7 @@ function renderAI(){
 const EVO_TIPOS = {fuente_añadida:"Medio añadido", fuente_silenciada:"Medio silenciado", fuente_retirada:"Medio retirado",
   fuente_restaurada:"Medio restaurado", peso_cambiado:"Peso cambiado", estrategia_promovida:"Estrategia promovida",
   estrategia_degradada:"Estrategia degradada", parametro_cambiado:"Parámetro cambiado", informe_semanal:"Informe semanal",
-  veredicto_medio:"Veredicto de un medio", propuesta_descartada:"Propuesta descartada", filtro_cambiado:"Filtro de noticias cambiado"};
+  veredicto_medio:"Veredicto de un medio", propuesta_descartada:"Propuesta descartada", filtro_cambiado:"Cambio del código en el paper"};
 const EVO_TONE = {fuente_añadida:"good", fuente_restaurada:"good", fuente_silenciada:"warn", fuente_retirada:"bad", peso_cambiado:"info",
   estrategia_promovida:"good", estrategia_degradada:"bad", parametro_cambiado:"info", informe_semanal:"muted", veredicto_medio:"muted",
   propuesta_descartada:"muted", filtro_cambiado:"warn"};
@@ -3621,7 +3657,7 @@ function evoMedRow(r, fvOn, P){
   return `<tr${S.evoSel===String(m.medio) ? ' class="sel"' : ""}>
     <td class="wrapc"><button type="button" class="chip" data-evo-medio="${esc(m.medio)}" title="Ver su acierto por horizonte">${esc(short(m.nombre || m.medio, 44))}</button>${sub.length ? `<br><span class="note">${esc(sub.join(" · "))}</span>` : ""}</td>
     <td>${est ? `<span class="estchip ${esc(est)}">${esc(FV_EST[est] || est)}</span>` : '<span class="estchip sin">sin estado</span>'}${f && f.manual ? `<br><span class="note">a mano${okT(f.manual_hasta) ? " hasta el " + madDM(f.manual_hasta) : ""}</span>` : ""}${f && isObj(f.sugerencia) ? `<br><span class="note" title="${esc(f.sugerencia.motivo || "")}">sugerido: ${esc((FV_EST[f.sugerencia.estado] || f.sugerencia.estado || "").toString().toLowerCase())}</span>` : ""}</td>
-    <td class="r mono">${isNum(m.peso) ? "×" + nf(m.peso,2) : "–"}${isNum(m.peso_manual) ? `<br><span class="note">fijado a mano</span><br><button type="button" class="btn" data-apr-auto="${esc(m.medio)}" title="Deja que el aprendizaje vuelva a decidir su peso">Volver al automático</button>` : ""}</td>
+    <td class="r mono">${isNum(m.peso) ? "×" + nf(m.peso,2) : "–"}${isNum(m.peso_manual) ? `<br><span class="note">fijado a mano</span><br><button type="button" class="btn" data-apr-auto="${esc(m.medio)}" title="Deja que el aprendizaje vuelva a decidir su peso">Volver al automático</button>` : ""}${m.medio!=null ? `<br><button type="button" class="btn" data-apr-fijar="${esc(m.medio)}" title="Fija a mano cuánto cuentan sus noticias (0 a 1,5; 1 = neutro)">Fijar peso</button>` : ""}</td>
     <td class="mono">${bar}${p01(m.acierto)}${isNum(m.bruto) || isNum(m.base) ? `<br><span class="note">bruto ${p01(m.bruto)} · base ${p01(m.base)}</span>` : ""}</td>
     <td class="r mono">${isNum(m.independientes) ? `${vigN(m.independientes)}/${vigN(minC)} bloques<br><span class="note">${vigN(m.dias)}/${vigN(minD)} días · ${vigN(m.casos)} noticias</span>` : '<span class="note">sin medir</span>'}</td>
     <td class="r mono">${isNum(m.ventanas) ? `${p01(m.ventanas)}<br><span class="note">${vigN(m.ventanas_casos)} casos</span>` : "–"}</td>
@@ -3752,7 +3788,7 @@ function fiabVerdict(F, pasan){
   const op = numOf(F.operan), opT = !isNum(op) ? "" : op ? ` ${vigN(op)} ${op===1 ? "pasa" : "pasan"} también la puerta para operar.` : " Ninguno pasa la puerta para operar: no se entra ni se veta nada por ellos.";
   if (isNum(az.bp) && az.bp >= 0.05) return `Pasan ${vigN(pasan)}; con el azar que conserva la hora pasarían ~${azN(az.bm)} (p = ${pTxt(az.bp)}): no se distinguen de la casualidad.${opT}`;
   if (!isNum(az.m)) return `Pasan ${vigN(pasan)}, pero falta la cuenta frente al azar: no se puede saber si es suerte.`;
-  if (pasan <= az.m || (isNum(az.p95) && pasan <= az.p95)) return `Pasan ${vigN(pasan)} y por puro azar pasarían ~${azN(az.m)}${isNum(az.p95) ? ` (hasta ${vigN(az.p95)} el 95 % de las veces)` : ""}: no se distinguen de la casualidad. Se usan porque cumplen los criterios, como prueba en paper, no como ventaja demostrada.`;
+  if (pasan <= az.m || (isNum(az.p95) && pasan <= az.p95)) return `Pasan ${vigN(pasan)} y por puro azar pasarían ~${azN(az.m)}${isNum(az.p95) ? ` (hasta ${vigN(az.p95)} el 95 % de las veces)` : ""}: no se distinguen de la casualidad.${opT || " Solo los que pasan la puerta para operar se usan, como prueba en paper, no como ventaja demostrada."}`;
   return `Pasan ${vigN(pasan)} frente a ~${azN(az.m)} por azar: más de lo que da la suerte, pero con ${d!=null ? `${vigN(d)} ${d===1 ? "día" : "días"}` : "pocos días"} de datos puede seguir siendo casualidad. Se comprueba en vivo, en la cartera paper.`;
 }
 // Minibarra por día: alto = acierto ajustado; verde ≥ el mínimo, ámbar ≥ el mínimo diario, rojo por debajo; tenue si el
@@ -4348,7 +4384,7 @@ function renderEvo(force){
   if (E){ safe(() => renderEvoHead(E)); safe(() => renderEvoProps(E)); safe(() => renderEvoChamp(E)); safe(() => renderEvoAsp(E)); }
   else { putH($("#evoCtl"), ""); putH($("#evoProps"), ""); putH($("#evoChamp"), ""); putH($("#evoAsp"), "");
     putH($("#evoHead"), `<p class="note">${S.live ? "La evolución aún no ha publicado su estado: arranca con el bot y calcula cada 10 min (BOT_EVOLUCION=0 la apaga)." : "Sin datos."}</p>`); }
-  safe(renderEvoTimeline); safe(renderFiables); safe(renderEvoMediaHead); safe(renderEvoMedia); safe(renderEvoMedio); safe(renderEvoNews); safe(renderEvoCand); safe(() => renderEvoReport(E));
+  safe(renderEvoTimeline); safe(renderFiables); safe(renderEvoMediaHead); safe(renderEvoMedia); safe(renderEvoMedio); safe(renderAprDim); safe(renderEvoPM); safe(renderEvoNews); safe(renderEvoCand); safe(() => renderEvoReport(E));
 }
 // Mensajes del bus
 function onEvo(m){
@@ -4438,6 +4474,22 @@ function aprAuto(medio){
     confirmLater(() => S.aprPend!==p, "El bot no ha confirmado el cambio de peso: mira el historial de cambios o vuelve a intentarlo.");
   }
 }
+// Peso de un medio fijado a mano (n.º 22): de 0 a 1,5 (1 = neutro), con confirmación. Aprendizaje.fijar_peso; se puede
+// revertir o volver al automático. Solo cambia cuánto cuentan sus noticias en la señal, nunca las reglas de operación.
+function aprFijar(medio){
+  if (typeof medio!=="string" || !medio || medio.length > 200) return;
+  if (!S.live){ toast("Ejemplo: en la demostración no se envía nada al bot.", 5000); return; }
+  const raw = typeof prompt==="function" ? prompt(`Peso de «${medio}» de 0 a 1,5 (1 = neutro, 0 = sus noticias no cuentan):`, "1") : null;
+  if (raw==null) return;
+  const v = Number(String(raw).trim().replace(",", "."));
+  if (!isFinite(v) || v < 0 || v > 1.5){ toast("El peso tiene que ser un número de 0 a 1,5.", 5000); return; }
+  if (!confirm(`¿Fijar el peso de «${medio}» en ×${nf(v,2)}? Queda en el historial y se puede revertir; tus reglas de operación no se tocan. Solo paper.`)) return;
+  if (sendBot({type:"peso_medio", medio, peso:v, motivo:"Fijado a mano desde la web"})){
+    const p = S.aprPend = {id:medio, t:Date.now(), txt:`Hecho: «${medio}» con peso ×${nf(v,2)} fijado a mano`};
+    toast("Orden enviada al bot. Pendiente de que la confirme.", 5000);
+    confirmLater(() => S.aprPend!==p, "El bot no ha confirmado el cambio de peso: mira el historial de cambios o vuelve a intentarlo.");
+  }
+}
 // «orden_web» (server.order_done): resultado de una orden de la web sobre fuentes o pesos. Solo avisa de la pendiente.
 function onOrden(m){
   const ok = m.ok!==false, why = typeof m.why==="string" && m.why ? m.why : "sin motivo", reciente = p => !isNum(m.ts) || m.ts >= p.t - 60000;
@@ -4489,12 +4541,37 @@ function evoClick(t){   // true si el clic era de la pestaña Evolución
     evoSend({type:"evolucion", accion:"revertir", id:rv.dataset.evoRevertir}); return true; }
   const fa = t.closest("[data-fv-acc]"); if (fa){ fvAction(fa.dataset.fvAcc, fa.dataset.fvId); return true; }
   const aa = t.closest("[data-apr-auto]"); if (aa){ aprAuto(aa.dataset.aprAuto); return true; }
+  const af = t.closest("[data-apr-fijar]"); if (af){ aprFijar(af.dataset.aprFijar); return true; }
   const mm = t.closest("[data-evo-medio]");
   if (mm){ const o = mm.dataset.evoMedio || ""; S.evoSel = o && o!==S.evoSel ? o : null; if (S.evoSel) loadMedio(S.evoSel); evoBump(); return true; }
   const dd = t.closest("[data-evo-dias]"); if (dd){ S.evoF.dias = +dd.dataset.evoDias || 0; loadEvo("hist"); evoBump(); return true; }
   const mf = t.closest("[data-evo-mf]"); if (mf){ S.evoMF = MF.some(x => x[0]===mf.dataset.evoMf) ? mf.dataset.evoMf : "todos"; evoBump(); return true; }
   const fb = t.closest("[data-fiab-f]"); if (fb){ S.fiabF = FIAB_F.some(x => x[0]===fb.dataset.fiabF) ? fb.dataset.fiabF : "todos"; evoBump(); return true; }
+  const ad = t.closest("[data-apr-dim]"); if (ad){ S.aprDim = APR_DIMS.some(x => x[0]===ad.dataset.aprDim) ? ad.dataset.aprDim : "nivel"; evoBump(); return true; }
   return false;
+}
+// Acierto por dimensión (n.º 21): por_nivel, por_region… del mensaje «aprendizaje» (los 12 grupos con más casos de cada una)
+const APR_DIMS = [["nivel","Nivel"],["region","Región"],["idioma","Idioma"],["tipo","Tipo de noticia"],["ventana","Ventana"],["fase","Fase"],["rol","Primera o confirmación"],["moneda","Moneda"]];
+function renderAprDim(){
+  const A = isObj(S.apr) ? S.apr : null, k = APR_DIMS.some(x => x[0]===S.aprDim) ? S.aprDim : "nivel";
+  putH($("#aprDimF"), APR_DIMS.map(([id, l]) => `<button type="button" class="chip" data-apr-dim="${id}" aria-pressed="${k===id}">${l}</button>`).join(""));
+  const rows = A ? objs(A["por_" + k]) : [];
+  if (!rows.length){ putH($("#aprDim"), `<p class="note" style="padding:0 14px 10px">${A ? "Aún sin casos medidos para esta dimensión." : S.live ? "El aprendizaje aún no ha publicado su estado." : "Sin datos."}</p>`); return; }
+  const P = isObj(A.params) ? A.params : {}, minC = numOf(P.min_casos), minD = numOf(P.min_dias);
+  putH($("#aprDim"), `<table><thead><tr><th class="wrapc">${esc((APR_DIMS.find(x => x[0]===k) || [])[1] || k)}</th><th>Acierto ajustado (IC 90 %)</th><th class="r">Bruto</th><th class="r">Base del día</th><th class="r">Casos</th><th class="r">Independientes</th><th class="r">Días</th></tr></thead><tbody>${rows.map(r => {
+      const ic = Array.isArray(r.ic90) && r.ic90.length===2 && r.ic90.every(isNum) ? ` <span class="note">(${p01(r.ic90[0])}–${p01(r.ic90[1])})</span>` : "";
+      const poco = (isNum(minC) && isNum(r.independientes) && r.independientes < minC) || (isNum(minD) && isNum(r.dias) && r.dias < minD);
+      return `<tr><td class="wrapc"><b>${esc(String(r.clave ?? "–"))}</b>${poco ? ' <span class="pill muted">poca muestra</span>' : ""}</td><td>${p01(r.acierto)}${ic}</td><td class="r mono">${p01(r.bruto)}</td><td class="r mono">${p01(r.base)}</td><td class="r mono">${vigN(r.casos)}</td><td class="r mono">${vigN(r.independientes)}</td><td class="r mono">${vigN(r.dias)}</td></tr>`; }).join("")}</tbody></table>
+    <p class="note" style="padding:0 14px 10px">Con poca muestra (menos de ${isNum(minC) ? vigN(minC) : "los"} casos independientes o ${isNum(minD) ? vigN(minD) : "pocos"} días) un acierto alto o bajo puede ser casualidad: no se separa del 50 % hasta que el intervalo deja fuera el 50 %.</p>`);
+}
+// Post-mortems (n.º 16): los últimos que publica /api/aprendizaje (20), con su resumen sin IA y el texto de la IA local
+const PM_EST = {hecho:["good","Explicado"], pendiente:["muted","Pendiente de la IA local"], error:["bad","La IA local falló"]};
+function renderEvoPM(){
+  const A = isObj(S.apr) ? S.apr : null, pms = A ? objs(A.postmortems) : [];
+  if (!pms.length){ putH($("#evoPM"), `<p class="note">${A && Array.isArray(A.postmortems) ? "Aún no hay operaciones cerradas que explicar." : S.live ? "Sin post-mortems todavía (salen en /api/aprendizaje al cerrarse cada operación)." : "Sin datos."}</p>`); return; }
+  putH($("#evoPM"), `<ul class="pmlist">${pms.slice(0, 20).map(p => { const e = PM_EST[p.estado] || ["muted", String(p.estado || "sin estado")];
+      const R = numOf(p.R), story = strOk(p.story), org = p.origen==="vigilancia" ? "virtual (vigilancia)" : "paper";
+      return `<li${story && p.origen!=="vigilancia" ? ` data-story="${esc(story)}" style="cursor:pointer"` : ""}><div><b>${esc(String(p.moneda || "–"))}</b> · ${esc(org)} · ${okT(p.cerrada) ? vigTime(p.cerrada) : "–"} · <span class="${isNum(R) && R>=0 ? "pos" : "neg"}">${isNum(R) ? (R>=0 ? "+" : "") + nf(R, 2) + " R" : "–"}</span> <span class="pill ${e[0]}">${esc(e[1])}</span></div>${p.resumen ? `<div class="note">${esc(String(p.resumen))}</div>` : ""}${p.texto ? `<div class="why">${esc(String(p.texto))}</div><span class="llm">${esc(String(p.modelo || "IA local"))} · explicación, no decisión</span>` : ""}</li>`; }).join("")}</ul>`);
 }
 // ---------- Demostración: un estado de EJEMPLO de la pestaña Evolución (inventado y rotulado como tal en cada panel) ----------
 // Solo los nombres y cifras de backtest de las estrategias del laboratorio (labData, si está incrustado) son reales.
@@ -4715,7 +4792,7 @@ function renderMando(){
   const pf = S.live && S.portfolio;
   $("#mdBook").innerHTML = (pend || `<p class="note" style="margin:0 0 8px">${S.live && !S.portfolio ? "El paper trading aún no ha propuesto operaciones." : S.live && S.approval==="auto" ? "Modo automático (paper): no hace falta aprobar." : "Nada pendiente de tu aprobación."}</p>`)
     + `<ul class="md-list" style="margin:0 -14px">${pos || `<li><span class="led"></span><span class="nm">Sin posiciones</span><span class="tx"></span><b></b></li>`}</ul>`
-    + kv([["Capital paper", `${nf(pf ? pf.equity : R.equity,2)} ${QUOTE}`],
+    + kv([["Capital paper", pf ? `${nf(pf.equity,2)} ${QUOTE}` : S.live && !S.results ? "–" : `${nf(R.equity,2)} ${QUOTE}`],
           ["Hoy", pf ? `<span class="${(pf.day_pnl||0)>=0?"pos":"neg"}">${pct(pf.day_pnl_pct||0,2)}</span> · con lo abierto` : td ? `<span class="${td.pnl>=0?"pos":"neg"}">${pct(td.pnl_pct,2)}</span> · ${td.n} ops.` : "–"],
           ["Operaciones", nf((R.trades||[]).length,0)],
           ["Pérdida del día", `${nf(S.dayLoss||0,2)} % de ${nf(S.limits.max_daily_loss_pct,0)} %`],
@@ -5985,6 +6062,8 @@ function renderResOpen(){
 }
 function renderResults(){
   const R = S.live ? (S.results || computeResults([])) : computeResults(S.closed), tr = R.trades || [];
+  // En directo sin /api/resultados todavía: el capital es el de la cartera del bot y, sin ella, ninguno (no el de la demo).
+  if (S.live && !S.results && S.portfolio) Object.assign(R, {equity:S.portfolio.equity, start_equity:S.portfolio.start_equity || R.start_equity});
   const note = $("#resNote"); note.hidden = tr.length>0;
   note.innerHTML = `<b>Aún no hay operaciones cerradas.</b><span>${S.live ? "El paper trading (dinero ficticio con precios reales de OKX EU) empieza en cuanto el estratega proponga la primera operación en una ventana de apertura." : "Pon la simulación a 10× o 60× para ver operaciones."}</span>`;
   const wins = tr.filter(t => t.pnl>0), today = madDay(S.vnow), todayD = (R.daily||[]).find(d => d.date===today);
@@ -5992,9 +6071,10 @@ function renderResults(){
   const goal = (R.daily||[]).filter(d => d.pnl_pct>=5).length;
   const cu = S.live ? ((S.results && S.results.cuenta) || (S.portfolio && S.portfolio.cuenta)) : null;   // cartera de prueba con nombre
   const K = resCostes(R, tr);   // comisiones y funding pagados, bruto y neto
+  const nada = S.live && !S.results && !S.portfolio;
   kpiRow($("#resKpis"), [
-    ["Capital", nf(R.equity,2), cu && cu.eur_usdc ? `${QUOTE} ≈ ${nf(R.equity/cu.eur_usdc,2)} € · ${esc(cu.nombre || "cartera de prueba")} (ficticia)` : `${QUOTE} · ${S.live ? "paper" : "simulación"}`],
-    ["Resultado total", `<span class="${total>=0?"pos":"neg"}">${total>=0?"+":""}${nf(total,2)}</span>`, `${pct(total/R.start_equity*100,2)} sobre ${nf(R.start_equity,0)}`],
+    ["Capital", nada ? "–" : nf(R.equity,2), nada ? "esperando los resultados del bot" : cu && cu.eur_usdc ? `${QUOTE} ≈ ${nf(R.equity/cu.eur_usdc,2)} € · ${esc(cu.nombre || "cartera de prueba")} (ficticia)` : `${QUOTE} · ${S.live ? "paper" : "simulación"}`],
+    ["Resultado total", nada ? "–" : `<span class="${total>=0?"pos":"neg"}">${total>=0?"+":""}${nf(total,2)}</span>`, nada ? "–" : `${pct(total/R.start_equity*100,2)} sobre ${nf(R.start_equity,0)}`],
     ["Hoy", todayD ? `<span class="${todayD.pnl>=0?"pos":"neg"}">${pct(todayD.pnl_pct,2)}</span>` : "–", todayD ? `${todayD.n} operaciones · ${todayD.pnl>=0?"+":""}${nf(todayD.pnl,2)} ${QUOTE}` : "sin operaciones hoy"],
     ["Operaciones", nf(tr.length,0), `${(R.daily||[]).length} días con actividad`],
     ["Acierto", tr.length ? pctp(wins.length/tr.length*100) : "–", `${wins.length} ganadoras`],
@@ -6021,7 +6101,7 @@ function renderResults(){
   $("#resRows").innerHTML = tr.slice(0,250).map(t => `<tr data-story="${esc(fiabStory(t) || t.story || "")}" style="cursor:pointer"><td class="mono">${dm(t.closed)} ${hm(t.closed)}</td><td>${esc(t.strategy)}${isFiableTrade(t) ? " " + FIAB_PILL : ""}</td><td>${esc(t.window)}</td><td><b>${t.coin}</b></td>
     <td><span class="side ${t.side}">${t.side==="long"?"COMPRA":"VENTA"}</span>${INST_TXT[t.instrument] ? ` <span class="note">${INST_TXT[t.instrument]}</span>` : ""}</td><td class="r mono">${pricef(t.entry)}</td><td class="r mono">${tradeExitHtml(t)}</td><td>${esc(t.reason||"")}</td>
     <td class="r mono ${t.pnl>=0?"pos":"neg"}">${t.pnl>=0?"+":""}${nf(t.pnl,2)}</td><td class="r mono">${pct(t.pnl_pct||0,2)}</td><td class="r mono">${tradeRHtml(t)}</td>${(c => `<td class="r mono"${c.ttl ? ` title="${esc(c.ttl)}"` : ""}>${c.html}</td>`)(costCell(t))}
-    <td class="r mono">${t.opened ? dur(t.closed-t.opened) : "–"}</td><td${isFiableTrade(t) ? ' title="Pulsa la fila para abrir la noticia que la disparó"' : ""}>${esc(short(t.headline||"",60))}${isFiableTrade(t) && isObj(t.tags) && grupoTxt(t.tags.grupo) ? `<br><span class="note">grupo fiable ${esc(grupoTxt(t.tags.grupo))}</span>` : ""}</td></tr>`).join("") || none(14);
+    <td class="r mono">${t.opened ? dur(t.closed-t.opened) : "–"}</td><td${isFiableTrade(t) ? ' title="Pulsa la fila para abrir la noticia que la disparó"' : ""}>${esc(short(t.headline||"",60))}${isFiableTrade(t) && isObj(t.tags) && grupoTxt(t.tags.grupo_nombre || t.tags.grupo) ? `<br><span class="note">grupo fiable ${esc(grupoTxt(t.tags.grupo_nombre || t.tags.grupo))}</span>` : ""}</td></tr>`).join("") || none(14);
 }
 
 // Margen izquierdo de un gráfico: el que pidan las etiquetas del eje (11 px de IBM Plex Mono ≈ 6,7 px por carácter), para
@@ -6092,6 +6172,8 @@ const WIN_NAME = {"tokio-seul":"Tokio y Seúl", china:"Shanghái y Hong Kong", e
 // impulso_7d.json más nombre y params). Las cifras salen del resumen, tal cual: fuera de muestra pierde y se dice.
 const E2_TITLE = "Estrategia en marcha: impulso de los primeros minutos (E2)", E2_TITLE_ANT = "Estrategia anterior (E2): impulso de los primeros minutos";
 const E2_SUB = "Lo que opera ahora el motor de aperturas: mide el movimiento de los 15 primeros minutos de cada apertura y, si pasa de ±0,2 %, lo sigue a +30 min con volumen relativo ≥ 1,5 y la tendencia de BTC a favor. Horquilla pura con tus reglas: stop 3 %, objetivo 3R (+9 %), sin break-even ni stop dinámico; largos al contado y cortos en perpetuo. Velas de 1 minuto de Binance desde noviembre de 2023, con comisiones y deslizamiento.";
+const E2_TITLE_REF = "Estrategia E2 (impulso de los primeros minutos): backtest de referencia";
+const E2_SUB_REF = "Todavía no se sabe qué estrategia opera el motor: lo publica el bot (pestaña Mercado y aperturas). E2 mide el movimiento de los 15 primeros minutos de cada apertura y, si pasa de ±0,2 %, lo sigue a +30 min con volumen relativo ≥ 1,5 y la tendencia de BTC a favor; stop 3 %, objetivo 3R (+9 %), sin break-even ni stop dinámico. Velas de 1 minuto de Binance desde noviembre de 2023, con comisiones y deslizamiento.";
 const E2_SUB_ANT = n => `Ya no opera: por tu decisión, el motor usa ahora «${n}» (arriba). Se guarda como referencia: medía el movimiento de los 15 primeros minutos de cada apertura y, si pasaba de ±0,2 %, lo seguía a +30 min con volumen relativo ≥ 1,5 y la tendencia de BTC a favor; stop 3 %, objetivo 3R (+9 %), sin break-even ni stop dinámico. Velas de 1 minuto de Binance desde noviembre de 2023, con comisiones y deslizamiento.`;
 const SEIS_ALT = ["Medida en backtest, no está en marcha: 6 diarias", "La variante de unas 6 operaciones al día: impulso de los 15 primeros minutos sin filtros, entrada a +15 min, stop 1,5 % y objetivo 3R, como mucho 24 h, con veto de noticias fiables en contra. El motor no la opera ahora; se enseña para comparar."];
 const SEIS_ANT = ["Estrategia anterior: 6 diarias", "Ya no opera: por tu decisión, el motor usa ahora «6 diarias v2» (arriba), con las mismas entradas y otra salida. Se guarda como referencia: impulso de los 15 primeros minutos sin filtros, entrada a +15 min, horquilla de stop 1,5 % y objetivo 3R, como mucho 24 h, con veto de noticias fiables en contra."];
@@ -6140,7 +6222,7 @@ function renderBtSeis(box, I, mode){
     <h3 style="margin:14px 0 6px;font-size:14px">Lo que dicen los datos</h3>
     <ul class="checks">
       <li><span class="ko">!</span><span><b>${pierde ? "Fuera de muestra pierde" : "Fuera de muestra no demuestra ventaja"}:</b> ${sR(F.mean_R)} por operación en ${nf(F.n,0)} operaciones. Con ${nf(RISK,1)} % de riesgo por operación son ≈ ${pctWd!=null ? pct(pctWd,2) : "–"} de la cuenta por jornada de lunes a viernes (${perWd!=null ? nf(perWd,1) : "–"} operaciones) y ≈ ${pctDay!=null ? pct(pctDay,2) : "–"} por día natural (${pctDay!=null ? pct(pctDay*30,1) : "–"} al mes, sin interés compuesto). En el estudio del 28-10-2026, las 6 variantes que llegan a unas 6 operaciones diarias perdían todas fuera de muestra: de −0,12 a −0,17 R por operación, de −0,32 a −0,44 % de la cuenta al día.</span></li>
-      <li><span class="ko">!</span><span><b>${on ? "Está en tu cartera paper por tu decisión, para medirla en vivo" : mode==="ant" ? "Estuvo en tu cartera paper por tu decisión desde el 28-10-2026 hasta que pasaste a «6 diarias v2»" : "Si la activas, será por tu decisión, para medirla en vivo"}</b>, no porque el backtest diga que gana. El riesgo por operación (${nf(RISK,1)} %) y tus reglas no se tocan para llegar a ningún objetivo.</span></li>
+      <li><span class="ko">!</span><span><b>${on ? "Está en tu cartera paper por tu decisión, para medirla en vivo" : mode==="ant" ? "Estuvo en tu cartera paper por tu decisión desde el 28-10-2026 hasta que pasaste a «6 diarias v2»" : mode==null ? "La activa o la quita solo tu decisión (scripts/activar_estrategia.py)" : "Si la activas, será por tu decisión, para medirla en vivo"}</b>, no porque el backtest diga que gana. El riesgo por operación (${nf(RISK,1)} %) y tus reglas no se tocan para llegar a ningún objetivo.</span></li>
       ${btTimeWins(F) ? `<li><span class="ko">!</span><span><b>El tope de ${isObj(I.params) && isNum(I.params.max_hold_h) ? nR(I.params.max_hold_h) : 24} h no sigue tu regla:</b> si no llega al objetivo ni al stop, se cierra a mercado con lo que haya${btTimeWins(F)}.</span></li>` : ""}
       <li><span class="ko">!</span><span><b>Con 3R el objetivo se cobra en ${sh(obj)} de las operaciones</b> (${nf(isNum(X.objetivo) ? X.objetivo : 0,0)} de ${nf(F.n,0)}; con el sentido al azar sale un 13-17 %): acertar el sentido no basta, el precio tiene que llegar a +4,5 % antes que a −1,5 %. Para no perder haría falta acertar el sentido ≈ 60 % de las veces; ni sabiéndolo siempre se pasa de ≈ +2 % al día.</span></li>
       <li><span class="ko">!</span><span><b>El backtest no lleva el veto de noticias fiables:</b> en los 3 años de velas no hay noticias grabadas. Lo que aporte el veto solo se verá en vivo, y sin grupos fiables no veta nada.</span></li>
@@ -6298,9 +6380,12 @@ function renderBtLive(){
   const sR = x => x==null || !isFinite(x) ? "–" : (x>0?"+":"") + nf(x, 2) + " R", sh = x => x==null ? "–" : nf(x*100, 0) + " %";
   const dmy = t => { if (!t) return "–"; const d = new Date(tsOf(t)); return `${dm(d.getTime())}-${d.getUTCFullYear()}`; };
   const RISK = 0.5;   // % de la cuenta arriesgado por operación (config.RISK_PER_TRADE_PCT)
-  // con «6 diarias» o «6 diarias v2» en marcha, E2 pasa a ser la anterior (y con la v2, también «6 diarias»)
-  const pre = motorPreset().preset, seis = pre==="seis", seis2 = pre==="seis2", rup3 = pre==="ruptura3", s4r = pre==="seis4r";
-  $("#btLiveTitle").textContent = seis || seis2 || rup3 || s4r ? E2_TITLE_ANT : E2_TITLE; $("#btLiveSub").textContent = seis || seis2 || rup3 || s4r ? E2_SUB_ANT(s4r ? "6 diarias 4R" : rup3 ? "Ruptura V3" : seis2 ? "6 diarias v2" : "6 diarias") : E2_SUB;
+  // con «6 diarias», «6 diarias v2» u otra de las tuyas en marcha, E2 pasa a ser la anterior (y con la v2, también «6 diarias»)
+  const mp = motorPreset(), pre = mp.preset, seis = pre==="seis", seis2 = pre==="seis2", rup3 = pre==="ruptura3", s4r = pre==="seis4r", s4r3 = pre==="seis4r3", e2on = pre==="impulso", e2ant = seis || seis2 || rup3 || s4r || s4r3;
+  // Sin «openings» (la copia publicada o antes del primer mensaje) o con una variante sin preset: no se sabe cuál opera.
+  $("#btLiveTitle").textContent = e2ant ? E2_TITLE_ANT : e2on ? E2_TITLE : E2_TITLE_REF;
+  $("#btLiveSub").textContent = e2ant ? E2_SUB_ANT(s4r3 ? "6 diarias 4R · stop 3 %" : s4r ? "6 diarias 4R" : rup3 ? "Ruptura V3" : seis2 ? "6 diarias v2" : "6 diarias") : e2on ? E2_SUB
+    : E2_SUB_REF + (mp.nombre ? ` En marcha ahora: ${mp.nombre}, que este backtest no mide.` : "");
   if (!I || !I.fuera || !I.fuera.n){ box.innerHTML = `<p class="note">${S.live ? "Aún no hay backtest del motor en vivo: lo genera la réplica BACKTEST_DIR/controles/compara_impulso.py." : "Esta demostración no trae el backtest del motor en vivo."}</p>`; }
   else {
     const F = I.fuera, N = I.dentro || {}, X = F.salidas || {};
@@ -6337,9 +6422,9 @@ function renderBtLive(){
   // medida y no en marcha). «6 diarias v2», igual: arriba del todo si la opera el motor; si no, debajo como medida.
   const SX = D.seis, hasSX = btOk(SX), S2 = D.seis2, hasS2 = btOk(S2);
   $("#btSeisTopP").hidden = !seis; $("#btSeisAltP").hidden = seis || !hasSX;
-  const alt = seis2 ? SEIS_ANT : SEIS_ALT; $("#btSeisAltTitle").textContent = alt[0]; $("#btSeisAltSub").textContent = alt[1];
+  const alt = seis2 ? SEIS_ANT : SEIS_ALT; $("#btSeisAltTitle").textContent = pre ? alt[0] : "Medida en backtest: 6 diarias"; $("#btSeisAltSub").textContent = alt[1];
   $("#btSeisTop").innerHTML = ""; $("#btSeisAlt").innerHTML = "";
-  if (seis || hasSX) safe(() => renderBtSeis(seis ? $("#btSeisTop") : $("#btSeisAlt"), SX, seis ? "on" : seis2 ? "ant" : "off"));
+  if (seis || hasSX) safe(() => renderBtSeis(seis ? $("#btSeisTop") : $("#btSeisAlt"), SX, seis ? "on" : seis2 ? "ant" : pre ? "off" : null));
   $("#btSeis2TopP").hidden = !seis2; $("#btSeis2AltP").hidden = seis2 || !hasS2;
   $("#btSeis2Top").innerHTML = ""; $("#btSeis2Alt").innerHTML = "";
   if (seis2 || hasS2) safe(() => renderBtSeis2(seis2 ? $("#btSeis2Top") : $("#btSeis2Alt"), S2, seis2));
@@ -6356,7 +6441,7 @@ function renderBtLive(){
   lab.innerHTML = `<div class="kpis" id="btLabKpis"></div>
     ${list.length ? `<div class="tbl-wrap"><table><thead><tr><th>Estrategia</th><th>Clase</th><th class="r">Dentro: op.</th><th class="r">R medio</th><th class="r">Ganadoras</th><th class="r">Fuera: op.</th><th class="r">R medio</th><th class="r">Ganadoras</th></tr></thead><tbody>
       ${list.map(s => { const a = s.is || {}, b = s.oos || {}, live = String(s.id||"").startsWith("ap_mom:15:");
-        return `<tr><td><b>${esc(s.name || s.id)}</b>${live ? ' <span class="verdict funciona">la opera el motor</span>' : ""}</td><td>${esc(s.class || "")}</td>
+        return `<tr><td><b>${esc(s.name || s.id)}</b>${live && e2on ? ' <span class="verdict funciona">la opera el motor</span>' : ""}</td><td>${esc(s.class || "")}</td>
           <td class="r mono">${nf(a.trades||0,0)}</td><td class="r mono ${a.mean_R>=0?"pos":"neg"}">${sR(a.mean_R)}</td><td class="r mono">${sh(a.win_rate)}</td>
           <td class="r mono">${nf(b.trades||0,0)}</td><td class="r mono ${b.mean_R>=0?"pos":"neg"}">${sR(b.mean_R)}</td><td class="r mono">${sh(b.win_rate)}</td></tr>`; }).join("")}
     </tbody></table></div>` : ""}
@@ -6601,8 +6686,22 @@ function simOrderflow(){
 const BAL_HOURS = 6;
 // Una noticia macro o geopolítica (con «reflejo») solo cuenta si la cripto la confirma; anyReflejo la mide igualmente
 // para enseñarla aparte en la balanza como «no cuenta».
+// Peso aprendido de cada medio (aprendizaje: 0 a 1,5; 1 = neutro), de los rankings del último «aprendizaje».
+let _pesoMedios = {apr:null, map:new Map()};
+function medioPeso(outlet){
+  if (_pesoMedios.apr !== S.apr){ const map = new Map();
+    for (const r of evoMedios()) if (isNum(r.m.peso)) map.set(String(r.m.medio).toLowerCase(), r.m.peso);
+    _pesoMedios = {apr:S.apr, map}; }
+  const p = outlet ? _pesoMedios.map.get(String(outlet).toLowerCase()) : null;
+  return isNum(p) ? Math.max(0, Math.min(1.5, p)) : 1;
+}
 function newsTilt(st, now, anyReflejo){
   if (!st || !st.t0 || now - st.t0 > BAL_HOURS*3600e3) return null;
+  // Como el motor (contrato 2.9 y 2.6, n.º 19): las de fuentes silenciadas o retiradas no cuentan y el resto pesa por el
+  // peso de su fuente (activa 1, prueba 0,5) y el aprendido de su medio.
+  if (st.srcState==="silenciada" || st.srcState==="retirada") return null;
+  const sw = isNum(st.srcWeight) ? Math.max(0, Math.min(1, st.srcWeight)) : 1, mw = medioPeso(st.outlet);
+  if (sw <= 0 || mw <= 0) return null;
   if (!anyReflejo && !reflejoOk(st)) return null;
   if (st.final==="unverified" || st.final==="lowprio" || (st.verify && st.verify.score < 0.7)) return null;
   if (st.final==="noimpact" || (st.impact && st.impact.drop)) return null;   // archivada por el analista: no vale su triaje
@@ -6618,8 +6717,9 @@ function newsTilt(st, now, anyReflejo){
   else return null;
   if (!dir || mag <= 0) return null;
   const imp = tr && tr.importancia != null ? tr.importancia/10 : 0.6, conf = Math.min(3, (st.corrob||[]).length);
-  const w = mag/100 * cred/100 * imp * Math.exp(-(now-st.t0)/3600e3/3) * (1 + 0.15*conf) * (im ? 1.3 : 1);
-  return {dir, w, coins: coins && coins.length ? coins : null, why, cred, credLbl: im ? "conf." : "cred.", imp: tr ? tr.importancia : null};
+  const w = mag/100 * cred/100 * imp * Math.exp(-(now-st.t0)/3600e3/3) * (1 + 0.15*conf) * (im ? 1.3 : 1) * sw * mw;
+  return {dir, w, coins: coins && coins.length ? coins : null, why, cred, credLbl: im ? "conf." : "cred.", imp: tr ? tr.importancia : null,
+          prueba: st.srcState==="prueba", pesoMedio: mw};
 }
 function newsBalance(now){
   const by = Object.fromEntries(COINS.map(c => [c, {buy:0, sell:0, n:0}])), items = [], waiting = [];
@@ -7021,7 +7121,8 @@ const World = (() => {
   function newsLi(x, now, wmax){
     const st = x.st, tr = st.triage || {}, rf = reflejoShown(st), head = tr.resumen && tr.resumen !== st.headline ? tr.resumen : st.headline;
     const meta = [st.src, "hace " + dur(now - st.t0), tr.importancia!=null ? `imp. ${tr.importancia}/10` : null, x.cred!=null ? `${x.credLbl} ${nf(x.cred,0)} %` : null,
-      x.coins ? x.coins.join(", ") : "todas", (st.corrob||[]).length ? `+${st.corrob.length} medios` : null].filter(Boolean).join(" · ");
+      x.coins ? x.coins.join(", ") : "todas", (st.corrob||[]).length ? `+${st.corrob.length} medios` : null,
+      x.prueba ? "fuente en prueba (pesa la mitad)" : null, isNum(x.pesoMedio) && x.pesoMedio !== 1 ? `peso del medio ×${nf(x.pesoMedio,2)}` : null].filter(Boolean).join(" · ");
     const tag = rf ? `<span class="rft ${reflejoInfo(rf)[0]}">${esc(reflejoInfo(rf)[1])}${isNum(rf.mov_pct) ? ` · ${pct(rf.mov_pct,2)}` : ""}</span>` : "";
     return `<li data-story="${esc(st.id)}"><span class="ar ${x.dir>0?"w-pos":"w-neg"}">${x.dir>0?"▲":"▼"}</span><div><div class="nt">${esc(head || "")}</div><div class="nm">${esc(meta)}</div>${tag}
       ${wmax ? `<div class="wt" style="width:${Math.max(6, x.w/wmax*100)}%;background:${x.dir>0?"#3be3a0":"#ff6b6b"}"></div>` : ""}</div></li>`;

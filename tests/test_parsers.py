@@ -75,3 +75,14 @@ def test_flujo_minorista():
     # Con historial: un 3,3 en XRP es lo normal si está en mitad de su rango de 7 días.
     assert bias_of(3.3, 0.005, pctl=55)["label"] == "largo"
     assert bias_of(3.3, 0.005, pctl=95)["label"] == "muy largo"
+
+
+def test_aviso_cuando_se_acaba_el_calendario_fomc():
+    """Hallazgo n.º 33: las fechas del FOMC están escritas a mano y se acaban en diciembre de 2027; con menos de 90 días
+    de calendario (o ya acabado) se avisa en el registro y en el mensaje «calendar»."""
+    from datetime import datetime, timezone
+    from bot import agenda
+    ms = lambda *a: int(datetime(*a, tzinfo=timezone.utc).timestamp() * 1000)
+    assert agenda.fomc_aviso(ms(2026, 10, 28)) is None
+    assert "se acaba el 08-12-2027" in agenda.fomc_aviso(ms(2027, 10, 1)) and "federalreserve.gov" in agenda.fomc_aviso(ms(2027, 10, 1))
+    assert "se acabó el 08-12-2027" in agenda.fomc_aviso(ms(2028, 1, 10))

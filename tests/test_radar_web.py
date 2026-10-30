@@ -1250,7 +1250,10 @@ def test_backtest_muestra_la_estrategia_en_marcha_y_el_laboratorio():
                           "oos": {"trades": 278, "mean_R": 0.1402, "win_rate": 0.52}}],
            "avance": {"days": 668, "trades": 1356, "total_pct": -61.17, "max_dd_pct": 65.28, "top": 10}}
     r = run(f"""S.btImp = {{impulso: {json.dumps(imp)}, lab: {json.dumps(lab)}}}; S.tab = "bt"; renderAll(true);
-      const a = {{live: H.el("#btLive").innerHTML + H.el("#btLiveKpis").innerHTML, lab: H.el("#btLab").innerHTML + H.el("#btLabKpis").innerHTML}};
+      const sinMotor = H.el("#btLab").innerHTML;
+      S.openings = {{strategy: "impulso", params: {{preset: "impulso"}}, windows: []}}; renderAll(true);
+      const a = {{sinMotor, live: H.el("#btLive").innerHTML + H.el("#btLiveKpis").innerHTML, lab: H.el("#btLab").innerHTML + H.el("#btLabKpis").innerHTML}};
+      S.openings = null;
       S.btImp = {{impulso: null, lab: null}}; renderBtLive();
       return {{...a, vacio: H.el("#btLive").innerHTML, vacioLab: H.el("#btLab").innerHTML}};""", live=False)
     live, lb = r["live"], r["lab"]
@@ -1259,6 +1262,7 @@ def test_backtest_muestra_la_estrategia_en_marcha_y_el_laboratorio():
     assert "La cuenta honesta en avance pierde" in live and "-61,2 %" in live and "65,3 %" in live
     assert "+0,53 R" in live and "+0,10 R" in live and "Variante elegida &lt;b&gt;después&lt;/b&gt;" in live
     assert "E2 &lt;i&gt;" in lb and "la opera el motor" in lb and "<small>Probadas</small><b>2000" in lb and "lista congelada el 2026-10-26" in lb
+    assert "la opera el motor" not in r["sinMotor"]   # sin saber qué opera el motor no se dice que es E2
     assert "<b>68 de 1358</b><span>por puro azar se esperan unas 68" in lb
     assert "<b>Comisiones del backtest:</b> 0,10 % por lado y 2 pb de deslizamiento" in lb   # también el laboratorio lo dice
     assert "no trae el backtest del motor" in r["vacio"] and "no trae el laboratorio" in r["vacioLab"]
@@ -1799,9 +1803,13 @@ def test_backtest_estrategia_en_marcha_seis_o_impulso():
               "<small>Fuera de muestra</small>", "<small>Por jornada</small>", "con funding -0,12 R", "-184,60 R", "sin interés compuesto"):
         assert t in h, t
     assert "-0,30 %" in h and "-0,22 %" in h   # 5,0 operaciones por jornada y 3,6 por día natural con 0,5 % de riesgo
-    for x in (i, n):
-        assert x["title"] == "Estrategia en marcha: impulso de los primeros minutos (E2)" and x["sub"].startswith("Lo que opera ahora")
-        assert x["top"] is True and x["alt"] is False and "Si la activas, será por tu decisión" in x["seis"] and "-0,12 R" in x["seis"]
+    assert i["title"] == "Estrategia en marcha: impulso de los primeros minutos (E2)" and i["sub"].startswith("Lo que opera ahora")
+    assert i["top"] is True and i["alt"] is False and "Si la activas, será por tu decisión" in i["seis"] and "-0,12 R" in i["seis"]
+    # sin «openings» (la copia publicada, o antes del primer mensaje) no se sabe qué opera: ni E2 ni «6 diarias» «en marcha»
+    assert n["title"] == "Estrategia E2 (impulso de los primeros minutos): backtest de referencia"
+    assert n["sub"].startswith("Todavía no se sabe qué estrategia opera el motor") and "en marcha" not in n["title"]
+    assert n["top"] is True and n["alt"] is False and "La activa o la quita solo tu decisión" in n["seis"]
+    assert "Si la activas" not in n["seis"] and "-0,12 R" in n["seis"]
     assert r["vacio"]["top"] is False and "no trae el backtest de «6 diarias»" in r["vacio"]["html"]
     assert r["vacio"]["title"].startswith("Estrategia anterior (E2)")
     _sin_null(h, s["e2"], i["seis"], n["seis"], r["vacio"]["html"])
@@ -1889,7 +1897,7 @@ def test_entrada_con_la_forma_del_backend_y_operacion_enlaza_la_noticia():
       S.tab = "results"; renderAll(true); const res = H.el("#resRows").innerHTML;
       S.tab = "trades"; renderAll(true);
       return {trace, res, cl: H.el("#closedRows").innerHTML};""")
-    assert "Espera hasta" in r["trace"] and "11:01:00 UTC" in r["trace"]
+    assert "Espera hasta" in r["trace"] and "12:01 Madrid" in r["trace"]   # 11:01 UTC, en hora de Madrid como el motivo
     assert "72 % en 9 noticias distintas (36 historias×moneda) · a 4 h desde el triaje, ajustado al mercado" in r["trace"]
     assert "con «6 diarias» y «6 diarias v2», 6 entradas y 3 % de riesgo; con E2, el motor cuenta también estas entradas en su tope de 4 y 2 %" in r["trace"]
     assert 'data-story="n1"' in r["res"] and 'data-story="nf-n1-btc"' not in r["res"]
@@ -3602,3 +3610,134 @@ def test_seis4r_solo_dice_lo_que_dicen_sus_datos():
     assert "Largos y cortos fuera de muestra" in r and "gana por los cortos" not in r and "al revés" not in r
     assert "La mayoría toca el stop" not in r and "<b>Salidas:</b>" in r
     _sin_null(r)
+def test_revision_28_10_operacion_por_noticia_capital_sin_cartera_y_grupo():
+    """Revisión del 28-10: la operación de la entrada por noticia (nf-…, tier «Plan») no es un plan de apertura «sin
+    noticia»; en directo, sin cartera del bot, no se enseña el capital de la demostración; el grupo de Resultados sale
+    con su nombre (tags.grupo_nombre), no con la clave."""
+    r = run("""H.open(); reset(); S.tab = "trades"; renderAll(true);
+      const kpis = H.el("#kpis").innerHTML, eq = H.el("#equity").innerHTML;
+      H.recv(ev("captured", "n1", {headline: "Titular de la noticia", src: "rbc.ru", tier: "T2", t0: now - 60e3, coins: ["BTC"]}),
+             ev("entrada_noticia", "n1", {entrada_noticia: {estado: "confirmada", motivo: "ok", moneda: "BTC", dir: 1,
+               paper_story: "nf-n1-btc"}}),
+             ev("strategy", "nf-n1-btc", {headline: "Noticia fiable · Compra BTC", src: "Entrada por noticia fiable", tier: "Plan",
+               t0: now, noticia: "n1", strat: strat("BTC", "long", {origen: "noticia_fiable", noticia: "n1",
+               tags: {origen: "noticia_fiable", story: "n1"}})}));
+      S.sel = "nf-n1-btc"; renderTrace(); const op = H.el("#trace").innerHTML;
+      S.sel = "n1"; renderTrace(); const news = H.el("#trace").innerHTML;
+      const tr = {id: "t1", story: "nf-n1-btc", strategy: "noticia-fiable-largo", window: "Noticia fiable", market: "", coin: "BTC",
+        side: "long", qty: 1, entry: 100, exit: 98.5, opened: now - 3600e3, closed: now, reason: "Stop", pnl: -0.5, pnl_pct: -1.5,
+        R: -1, fees: 0.1, headline: "h", instrument: "spot", funding: 0, commissions: 0.1,
+        tags: {origen: "noticia_fiable", story: "n1", grupo: "tipo_sentido:regulatorio:-1", grupo_nombre: "regulatorio · bajista"}};
+      S.results = {start_equity: 111.37, equity: 110.87, trades: [tr], by_strategy: [], by_window: [], by_coin: [],
+                   equity_curve: [[now - 7200e3, 111.37], [now, 110.87]], daily: []};
+      S.tab = "results"; renderAll(true);
+      return {kpis, eq, op, news, res: H.el("#resRows").innerHTML};""")
+    assert "111,37" not in r["kpis"] and "esperando la cartera del bot" in r["kpis"] and "Sin cartera del bot" in r["eq"]
+    assert "sin noticia que lo dispare" not in r["op"] and "Disparada por una noticia fiable" in r["op"]
+    assert 'data-story="n1"' in r["op"] and "Titular de la noticia" in r["op"]
+    assert 'data-story="nf-n1-btc"' in r["news"] and "Abrir la operación (paper)" in r["news"]
+    assert "grupo fiable regulatorio · bajista" in r["res"] and "tipo_sentido:regulatorio" not in r["res"]
+    _sin_null(r["op"], r["news"], r["res"])
+
+
+def test_contadores_del_cazador_con_los_totales_reales():
+    """Hallazgo n.º 8: con la foto (pocos descartes) la web daba que pasaba un 79 %; el mensaje «conteo» manda."""
+    r = run("""H.open(); reset();
+      H.recv(ev("captured", "a", {headline: "x"}), ev("captured", "b", {headline: "y"}), ev("filtered", "c", {headline: "z"}),
+             {type: "conteo", desde: now - 3600e3, kinds: {captured: 1420, filtered: 2462, corroborated: 3, triaged: 302, lowprio: 50}});
+      const a = {cap: S.counts.captured, fil: S.counts.filtered};
+      H.recv(ev("captured", "d", {headline: "w"}));
+      return {...a, cap2: S.counts.captured};""")
+    assert r == {"cap": 1420, "fil": 2462, "cap2": 1421}
+
+
+def test_evolucion_ensena_postmortems_y_acierto_por_dimension():
+    """Hallazgos n.º 16 y 21: la web pinta los post-mortems (resumen sin IA, texto de la IA local y estado) y el acierto
+    por nivel, región, idioma, tipo, ventana, fase, rol y moneda con su intervalo y los casos independientes."""
+    r = run("""H.open(); reset();
+      H.recv({type: "aprendizaje", ts: now, estado: "ok", params: {min_casos: 20, min_dias: 10},
+        por_nivel: [{clave: "T1", casos: 400, independientes: 60, dias: 12, acierto: 0.522, ic90: [0.47, 0.57], bruto: 0.41, base: 0.39},
+                    {clave: "T3 <x>", casos: 30, independientes: 5, dias: 2, acierto: 0.61, ic90: [0.4, 0.8], bruto: 0.5, base: 0.4}],
+        por_moneda: [{clave: "BTC", casos: 900, independientes: 80, dias: 14, acierto: 0.49, ic90: [0.45, 0.53], bruto: 0.4, base: 0.41}],
+        postmortems: [{id: "p:t1", origen: "paper", story: "a-europa-btc-1", moneda: "BTC", cerrada: now - 3600e3, R: -1.04,
+                       resumen: "Stop a las 11:02 <b>", texto: null, estado: "pendiente", modelo: null, hechos: {}},
+                      {id: "v:9", origen: "vigilancia", story: "v9", moneda: "SOL", cerrada: now - 7200e3, R: 3.0,
+                       resumen: "Objetivo", texto: "Ganó porque el impulso siguió.", estado: "hecho", modelo: "Qwen3.5 9B (local)", hechos: {}}]});
+      S.tab = "evo"; renderEvo(true);
+      const nivel = H.el("#aprDim").innerHTML, chips = H.el("#aprDimF").innerHTML, pm = H.el("#evoPM").innerHTML;
+      S.aprDim = "moneda"; renderEvo(true);
+      return {nivel, chips, pm, moneda: H.el("#aprDim").innerHTML};""")
+    assert "T1" in r["nivel"] and "52 %" in r["nivel"] and "(47 %–57 %)" in r["nivel"] and "T3 &lt;x&gt;" in r["nivel"]
+    assert "poca muestra" in r["nivel"] and 'data-apr-dim="region"' in r["chips"] and "BTC" in r["moneda"]
+    assert "Stop a las 11:02 &lt;b&gt;" in r["pm"] and "Pendiente de la IA local" in r["pm"] and "-1,04 R" in r["pm"]
+    assert "Ganó porque el impulso siguió." in r["pm"] and "Explicado" in r["pm"] and "virtual (vigilancia)" in r["pm"]
+    assert 'data-story="a-europa-btc-1"' in r["pm"] and 'data-story="v9"' not in r["pm"]
+    _sin_null(r["nivel"], r["pm"], r["moneda"])
+
+
+def test_balanza_con_el_peso_de_la_fuente_y_del_medio():
+    """Hallazgo n.º 19: la balanza de la web cuenta como el motor: las de fuentes silenciadas o retiradas no cuentan; una
+    en prueba pesa la mitad; y el peso aprendido del medio (aprendizaje) multiplica."""
+    r = run("""H.open(); reset();
+      const tr = {tipo: "exchange", importancia: 7, credibilidad: 80, sentimiento: "alcista",
+                  repercusion: {direccion: 60, magnitud: 70, activos: ["BTC"]}, monedas: ["BTC"]};
+      const story = (id, extra) => H.recv(ev("captured", id, {headline: "h " + id, src: "s", tier: "T1", t0: now, coins: ["BTC"],
+                                                              clase: "cripto", outlet: "a.com", ...extra}), ev("triaged", id, {triage: tr}));
+      story("n1", {srcState: "activa", srcWeight: 1}); story("n2", {srcState: "prueba", srcWeight: 0.5});
+      story("n3", {srcState: "silenciada", srcWeight: 0}); story("n4", {outlet: "bueno.com"});
+      H.recv({type: "aprendizaje", ts: now, estado: "ok", medios_mejores: [{medio: "bueno.com", peso: 1.25}]});
+      const t0 = Date.now();   // un solo instante: el peso decae con la edad y cada Date.now() daba otro
+      const w = id => { const t = newsTilt(S.stories.get(id), t0); return t ? t.w : null; };
+      return {w1: w("n1"), w2: w("n2"), w3: w("n3"), w4: w("n4"), p2: newsTilt(S.stories.get("n2"), t0).prueba};""")
+    assert r["w3"] is None and r["p2"] is True
+    assert abs(r["w2"] / r["w1"] - 0.5) < 1e-9 and abs(r["w4"] / r["w1"] - 1.25) < 1e-9
+
+
+def test_fijar_a_mano_el_peso_de_un_medio():
+    """Hallazgo n.º 22: desde la web se puede fijar a mano el peso de un medio (0 a 1,5), con confirmación; un valor
+    fuera de rango no se envía."""
+    r = run(EVO + MEDIOS + """H.open(); reset();
+      H.recv(evo(), apr({medios_mejores: [M("agencia.example", {peso: 1.0, veredicto: "neutro"})]}), fvMsg());
+      S.fvList = LISTA; S.tab = "evo"; evoBump(); renderAll(true);
+      const html = H.el("#evoMedia").innerHTML, asked = []; confirm = m => (asked.push(m), true);
+      prompt = () => "1,2"; H.fire("click", {"data-apr-fijar": "agencia.example"});
+      prompt = () => "7"; H.fire("click", {"data-apr-fijar": "agencia.example"}); const t = H.el("#toast").textContent;
+      prompt = () => null; H.fire("click", {"data-apr-fijar": "agencia.example"});
+      return {html, asked, t, sent: H.sent()};""")
+    assert 'data-apr-fijar="agencia.example"' in r["html"] and "Fijar peso" in r["html"]
+    assert len(r["asked"]) == 1 and "×1,20" in r["asked"][0] and "se puede revertir" in r["asked"][0]
+    assert r["t"] == "El peso tiene que ser un número de 0 a 1,5."
+    assert [m for m in r["sent"] if m.get("type") == "peso_medio"] == [
+        {"type": "peso_medio", "medio": "agencia.example", "peso": 1.2, "motivo": "Fijado a mano desde la web"}]
+
+
+def test_aviso_si_el_bot_estuvo_parado():
+    """Hallazgo n.º 0: si el bot estuvo parado antes de arrancar (hueco del «reset»), la web lo dice durante 24 h."""
+    r = run("""H.open();
+      const vista = () => ({hidden: H.el("#avisoParado").hidden, txt: H.el("#avisoParado").textContent});
+      H.recv({type: "reset", phase: 2, started: now, hueco: {desde: now - 33 * 3600e3, hasta: now - 60e3, min: 1979}});
+      const a = vista();
+      H.recv({type: "reset", phase: 2, started: now, hueco: {desde: now - 20 * 60e3, hasta: now - 60e3, min: 19}});
+      const b = vista();
+      H.recv({type: "reset", phase: 2, started: now, hueco: null});
+      const c = vista();
+      H.recv({type: "reset", phase: 2, started: now, hueco: {desde: now - 30 * 3600e3, hasta: now - 25 * 3600e3, min: 300}});
+      return {a, b, c, d: vista()};""")
+    assert r["a"]["hidden"] is False and "parado 33,0 h" in r["a"]["txt"] and "en Madrid" in r["a"]["txt"]
+    assert "velas de 1 min" in r["a"]["txt"] and r["b"]["hidden"] is False and "parado 19 min" in r["b"]["txt"]
+    assert r["c"]["hidden"] is True and r["d"]["hidden"] is True
+
+
+def test_aviso_si_el_reloj_se_desvia():
+    """Hallazgo n.º 53: si el reloj del PC se desvía más de 2 s de OKX, la web lo dice; al corregirse, desaparece."""
+    r = run("""H.open(); reset();
+      const vista = () => ({hidden: H.el("#avisoReloj").hidden, txt: H.el("#avisoReloj").textContent});
+      const a0 = vista();
+      H.recv({type: "reloj", ts: now, fuente: "OKX", desfase_ms: 3000, ok: false, aviso: "El reloj de este PC va 3,0 s adelantado <b>"});
+      const a = vista();
+      H.recv({type: "reloj", ts: now, fuente: "OKX", desfase_ms: 200, ok: true, aviso: null});
+      const b = vista();
+      H.recv({type: "reloj", ts: now, fuente: null, desfase_ms: null, ok: null, aviso: null, error: "OKX: sin red"});
+      return {a0, a, b, c: vista()};""")
+    assert r["a0"]["hidden"] is True and r["a"]["hidden"] is False and r["a"]["txt"].startswith("El reloj de este PC va 3,0 s")
+    assert r["b"]["hidden"] is True and r["c"]["hidden"] is True

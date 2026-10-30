@@ -90,7 +90,7 @@ Contexto regulatorio [verificado con prensa jurídica y avisos de ESMA y la CNMV
 
 | Opción | Por qué | Pegas |
 |---|---|---|
-| **1. OKX EU (recomendada)** | Licencia MiCA (Malta) y MiFID. Comisiones de 0,08/0,10 %. Órdenes por WebSocket y modo demo para paper. X-Perps reguladas que permiten **ponerse corto** cuando la noticia es bajista. Soportada por CCXT (`myokx`). | El libro de órdenes es solo del EEE, con menos profundidad. Comisiones de la UE y acceso al demo desde el EEE **[verificar]**. Sanción del Departamento de Justicia de EE.UU. en 2025. |
+| **1. OKX EU (recomendada)** | Licencia MiCA (Malta) y MiFID. Comisiones de contado de 0,08/0,10 % solo con la cuenta X-Perps desbloqueada; sin ella, 0,20/0,35 % (docs/05, sección 21). Órdenes por WebSocket y modo demo para paper. X-Perps reguladas que permiten **ponerse corto** cuando la noticia es bajista. Soportada por CCXT (`myokx`). | El libro de órdenes es solo del EEE, con menos profundidad. Comisiones de la UE y acceso al demo desde el EEE **[verificar]**. Sanción del Departamento de Justicia de EE.UU. en 2025. |
 | 2. Bitvavo | Licencia MiCA (Países Bajos). La comisión más baja: 0,05/0,05 % en pares USDC. El libro en EUR más profundo de Europa. API rápida. | Solo contado, así que no se puede ir corto. Sin entorno de pruebas público. |
 | 3. Kraken | Licencia MiCA (Irlanda). Libro de órdenes global. Órdenes por WebSocket y FIX. | Comisiones de 0,40/0,80 % desde julio de 2026 con volumen bajo, que se comen una estrategia de noticias. |
 | Hyperliquid | Técnicamente la mejor para perpetuos. | Sin licencia: zona gris legal. No usar sin asesoría jurídica. |

@@ -2,6 +2,7 @@
 import asyncio
 import json
 import logging
+import os
 import queue
 import sqlite3
 import threading
@@ -55,11 +56,48 @@ async def in_batches(prune, *args) -> int:
     return total
 
 
+COPIAS_KEEP = 7           # copias diarias de bot.db que se conservan (hallazgo n.º 39)
+
+
+def copia_diaria(path: Path, carpeta: Path, dia: str, keep: int = COPIAS_KEEP) -> Path | None:
+    """Copia en caliente de la base en carpeta/bot-AAAA-MM-DD.db con la API backup de sqlite3, de una vez: una foto
+    coherente aunque el bot siga escribiendo (en WAL, leer no bloquea a quien escribe). Se escribe en un temporal, se
+    comprueba con PRAGMA quick_check y solo entonces se renombra; se conservan las keep más recientes. None si la copia
+    de ese día ya existe. Lanza si la copia sale dañada (y no deja nada a medias). Bloquea: llamarla en un hilo."""
+    carpeta.mkdir(parents=True, exist_ok=True)
+    dest = carpeta / f"bot-{dia}.db"
+    if dest.exists():
+        return None
+    tmp = carpeta / f"bot-{dia}.db.tmp"
+    src = sqlite3.connect(Path(path).resolve().as_uri() + "?mode=ro", uri=True, timeout=60)
+    try:
+        dst = sqlite3.connect(tmp)
+        try:
+            src.backup(dst)
+            check = dst.execute("PRAGMA quick_check").fetchone()[0]
+        finally:
+            dst.close()
+    finally:
+        src.close()
+    if check != "ok":
+        tmp.unlink(missing_ok=True)
+        raise RuntimeError(f"la copia de {dia} sale dañada: {check}")
+    os.replace(tmp, dest)
+    for old in sorted(carpeta.glob("bot-????-??-??.db"))[:-keep]:
+        try:
+            old.unlink()
+        except OSError as e:
+            log.warning("No pude borrar la copia vieja %s: %s", old.name, e)
+    return dest
+
+
 class Store:
     def __init__(self, path: Path):
         path.parent.mkdir(parents=True, exist_ok=True)
         self.path = path
-        self.db = sqlite3.connect(path, check_same_thread=False)
+        # timeout 30 s (antes 5): con varias conexiones que escriben (el hilo de las claves vistas, fuentes vivas), un
+        # «database is locked» suelto ya no salta a los 5 s (hallazgo n.º 46)
+        self.db = sqlite3.connect(path, check_same_thread=False, timeout=30)
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA synchronous=NORMAL")   # seguro con WAL y mucho más rápido con miles de feeds
         self.db.executescript(
@@ -87,6 +125,11 @@ class Store:
             (ev["id"], ev["ts"], ev.get("story"), ev.get("agent"), ev.get("kind"), json.dumps(ev, ensure_ascii=False)),
         )
         self.db.commit()
+
+    def ultima_actividad(self, antes: int) -> int | None:
+        """Hora del último evento guardado antes de `antes` (ms): al arrancar, cuándo dejó de funcionar el bot."""
+        row = self.db.execute("SELECT MAX(ts) FROM events WHERE ts < ?", (antes,)).fetchone()
+        return row[0] if row else None
 
     def recent_events(self, n: int, exclude: tuple[str, ...] = (), only: tuple[str, ...] = ()) -> list[dict]:
         where, args = "", []

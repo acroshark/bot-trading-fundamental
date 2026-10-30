@@ -183,6 +183,11 @@ def test_puerta_para_operar_azar_por_horas_historias_y_hacia_delante():
     g = grupo(fiables.calcular(datos_puerta(senal=0), NOW2, perms=50), "medio:bueno.com")
     assert g["estado"] == "fiable" and g["opera"] is False and g["vivo"]["n"] == 0
     assert any("hacia delante y en vivo" in x for x in g["no_opera"])
+    # una macro que la cripto aún no confirmó (senal 2) cuenta en vivo como la 1: quedarse solo con las confirmadas
+    # miraría el futuro (la confirmación es un movimiento a favor dentro de los 60 min que también mide acc240)
+    m2 = grupo(fiables.calcular(datos_puerta(senal=2), NOW2, perms=50), "medio:bueno.com")
+    assert m2["vivo"]["n"] == 96 and m2["adelante"]["n"] == 60
+    assert not any("hacia delante" in x for x in m2["no_opera"])
     # cada noticia sola en su hora (sin las del otro medio): el azar que conserva la hora no la distingue
     sola = fiables.calcular(con_deriva_cero([r for r in datos_puerta() if r["outlet"] == "bueno.com"]), NOW2,
                             perms=50)

@@ -16,7 +16,7 @@ from . import aprendizaje, comisiones, config, reaccion, reflejo, resumen_backte
 from .backtest import filter_results
 from .bus import Bus, dumps_web
 from .lab_vivo_lectura import ACCIONES as LAB_ACCIONES, DIA_RE as LAB_DIA_RE, ID_RE as LAB_ID_RE, LabVivoLectura
-from .market import bias_of, funding_8h
+from .market import bias_of, fresh_flow, funding_8h
 from .models import now_ms
 from .ranking import LIMITE_DEF as RANKING_LIMITE, LIMITE_MAX as RANKING_MAX, ORIGEN_RE, Ranking
 from .regions import MARKETS, REGIONS
@@ -25,7 +25,8 @@ log = logging.getLogger("server")
 LIVE_FLAG = '<script>window.RADAR_LIVE = {ws: "/events"};</script>'
 MAD = ZoneInfo("Europe/Madrid")
 TIER_ADJ = {"T0": 5, "T1": 2, "T2": 0, "T3": -5}   # suave: la IA local ya ve el nivel de la fuente
-NEWS_MAX = 60
+NEWS_MAX = 60               # noticias de /api/noticias por defecto
+NEWS_LIMIT_MAX = 500        # ?limite= como mucho (hallazgo n.º 11: con 60, ?horas=48 devolvía solo el último minuto)
 NEWS_KINDS = ("captured", "triaged", "lowprio", "corroborated", "srcstate", "reflejo")
 STORY_MAX = 128             # ids de historia: «n…», «w-…», «a-…»
 LOOPBACK = ("127.0.0.1", "::1")
@@ -111,9 +112,9 @@ def news_credibility(cred: float | None, tier: str | None, confirmations: int, o
     return aprendizaje.adjusted_credibility(base, outlet, weight=aprendizaje.source_weight(outlet) * src_weight)
 
 
-def _pick_stories(db, since: int, min_imp: int, bolsa: str | None) -> list[str]:
+def _pick_stories(db, since: int, min_imp: int, bolsa: str | None, limit: int = NEWS_MAX) -> list[str]:
     """Las historias que devolverá /api/noticias, sin leer los cuerpos enteros: el último triaje de cada una (importancia
-    y bolsas, con json_extract) y las captadas de la más nueva a la más vieja hasta tener NEWS_MAX que pasen el filtro."""
+    y bolsas, con json_extract) y las captadas de la más nueva a la más vieja hasta tener limit que pasen el filtro."""
     tri: dict[str, tuple] = {}
     if min_imp > 0 or bolsa:
         bolsas = "json_extract(body, '$.patch.triage.repercusion.bolsas')" if bolsa else "NULL"
@@ -134,19 +135,19 @@ def _pick_stories(db, since: int, min_imp: int, bolsa: str | None) -> list[str]:
         if bolsa and bolsa != REGIONS.get(reg or "", (None, None))[1] and bolsa not in listed:
             continue
         out.append(story)
-        if len(out) == NEWS_MAX:
+        if len(out) == limit:
             break
     return out
 
 
-def recent_news(bus: Bus, hours: float, min_imp: int, bolsa: str | None = None) -> list[dict]:
+def recent_news(bus: Bus, hours: float, min_imp: int, bolsa: str | None = None, limit: int = NEWS_MAX) -> list[dict]:
     """Noticias relevantes recientes con su triaje local, en el formato que leen las skills de OpenClaw.
     Usa su propia conexión de solo lectura: se puede (y se debe) llamar desde un hilo, fuera del bucle.
     Cada una lleva «clase» (cripto, macro o contexto, del prefiltro) y «reflejo» (el último estado del evento «reflejo»,
     o null): una macro o geopolítica que la cripto no ha confirmado sale con credibilidad_ajustada 0."""
     since = now_ms() - int(hours * 3600_000)
     with bus.store.reader() as db:
-        pick = _pick_stories(db, since, min_imp, bolsa)
+        pick = _pick_stories(db, since, min_imp, bolsa, limit)
         if not pick:
             return []
         rows = db.execute(f"SELECT body FROM events WHERE story IN ({','.join('?' * len(pick))}) AND ts >= ? "
@@ -189,7 +190,7 @@ def recent_news(bus: Bus, hours: float, min_imp: int, bolsa: str | None = None) 
         if s["credibilidad_ajustada"] is not None and not reflejo.cuenta(s.get("titular"), tri, s["reflejo"], s.get("clase")):
             s["credibilidad_ajustada"] = 0   # macro o geopolítica sin reflejo confirmado en la cripto: no cuenta
         out.append(s)
-    return sorted(out, key=lambda s: -s["ts"])[:NEWS_MAX]
+    return sorted(out, key=lambda s: -s["ts"])[:limit]
 
 
 def ws_origins() -> set[str]:
@@ -252,7 +253,7 @@ def state_summary(bus: Bus) -> dict:
     st = bus.state
     market = st.get("market", {})
     flow = {}
-    for c, f in (market.get("flow") or {}).items():
+    for c, f in fresh_flow(market).items():
         b = bias_of(f["ls"], funding_8h(f), f.get("pctl"))
         flow[c] = {"sesgo_minorista": b["label"], "pct_cuentas_largo": round(b["longPct"]), "ratio_ls": round(f["ls"], 2),
                    "percentil_7_dias": round(f["pctl"]) if f.get("pctl") is not None else None,
@@ -687,12 +688,13 @@ def make_app(bus: Bus, health, services: Services | None = None) -> web.Applicat
         try:
             hours = max(0.0, min(48.0, float(request.query.get("horas", "3"))))
             min_imp = int(request.query.get("min", "0"))
+            limit = max(1, min(NEWS_LIMIT_MAX, int(request.query.get("limite", str(NEWS_MAX)))))
         except ValueError:
-            raise web.HTTPBadRequest(text="horas y min deben ser números")
+            raise web.HTTPBadRequest(text="horas, min y limite deben ser números")
         bolsa = request.query.get("bolsa")
         if bolsa and bolsa not in MARKETS:
             raise web.HTTPBadRequest(text=f"bolsa desconocida; usa una de: {', '.join(MARKETS)}")
-        return j(await asyncio.to_thread(recent_news, bus, hours, min_imp, bolsa))   # en un hilo: 48 h son miles de filas
+        return j(await asyncio.to_thread(recent_news, bus, hours, min_imp, bolsa, limit))   # en un hilo: miles de filas
 
     async def api_sources(request: web.Request) -> web.Response:
         """Feeds con su estado de ciclo de vida (estado y peso, de fuentes_vivas); ?estado= filtra por él."""
@@ -720,7 +722,8 @@ def make_app(bus: Bus, health, services: Services | None = None) -> web.Applicat
     # ---- fuentes vivas (estado de cada fuente y descubrimiento)
 
     async def api_fv(request: web.Request) -> web.Response:
-        """Estado «fuentes_vivas» con la lista filtrada (?region=&estado=&tipo=feed|medio&limite=) y los candidatos."""
+        """Estado «fuentes_vivas» con la lista filtrada (?region=&estado=&tipo=feed|medio&limite=) y los candidatos (la
+        lista; sus contadores, en candidatos_cuenta: hallazgo n.º 29)."""
         fv = sv.fuentes_vivas
         if not fv:
             return j(bus.state.get("fuentes_vivas") or {"type": "fuentes_vivas", "estado": "apagado", "lista": [],
@@ -731,6 +734,8 @@ def make_app(bus: Bus, health, services: Services | None = None) -> web.Applicat
             raise web.HTTPBadRequest(text="tipo debe ser feed o medio")
         out = {**fv.estado(), "ts": now_ms()}
         out["lista"] = fv.lista(q.get("region") or None, q.get("estado") or None, tipo, q_int(request, "limite", 300, 1, 10_000))
+        # Aquí «candidatos» es la lista (como siempre); los contadores del mensaje del bus van en candidatos_cuenta.
+        out["candidatos_cuenta"] = out["candidatos"]
         out["candidatos"] = fv.candidatos(50)
         return j(out)
 
@@ -893,6 +898,14 @@ def make_app(bus: Bus, health, services: Services | None = None) -> web.Applicat
         if sv.reaccion:
             return j(sv.reaccion.view())
         return j(bus.state.get("cripto_aperturas") or reaccion.apagado())
+
+    async def api_reflejo(_request: web.Request) -> web.Response:
+        """Reflejo de las noticias macro desde el arranque: cuántas pendientes y finales, la tasa de «confirmada» y la que
+        saldría por puro azar, para compararlas (docs/05, sección 18)."""
+        if sv.reflejo:
+            return j({"type": "reflejo", "estado": "encendido", **sv.reflejo.view()})
+        return j({"type": "reflejo", "estado": "apagado", "pendientes": 0, "finales": {}, "tasa_confirmada": None,
+                  "azar_confirmada_pct": reflejo.AZAR.get("umbral_2sigma_pct")})
 
     async def api_vigilancia(_request: web.Request) -> web.Response:
         if sv.vigilancia:
@@ -1116,6 +1129,7 @@ def make_app(bus: Bus, health, services: Services | None = None) -> web.Applicat
     app.router.add_get("/api/lab_vivo/generador", api_lab_generador)
     app.router.add_get("/api/vigilancia", api_vigilancia)
     app.router.add_get("/api/cripto_aperturas", api_cripto_aperturas)
+    app.router.add_get("/api/reflejo", api_reflejo)
     app.router.add_get("/api/fuentes_vivas", api_fv)
     app.router.add_get("/api/fuentes_vivas/lista", api_fv_lista)
     app.router.add_get("/api/fuentes_vivas/candidatos", api_fv_candidatos)

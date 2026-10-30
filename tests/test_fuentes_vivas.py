@@ -48,15 +48,17 @@ def make(tmp_path, specs, **kw):
 
 
 def poner(store, feed, n, veredicto, *, medio=None, dias=2, confirmada=0, nombre=None, host=None, tag="", paso=7 * H,
-          tier="T2"):
+          tier="T2", hasta=None):
     """n noticias ya medidas (cerradas) de un feed, desde hace unos días hacia atrás: cada una `paso` antes que la
-    anterior (por defecto 7 h: cada noticia es un caso independiente y 30 caen en más de 7 días)."""
-    now = now_ms()
+    anterior (por defecto 7 h: cada noticia es un caso independiente y 30 caen en más de 7 días). Con `hasta` (ms) se
+    cuentan hacia atrás desde ese instante fijo y no desde «ahora menos `dias`»: hace falta cuando la prueba depende
+    de en qué hora o en qué día UTC caen (las cifras agrupan por horas y días UTC)."""
+    ref = now_ms() - dias * DAY if hasta is None else hasta
     key = (str(store.path), feed)
     rows = []
     for i in range(n):
         _CURSOR[key] += paso
-        rows.append((f"s-{feed}-{medio}-{veredicto}-{tag}{_CURSOR[key]}", now - dias * DAY - _CURSOR[key], feed, medio,
+        rows.append((f"s-{feed}-{medio}-{veredicto}-{tag}{_CURSOR[key]}", ref - _CURSOR[key], feed, medio,
                      nombre, host, "jp", "ja", tier, 30.0, veredicto, confirmada, None))
     store.db.executemany(f"INSERT INTO fv_noticias ({COLS}) VALUES ({','.join('?' * 13)})", rows)
     store.db.commit()
@@ -504,16 +506,32 @@ async def test_auto_apagado_solo_sugiere(tmp_path):
 
 async def test_consulta_prolifica_en_un_mal_dia_no_silencia_al_medio(tmp_path):
     """El caso del informe: una consulta de Google News capta 30 noticias alcistas de un medio en un día de caída
-    (0 de 30). Comparten mercado: es un caso, no treinta, y nadie se silencia."""
+    (0 de 30). Comparten mercado: es un caso, no treinta, y nadie se silencia. La media hora va a una hora fija de un
+    día UTC (11:30-11:59 de anteayer): contada desde «ahora menos dos días», entre las 00:01 y las 00:30 UTC cruzaba la
+    medianoche y daba 2 días (ese caso lo fija la prueba siguiente)."""
     fv, poller, bus, store = make(tmp_path, [spec("jp-gn", GN_URL, kind="google_news")])
-    poner(store, "jp-gn", 30, "fallo", medio="prolifico.example", paso=60_000)   # media hora
+    anteayer = (now_ms() // DAY - 2) * DAY                                         # 00:00 UTC
+    poner(store, "jp-gn", 30, "fallo", medio="prolifico.example", paso=60_000, hasta=anteayer + 12 * H)  # media hora
     poner(store, "jp-gn", 40, "fallo", medio="dos-dias.example", paso=H, dias=5)  # 40 horas seguidas
     res = await fv.revisar()
     assert res["cambios"] == [] and poller.outlet_estados == {} and fv.sugerencias == {}
     c = fv.cifras["medio:prolifico.example"]
-    assert c.casos == 30 and c.indep <= 2 and c.dias == 1
+    assert c.casos == 30 and c.indep == 1 and c.dias == 1
     c2 = fv.cifras["medio:dos-dias.example"]
     assert c2.indep == 40 and c2.dias <= 3
+    store.close()
+
+
+async def test_media_hora_que_cruza_la_medianoche_utc_tampoco_silencia(tmp_path):
+    """Las horas y los días de las cifras son UTC de calendario (como mercado_base): la misma media hora de 23:45 a
+    00:14 UTC son 2 casos en 2 días distintos. Sigue lejos de los mínimos (30 casos en 7 días) y nadie se silencia."""
+    fv, poller, bus, store = make(tmp_path, [spec("jp-gn", GN_URL, kind="google_news")])
+    anteayer = (now_ms() // DAY - 2) * DAY                                         # 00:00 UTC
+    poner(store, "jp-gn", 30, "fallo", medio="prolifico.example", paso=60_000, hasta=anteayer + 15 * 60_000)
+    res = await fv.revisar()
+    assert res["cambios"] == [] and poller.outlet_estados == {} and fv.sugerencias == {}
+    c = fv.cifras["medio:prolifico.example"]
+    assert (c.casos, c.indep, c.dias, c.indep_dir, c.dias_dir) == (30, 2, 2, 2, 2)
     store.close()
 
 
@@ -582,6 +600,26 @@ def test_orden_a_mano_solo_para_fuentes_conocidas(tmp_path):
     store.close()
 
 
+async def test_contadores_de_medios_con_los_medidos_y_sin_el_resto_de_prueba(tmp_path):
+    """Hallazgos n.º 9 y 34: un medio medido sin ningún cambio de estado cuenta como activo (la web daba «0 medios
+    activos» con miles medidos) y un dominio .invalid (el resto de una prueba) no cuenta ni sale en la lista, aunque su
+    fila y su historial siguen ahí."""
+    fv, poller, bus, store = make(tmp_path, [spec("jp-a", "https://www.a.jp/r")])
+    for medio in ("uno.example", "dos.example", "tres.example"):
+        poner(store, "jp-a", 3, "util", medio=medio)
+    await fv.revisar()
+    assert fv.estado()["medios"] == {"activa": 3, "prueba": 0, "silenciada": 0, "retirada": 0}
+    fv._cambiar("medio:tres.example", "silenciada", "manual", "a mano", auto=False, por="tú, desde la web")
+    fv._cambiar("medio:no-existe-prueba.invalid", "silenciada", "manual", "Silenciada a mano: prueba", auto=False,
+                por="tú, desde la web")
+    assert fv.estado()["medios"] == {"activa": 2, "prueba": 0, "silenciada": 1, "retirada": 0}
+    ids = [v["id"] for v in fv.lista(tipo="medio")]
+    assert "medio:tres.example" in ids and not any(i.endswith(".invalid") for i in ids)
+    assert "medio:no-existe-prueba.invalid" in fv.filas
+    assert store.db.execute("SELECT COUNT(*) FROM source_status_log WHERE id LIKE '%.invalid'").fetchone()[0] == 1
+    store.close()
+
+
 async def test_prueba_con_material_sin_triar_sigue_en_prueba(tmp_path):
     specs = [spec("jp-n", "https://n.jp/rss", tier="T3"), spec("jp-p", "https://p.jp/rss", tier="T3")]
     fv, poller, bus, store = make(tmp_path, specs)
@@ -608,8 +646,10 @@ async def test_caida_tecnica_y_red_caida(tmp_path):
     for _ in range(12):
         caido.on_error("HTTP 503")
     t = now_ms()
-    for k in range(37):   # cada revisión suma lo que pasó desde la anterior (como mucho 2 h)
-        assert fv._salud(t + k * 2 * H) is False
+    assert fv._salud(t) is False and fv.salud == {"jp-0": 0.0}          # primer fallo visto de la racha
+    assert fv._salud(t + 10 * H) is False and fv.salud == {"jp-0": pytest.approx(10)}
+    # Hallazgo n.º 5: el tiempo es real. Con el bot parado 62 h entre medias, al volver (y si sigue fallando) cuenta todo.
+    assert fv._salud(t + 72 * H) is False
     assert fv.salud == {"jp-0": pytest.approx(72)}
     assert store.db.execute("SELECT horas FROM source_health WHERE id='jp-0'").fetchone()[0] == pytest.approx(72)
     [c] = fv.aplicar_reglas(t)
@@ -624,6 +664,31 @@ async def test_caida_tecnica_y_red_caida(tmp_path):
     for st in list(poller.states.values())[:3]:
         st.on_error("Sin conexión con el servidor")
     assert fv._salud(t + 77 * H) is True and fv.salud == {}
+    store.close()
+
+
+async def test_caida_tecnica_cuenta_el_tiempo_real_tras_reiniciar(tmp_path):
+    """Hallazgo n.º 5: la racha sobrevive a un reinicio (source_health) y cuenta el tiempo real desde su primer fallo
+    visto; un feed que funcionaba al parar empieza de cero aunque falle al volver. Las filas de antes (horas de bot en
+    marcha) dan un inicio más tardío: se cuenta de menos, nunca de más."""
+    fv, poller, bus, store = make(tmp_path, [spec(f"jp-{i}", f"https://h{i}.jp/rss") for i in range(10)])
+    for st in poller.states.values():
+        st.on_success(1)
+    for _ in range(12):
+        poller.states["jp-0"].on_error("HTTP 503")
+    t = now_ms()
+    fv._salud(t - 30 * H)
+    store.db.execute("INSERT INTO source_health VALUES ('jp-9', 20.0, ?)", (t - 10 * H,))   # fila de antes
+    store.db.commit()
+    fv2 = FuentesVivas(bus, store, None, registro_dir=tmp_path / "fuentes")   # el bot se reinicia 40 h después
+    fv2.attach(poller)
+    assert fv2.salud_inicio == {"jp-0": t - 30 * H, "jp-9": t - 30 * H}
+    for _ in range(12):
+        poller.states["jp-1"].on_error("HTTP 500")                               # funcionaba al parar
+    assert fv2._salud(t + 42 * H) is False
+    assert fv2.salud["jp-0"] == pytest.approx(72) and fv2.salud["jp-1"] == 0.0 and "jp-9" not in fv2.salud
+    [c] = fv2.aplicar_reglas(t + 42 * H)
+    assert (c["id"], c["despues"], c["tipo"]) == ("jp-0", "silenciada", "tecnico") and "3,0 días" in c["motivo"]
     store.close()
 
 

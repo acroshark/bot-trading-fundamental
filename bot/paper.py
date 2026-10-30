@@ -12,18 +12,26 @@ puede ir corto) y un corto al contado explícito se acepta con el aviso de que n
 Un perpetuo cobra o paga el funding en cada liquidación (00:00, 08:00 y 16:00 UTC) con la tasa de
 market.flow[moneda].funding o, sin ella, la última conocida; entra en el resultado, en R y en las comisiones. Su
 nominal total no pasa de 2 veces el capital (2:1) y en la exposición cuenta su margen (la mitad del nominal).
-SUPUESTO del funding (funding_8h): market.flow[moneda].funding es el lastFundingRate de Binance USDT-M × 100, la tasa de
-UN periodo de liquidación, y se da por hecho que ese periodo es de 8 h (lo normal en BTC, ETH, SOL y XRP). Si Binance
-liquida esa moneda cada 4 h o 1 h, la tasa es por ese periodo y el paper cobraría de menos, salvo que la fila traiga
-«funding_h» (fundingIntervalHours de /fapi/v1/fundingInfo; hoy market.py no lo envía), con la que se escala a 8 h.
-Tampoco es la tasa de OKX X-Perps EU, donde se ejecutaría de verdad: es una aproximación.
+Funding (funding_8h): market.flow[moneda].funding es el lastFundingRate de Binance USDT-M × 100, la tasa de UN periodo de
+liquidación, y market.py publica «funding_h» (fundingIntervalHours de /fapi/v1/fundingInfo, leído cada 6 h; los símbolos
+que no lista liquidan cada 8 h), con la que se escala a % por 8 h. Sin funding_h (Binance sin responder) se supone 8 h.
+Una fila del flujo de más de 5 min no se usa (market.fresh_flow): se cobra con la última tasa conocida. No es la tasa de
+OKX X-Perps EU, donde se ejecutaría de verdad (pública y del orden del doble): es una aproximación (docs/05, sección 27).
 Comisiones (29-10-2026, bot/comisiones.py): las del perfil en uso (por defecto OKX EU con cuenta X-Perps). La entrada,
 el stop y los cierres a mercado pagan comisión de tomador; el objetivo y la parcial (órdenes límite), de creador. Cada
 posición guarda las tasas con que se abrió («comision») y las usa hasta cerrarse; cada operación lleva sus costes
 («costes»: entrada, salidas, funding y total, en USDC y en R) y la cartera, el perfil en uso («comisiones»). Sin cuenta
 X-Perps (perfil okx_eu_sin_xperps, o la cuenta real sin X-Perps) no hay cortos ni perpetuos: se vetan («sin_cortos»).
 Mandos de la web (server.on_ws_message): decide, close, set_mode, halt / resume (parada manual, persistente), cancel y
-set_comisiones (perfil de comisiones, persistente)."""
+set_comisiones (perfil de comisiones, persistente).
+HUECOS (hallazgo n.º 47): una posición abierta que pasa más de GAP_MIN_MS sin gestionarse (el bot parado o caído, o sin
+precios) no sigue como si nada. Cada posición guarda la última vez que se gestionó con precio («seen», cada 30 s como
+mucho); al volver, se reconstruye el hueco con las velas de 1 min de Binance al contado (fetch_bars, pasadas a la escala de
+OKX EU con el cociente entre los dos precios al empezar el hueco): si tocó el stop, el objetivo o el tope de tiempo, se
+cierra a ese nivel y a esa hora (replay_gap), con el funding de las liquidaciones de por medio. Mientras tanto no se
+gestiona. Sin velas tras GAP_TRIES intentos, sigue en vivo y queda marcada («huecos» con completo = False). Igual con una
+posición con la parcial pendiente o con cerrojo (p. ej. «6 diarias v2»): su salida no es una horquilla fija y no se
+reconstruye."""
 import asyncio
 import hashlib
 import json
@@ -36,6 +44,7 @@ from zoneinfo import ZoneInfo
 
 from . import comisiones, config, regions
 from .bus import Bus
+from .market import fresh_flow
 from .models import now_ms
 from .store import Store
 
@@ -59,6 +68,12 @@ STEP_EVERY_S = 1.0
 PORTFOLIO_EVERY_S = 2.0
 ERR_LOG_EVERY_S = 300          # un fallo que se repite cada ronda se registra como mucho cada 5 min
 CLOSED_IN_PORTFOLIO = 50
+DAY_MAX_ENTRIES = 6            # reglas del usuario: entradas por día de Madrid como mucho, de TODOS los orígenes
+DAY_MAX_RISK_PCT = 3.0         # ... y riesgo comprometido en stop (0,5 % × 6); con un preset más estricto, el suyo
+GAP_MIN_MS = 2 * 60_000        # una posición sin gestionar más tiempo que esto (bot parado o sin precios) se reconstruye
+GAP_RETRY_S = 60               # reintento de las velas del hueco
+GAP_TRIES = 10                 # sin velas completas tras tantos intentos, se reconstruye con lo que haya y sigue en vivo
+GAP_HOLE_MS = 5 * 60_000       # velas del hueco con un salto mayor que esto: incompletas
 COST_SLIP_BPS = 2.0            # deslizamiento supuesto por lado en el coste de ida y vuelta (como el backtest); es
                                # también el máximo del simulado, que se suma al medio diferencial
 BE_MARGIN_BPS = 2.0            # margen del break-even sobre el coste de ida y vuelta
@@ -184,6 +199,10 @@ def motivo_codigo(why: str | None, kind: str = "riskko") -> str:
         return "reglas"
     if t.startswith(("Pérdida del día", "Operativa detenida")):
         return "perdida_dia"
+    if t.startswith("Entradas del día"):
+        return "tope_dia"
+    if t.startswith("Riesgo del día"):
+        return "riesgo_dia"
     if t.startswith("Posiciones abiertas o en curso") or (t.startswith("Ya hay ") and "posiciones abiertas" in t):
         return "max_posiciones"
     if t.startswith(("Exposición total", "La exposición subiría", "Nominal en perpetuos", "El nominal en perpetuos")):
@@ -326,16 +345,77 @@ def stop_update(d: int, entry: float, stop_pct: float, trail: float | None, best
     return stop, be, kind
 
 
+def replay_gap(side: str, sl: float, tp2: float | None, hold_until: float | None, bars, factor: float = 1.0) -> dict:
+    """Lo que pasó con una posición abierta durante un hueco (bot parado o sin precios), con velas de 1 min
+    [t, o, h, l, c, …] ordenadas (las de Binance en USDT, pasadas a la escala de OKX EU multiplicando por factor). Primera
+    salida, como en el paper: el tope de tiempo cumplido al empezar la vela (sale a su apertura); una apertura que ya salta
+    el stop (sale a la apertura, peor que el stop) o el objetivo (sale en el objetivo, como la orden límite); dentro de la
+    vela, el stop o el objetivo y, si toca los dos, el stop (el peor caso: no se sabe cuál fue antes). Horquilla pura (las
+    reglas del usuario): un stop dinámico o un break-even no se reconstruyen. Devuelve {salida: None | "stop" | "objetivo"
+    | "tiempo", px (nivel de salida, sin deslizamiento), at (ms), best (extremo favorable), last (último cierre), n (velas
+    miradas)}."""
+    d = 1 if side == "long" else -1
+    out = {"salida": None, "px": None, "at": None, "best": None, "last": None, "n": 0}
+    for r in bars:
+        t, o, h, l, c = int(r[0]), float(r[1]) * factor, float(r[2]) * factor, float(r[3]) * factor, float(r[4]) * factor
+        if hold_until and t >= hold_until:
+            out.update(salida="tiempo", px=o, at=max(int(hold_until), t))
+            return out
+        out["n"] += 1
+        fav, adv = (h, l) if d > 0 else (l, h)
+        if d * (o - sl) <= 0:
+            out.update(salida="stop", px=o, at=t)
+            return out
+        if tp2 and d * (o - tp2) >= 0:
+            out.update(salida="objetivo", px=tp2, at=t)
+            return out
+        if d * (adv - sl) <= 0:
+            out.update(salida="stop", px=sl, at=t)
+            return out
+        out["best"] = fav if out["best"] is None or d * (fav - out["best"]) > 0 else out["best"]
+        if tp2 and d * (fav - tp2) >= 0:
+            out.update(salida="objetivo", px=tp2, at=t)
+            return out
+        out["last"] = c
+    return out
+
+
+def day_caps(motor: dict | None = None) -> tuple[int, float]:
+    """(entradas, riesgo en %) del día de Madrid para todo el paper: los del preset en marcha del motor de aperturas
+    (max_day_entries y max_day_risk_pct; E2 da 4 y 2 %, «6 diarias» 6 y 3 %) y nunca más de DAY_MAX_ENTRIES y
+    DAY_MAX_RISK_PCT. Sin dato, esos."""
+    m = motor if isinstance(motor, dict) else {}
+    n, r = _f(m.get("max_day_entries")), _f(m.get("max_day_risk_pct"))
+    return ((min(DAY_MAX_ENTRIES, int(n)) if n and n > 0 else DAY_MAX_ENTRIES),
+            (min(DAY_MAX_RISK_PCT, r) if r and r > 0 else DAY_MAX_RISK_PCT))
+
+
+def gap_complete(bars, a: int, b: int) -> bool:
+    """¿Las velas cubren el hueco [a, b) sin saltos de más de GAP_HOLE_MS?"""
+    ts = [int(r[0]) for r in bars or [] if a <= int(r[0]) < b]
+    if b - a < 60_000:
+        return True
+    if not ts or ts[0] > a + 2 * 60_000 or ts[-1] + 60_000 < b - 3 * 60_000:
+        return False
+    return all(y - x <= GAP_HOLE_MS for x, y in zip(ts, ts[1:]))
+
+
 # ---------------------------------------------------------------- broker
 
 class PaperBroker:
-    def __init__(self, bus: Bus, store: Store, get_market, get_orderflow=None, clock=now_ms, slip_bps=None):
+    def __init__(self, bus: Bus, store: Store, get_market, get_orderflow=None, clock=now_ms, slip_bps=None,
+                 fetch_bars=None, day_limits=None):
         self.bus = bus
         self.store = store
         self.get_market = get_market                          # () -> último "market" (precios y diferencial OKX EU)
         self.get_orderflow = get_orderflow or (lambda: None)  # () -> último "orderflow" (diferencial del libro)
         self.clock = clock                                    # () -> ms; inyectable en las pruebas
         self.slip_bps = slip_bps or (lambda: random.uniform(0.5, 2.0))
+        # async (moneda, desde_ms, hasta_ms) -> velas de 1 min [t, o, h, l, c, …] de Binance, para los huecos (None: no
+        # se reconstruyen, como antes)
+        self.fetch_bars = fetch_bars
+        self.day_limits = day_limits           # () -> parámetros del motor en marcha (sus topes del día), o None
+        self._gaps: dict[str, dict] = {}       # posiciones con un hueco por reconstruir {desde, intentos, proximo}
         self.mode = config.APPROVAL_MODE if config.APPROVAL_MODE in MODES else "veto"
         if self.mode != config.APPROVAL_MODE:
             log.warning("Modo de aprobación desconocido «%s»: se usa veto", config.APPROVAL_MODE)
@@ -380,6 +460,15 @@ class PaperBroker:
             else:
                 self.closed.append(d)
         self.closed.sort(key=lambda t: t["closed"])
+        if any(_f(p.get("seen")) is None for p in self.positions.values()):
+            # guardadas antes de «seen»: el hueco empieza en la última actividad del bot (el último evento guardado)
+            try:
+                last = self.store.db.execute("SELECT MAX(ts) FROM events").fetchone()[0]
+            except Exception:
+                last = None
+            for p in self.positions.values():
+                if _f(p.get("seen")) is None:
+                    p["seen"] = max(int(p["opened"]), int(last or 0))
         q = self._get_state("queue")
         q = q if isinstance(q, dict) else {}
         now = self.clock()
@@ -514,7 +603,7 @@ class PaperBroker:
 
     def _funding_rate(self, coin: str) -> float | None:
         """Tasa de funding de ahora en % por 8 h (funding_8h de market.flow[moneda]) o None sin dato."""
-        return funding_8h((self._market().get("flow") or {}).get(coin))
+        return funding_8h(fresh_flow(self._market(), self.clock()).get(coin))
 
     def _macro_soon(self, now: int) -> dict | None:
         for e in (self.bus.state.get("calendar") or {}).get("events") or []:
@@ -883,6 +972,41 @@ class PaperBroker:
             return f"{bad} · el perfil de comisiones ha cambiado desde que se envió"
         return None
 
+    def day_entries(self, now: int, eq: float | None = None) -> dict[str, float]:
+        """Entradas del día de Madrid de now, de todos los orígenes, con su riesgo en stop en % del capital: abiertas y
+        cerradas que se abrieron hoy (riesgo real) y pendientes o programadas (el riesgo de su ticket). Como
+        apertura.paper_day_entries, pero con el estado del propio paper."""
+        eq = self.equity() if eq is None else eq
+        start = day_start_ms(now)
+        out: dict[str, float] = {}
+        for x in [*self.positions.values(), *self.closed]:
+            if _f(x.get("opened"), 0) >= start:
+                r = _f(x.get("riskUsd"))
+                out[x["story"]] = round(r / eq * 100, 4) if r and eq else config.RISK_PER_TRADE_PCT
+        for it in [*self.pending.values(), *self.scheduled.values()]:
+            out.setdefault(it["story"], _f(it["ticket"].get("risk"), config.RISK_PER_TRADE_PCT))
+        return out
+
+    def _day_check(self, story: str, risk: float, now: int, eq: float) -> dict:
+        """Topes del día (reglas del usuario): entradas y riesgo del día de Madrid de todos los orígenes (motor, entrada
+        por noticia y fase 2), con los del preset en marcha del motor (day_caps)."""
+        try:
+            motor = self.day_limits() if self.day_limits is not None else None
+        except Exception:
+            motor = None
+        n_max, r_max = day_caps(motor)
+        ent = self.day_entries(now, eq)
+        ent.pop(story, None)
+        used = sum(ent.values())
+        if len(ent) >= n_max:
+            return {"ok": False, "t": f"Entradas del día: {len(ent)} de {n_max} (todas las del paper, día de Madrid): "
+                                      "no caben más"}
+        if used + risk > r_max + 1e-9:
+            return {"ok": False, "t": f"Riesgo del día {_n(used)} % + {_n(risk)} % > {_n(r_max)} % (todas las entradas "
+                                      "del paper, día de Madrid)"}
+        return {"ok": True, "t": f"Entradas del día {len(ent)} de {n_max} y riesgo {_n(used)} % + {_n(risk)} % ≤ "
+                                 f"{_n(r_max)} % (día de Madrid)"}
+
     def _risk_checks(self, t: dict, story: str, now: int, prices: dict) -> tuple[list[dict], float]:
         coin = t.get("coin")
         risk, stop = _f(t.get("risk"), 0.0), _f(t.get("stopPct"), 0.0)
@@ -948,6 +1072,8 @@ class PaperBroker:
             {"ok": same is None, "t": f"Sin otra operación abierta o en curso en {coin}" if same is None
                 else f"Ya hay una operación en {coin} ({same}): una sola por moneda"},
         ]
+        if config.USER_RULES:   # límites diarios de entradas y riesgo, para todos los orígenes (también la fase 2)
+            checks.append(self._day_check(story, risk, now, eq))
         if inst == "perp":   # apalancamiento máximo para particulares en España
             perp = self._perp_notional() + notional
             ok = perp <= eq * PERP_MAX_LEVERAGE + 1e-6
@@ -1162,7 +1288,8 @@ class PaperBroker:
         sl = px - d * r
         pos = {"id": "t" + hashlib.sha1(f"{story}|{now}".encode()).hexdigest()[:12], "story": story, "coin": coin, "side": side,
                "qty": qty, "entry": px, "sl": sl, "sl_initial": sl, "sl_kind": "inicial", "sl_pub": sl, "stop_pct": stop,
-               "trail_pct": trail, "high_water": px, "last": px, "opened": now, "riskUsd": notional * stop / 100,
+               "trail_pct": trail, "high_water": px, "last": px, "opened": now, "seen": now,
+               "riskUsd": notional * stop / 100,
                "notional": notional, "fee_open": notional * com["tomador"] / 100, "comision": com,
                "tp1": px + d * r * tp1R if tp1R else None, "tp2": px + d * r * tp2R if tp2R else None, "tp2R": tp2R,
                "be": False, "hold_until": hold_until, "hold_label": hold_label, "headline": item["headline"],
@@ -1315,22 +1442,26 @@ class PaperBroker:
             p["funding_rate"] = rate
         nxt = p.get("funding_next") or next_funding_ms(p["opened"])
         while now >= nxt:
-            at, nxt = nxt, nxt + FUNDING_EVERY_MS
-            p["funding_next"] = nxt
-            r, notional = p.get("funding_rate"), p["qty"] * px
-            if r is None:
-                log.warning("Paper: %s sin tasa de funding a las %s: esa liquidación no se cuenta", p["story"], _hm(at))
-                continue
-            amt = funding_pay(p["side"], notional, r)
-            p["funding"] = p.get("funding", 0.0) + amt
-            p["funding_n"] = p.get("funding_n", 0) + 1
-            p["exec"] = {**p["exec"], "funding": round(p["funding"], 4), "funding_n": p["funding_n"]}
-            self._event("manage", "exec", p["story"], p["coin"],
-                        f"{p['coin']}: funding {'cobrado' if amt >= 0 else 'pagado'} {_sg(amt)} {config.QUOTE} (paper)",
-                        f"Liquidación de las {_hm(at)} (Madrid) · tasa {_n(r, 4)} % por 8 h sobre {_n(notional, 0)} "
-                        f"{config.QUOTE} de nominal · acumulado {_sg(p['funding'])} {config.QUOTE}",
-                        {"exec": dict(p["exec"])}, now)
-            self._save_trade(p)
+            self._pay_funding(p, nxt, px, now)
+            nxt = p["funding_next"]
+
+    def _pay_funding(self, p: dict, at: int, px: float, now: int) -> None:
+        """Una liquidación del funding (la de las at) sobre el nominal a precio px, con la última tasa conocida."""
+        p["funding_next"] = at + FUNDING_EVERY_MS
+        r, notional = p.get("funding_rate"), p["qty"] * px
+        if r is None:
+            log.warning("Paper: %s sin tasa de funding a las %s: esa liquidación no se cuenta", p["story"], _hm(at))
+            return
+        amt = funding_pay(p["side"], notional, r)
+        p["funding"] = p.get("funding", 0.0) + amt
+        p["funding_n"] = p.get("funding_n", 0) + 1
+        p["exec"] = {**p["exec"], "funding": round(p["funding"], 4), "funding_n": p["funding_n"]}
+        self._event("manage", "exec", p["story"], p["coin"],
+                    f"{p['coin']}: funding {'cobrado' if amt >= 0 else 'pagado'} {_sg(amt)} {config.QUOTE} (paper)",
+                    f"Liquidación de las {_hm(at)} (Madrid) · tasa {_n(r, 4)} % por 8 h sobre {_n(notional, 0)} "
+                    f"{config.QUOTE} de nominal · acumulado {_sg(p['funding'])} {config.QUOTE}",
+                    {"exec": dict(p["exec"])}, now)
+        self._save_trade(p)
 
     def _exit_px(self, p: dict, px: float) -> float:
         sp = self._spread(p["coin"])
@@ -1428,10 +1559,12 @@ class PaperBroker:
         c = self._costes_trade(t)
         return {**t, "costes": c, "bruto": round((_f(t.get("pnl"), 0.0) or 0.0) + c["total"], 4)}
 
-    def _close(self, p: dict, exit_px: float, why: str, now: int, limite: bool = False) -> dict:
+    def _close(self, p: dict, exit_px: float, why: str, now: int, limite: bool = False, at: int | None = None) -> dict:
         """Cierra lo que queda (limite: con una orden límite, el objetivo, que paga como creador; si no, a mercado, como
         tomador). pnl, comisiones y R incluyen las salidas parciales; qty es la inicial y exit, el precio medio de todas
-        las salidas (así pnl = ±(exit − entry) × qty − comisiones también con parciales)."""
+        las salidas (así pnl = ±(exit − entry) × qty − comisiones también con parciales). at: la hora de la salida si fue
+        antes (un hueco reconstruido); el evento sale ahora."""
+        at = now if at is None else int(at)
         d, qty = self._dir(p["side"]), p["qty"]
         parts = p.get("partials") or []
         tas = self._tasas(p)
@@ -1448,7 +1581,7 @@ class PaperBroker:
         trade = {"id": p["id"], "story": p["story"], "strategy": p["strategy"], "window": p["window"], "market": p["market"],
                  "coin": p["coin"], "side": p["side"], "qty": round(q_all, 8), "entry": round(p["entry"], 8),
                  "exit": round(avg_exit, 8), "sl_initial": round(p["sl_initial"], 8), "trail_pct": p["trail_pct"],
-                 "opened": p["opened"], "closed": now, "reason": why, "pnl": round(pnl, 4),
+                 "opened": p["opened"], "closed": at, "reason": why, "pnl": round(pnl, 4),
                  "pnl_pct": round(pnl / p["notional"] * 100, 4), "R": round(R, 4), "fees": round(fees, 4),
                  "headline": p["headline"], "news_score": p.get("news_score"),
                  # Añadidos: riesgo y nominal, resultado en % del capital, stop final y extremo favorable.
@@ -1463,17 +1596,23 @@ class PaperBroker:
                          locked=bool(p.get("locked")), locked_at=p.get("locked_at"))
         if p.get("tags"):
             trade["tags"] = p["tags"]
+        for k in ("hueco", "huecos"):   # reconstruida con las velas de un hueco (hallazgo n.º 47)
+            if p.get(k):
+                trade[k] = p[k]
         trade.update(instrument=p.get("instrument") or "spot", funding=round(fund, 4), commissions=round(comm, 4))
         trade["costes"] = self._costes(p["fee_open"], p.get("fees_exit", 0.0) + fee_last, fund, p["riskUsd"],
                                        tas.get("perfil"))
         trade["costes"]["salida_tipo"] = "creador" if limite else "tomador"
         trade["bruto"] = round(pnl + fees, 4)   # antes de comisiones y funding (con el deslizamiento en los precios)
         del self.positions[p["story"]]
+        self._gaps.pop(p["story"], None)
         self.closed.append(trade)
-        self._save_trade(trade, now)
+        if len(self.closed) > 1 and self.closed[-2]["closed"] > at:
+            self.closed.sort(key=lambda t: t["closed"])
+        self._save_trade(trade, at)
         result = {"coin": trade["coin"], "side": trade["side"], "qty": trade["qty"], "entry": trade["entry"],
                   "exit": trade["exit"], "why": why, "pnl": trade["pnl"], "pnl_pct": trade["pnl_pct"], "R": trade["R"],
-                  "fees": trade["fees"], "opened": trade["opened"], "closedAt": now, "riskUsd": trade["riskUsd"],
+                  "fees": trade["fees"], "opened": trade["opened"], "closedAt": at, "riskUsd": trade["riskUsd"],
                   "notional": trade["notional"], "headline": trade["headline"], "strategy": trade["strategy"],
                   "window": trade["window"]}
         result["costes"] = dict(trade["costes"])
@@ -1539,11 +1678,123 @@ class PaperBroker:
             self._resolve(story, False, "Caducada sin respuesta", now)
 
     def _step_position(self, p: dict, now: int, prices: dict) -> None:
+        if p["story"] in self._gaps:   # hueco por reconstruir: nada se gestiona hasta tener sus velas
+            return
         px = prices.get(p["coin"])
-        if p.get("instrument") == "perp":   # el funding se liquida aunque falte el precio (con el último)
+        gaps = self.fetch_bars is not None
+        if px and gaps and now - (_f(p.get("seen")) or now) > GAP_MIN_MS:
+            self._open_gap(p, now)
+            return
+        if p.get("instrument") == "perp" and (px or not gaps):
+            # el funding se liquida aunque falte el precio (con el último), salvo si los huecos se reconstruyen: entonces
+            # lo liquida la reconstrucción con el precio de cada hora
             self._funding(p, px or p.get("last") or p["entry"], now)
         if px:   # sin precio actualizado no se mueven los stops ni se cierra por tiempo
+            p["seen"] = now
             self._manage(p, px, now)
+
+    # ---- huecos: posiciones que pasaron un rato sin gestionarse (hallazgo n.º 47)
+
+    def _open_gap(self, p: dict, now: int) -> None:
+        desde = int(_f(p.get("seen")) or p["opened"])
+        self._gaps[p["story"]] = {"desde": desde, "intentos": 0, "proximo": 0}
+        log.warning("Paper: %s %s sin gestionar desde %s (%s): se reconstruye con velas de 1 min antes de seguir",
+                    p["coin"], p["story"], datetime.fromtimestamp(desde / 1000, MAD).strftime("%d-%m %H:%M"),
+                    _ago(now - desde))
+        self._status("exec", f"{p['coin']}: posición sin gestionar desde las {_hm(desde)} (bot parado o sin precios): "
+                             "reconstruyo el hueco con velas de 1 min antes de seguir")
+
+    async def reconcile(self, now: int | None = None) -> int:
+        """Reconstruye los huecos pendientes con las velas de 1 min (fetch_bars). Devuelve cuántos se cerraron."""
+        if not self._gaps or self.fetch_bars is None:
+            return 0
+        now = self.clock() if now is None else int(now)
+        cerradas = 0
+        for story, g in list(self._gaps.items()):
+            p = self.positions.get(story)
+            if p is None:
+                self._gaps.pop(story, None)
+                continue
+            if now < g["proximo"]:
+                continue
+            g["intentos"] += 1
+            a, b = g["desde"] // 60_000 * 60_000, now // 60_000 * 60_000
+            try:
+                bars = await self.fetch_bars(p["coin"], a - 2 * 60_000, b) or []
+            except Exception as e:
+                self._log_err("hueco:" + story, f"Paper: sin velas del hueco de {story} ({e})")
+                bars = []
+            completo = gap_complete(bars, a, b)
+            if not completo and g["intentos"] < GAP_TRIES:
+                g["proximo"] = now + GAP_RETRY_S * 1000
+                continue
+            self._gaps.pop(story, None)
+            cerradas += self._apply_gap(p, bars, a, b, now, completo)
+        return cerradas
+
+    def _gap_factor(self, p: dict, bars: list, a: int, now: int) -> float:
+        """Cociente OKX EU (USDC) / Binance (USDT) al empezar el hueco: el último precio visto frente a la vela de
+        entonces; sin él, el precio de ahora frente al último cierre; sin nada, 1."""
+        by_t = {int(r[0]): r for r in bars}
+        ref = by_t.get(a)
+        ref = float(ref[1]) if ref else (float(by_t[a - 60_000][4]) if a - 60_000 in by_t else None)
+        last = _f(p.get("last"))
+        if ref and last:
+            return last / ref
+        cur = self._prices(now).get(p["coin"])
+        if cur and bars:
+            return cur / float(bars[-1][4])
+        return 1.0
+
+    def _apply_gap(self, p: dict, bars: list, a: int, b: int, now: int, completo: bool) -> int:
+        rows = [r for r in bars if a <= int(r[0]) < b]
+        factor = self._gap_factor(p, bars, a, now)
+        # Con la parcial pendiente o con cerrojo (p. ej. «6 diarias v2») la horquilla fija no dice lo que habría pasado: la
+        # parcial cobra y el stop sube por el camino. No se reconstruye: sigue en vivo y el hueco queda sin reconstruir.
+        puro = not p.get("lock_r") and (not p.get("tp1_frac") or p.get("tp1_done"))
+        res = replay_gap(p["side"], p["sl"], p.get("tp2"), p.get("hold_until"), rows if puro else [], factor)
+        completo = completo and puro
+        info = {"desde": a, "hasta": b, "velas": res["n"], "factor": round(factor, 6), "completo": completo,
+                "fuente": "Binance 1 min"}
+        d, end = self._dir(p["side"]), res["at"] if res["salida"] else b
+        if res["best"] is not None and d * (res["best"] - p["high_water"]) > 0:
+            p["high_water"] = res["best"]
+        if p.get("instrument") == "perp":   # las liquidaciones del funding de por medio, con el precio de su hora
+            close_at = {int(r[0]) + 60_000: float(r[4]) * factor for r in rows}
+            nxt = p.get("funding_next") or next_funding_ms(p["opened"])
+            while nxt <= end and nxt <= now:
+                self._pay_funding(p, nxt, close_at.get(nxt) or p.get("last") or p["entry"], now)
+                nxt = p["funding_next"]
+        if res["salida"]:
+            at = int(res["at"])
+            p["hueco"] = info
+            if res["salida"] == "objetivo":
+                why, px = f"Objetivo ({_n(p['tp2R'], 1)} R)", res["px"]
+            elif res["salida"] == "stop":
+                why, px = STOP_NAMES[p["sl_kind"]], self._exit_px(p, res["px"])
+            else:
+                why, px = f"Cierre por tiempo ({p['hold_label']})", self._exit_px(p, res["px"])
+            why += f" con el bot sin gestionarla (a las {_hm(at)} Madrid, reconstruido con velas de 1 min de Binance)"
+            self._close(p, px, why, now, limite=res["salida"] == "objetivo", at=at)   # el objetivo, orden límite: creador
+            return 1
+        p["huecos"] = [*(p.get("huecos") or []), info][-20:]
+        if res["last"] is not None:
+            p["last"] = res["last"]
+        p["seen"] = now
+        p["exec"] = {**p["exec"], "high_water": p["high_water"], "hueco": info}
+        txt = (f"Sin gestionar de {_hm(a)} a {_hm(b)} (Madrid): {res['n']} velas de 1 min de Binance sin tocar el stop "
+               "ni el objetivo; sigue abierta")
+        if not puro:
+            txt = (f"Sin gestionar de {_hm(a)} a {_hm(b)} (Madrid), con la parcial pendiente o con cerrojo: su salida no es "
+                   "una horquilla fija y no se reconstruye; sigue abierta en vivo")
+        elif not completo:
+            txt = (f"Sin gestionar de {_hm(a)} a {_hm(b)} (Madrid) y sin velas completas de ese hueco tras {GAP_TRIES} "
+                   f"intentos ({res['n']} velas): sigue abierta en vivo, pero el hueco queda sin reconstruir")
+        self._event("manage", "exec", p["story"], p["coin"], f"{p['coin']}: hueco revisado", txt,
+                    {"exec": dict(p["exec"])}, now)
+        self._save_trade(p)
+        log.info("Paper: hueco de %s revisado (%d velas, completo=%s): sigue abierta", p["story"], res["n"], completo)
+        return 0
 
     def _note_stale(self, prices: dict) -> None:
         """Avisa en la web cuando una posición abierta se queda sin precio actualizado (y cuando vuelve)."""
@@ -1580,6 +1831,13 @@ class PaperBroker:
         last_pf = 0.0
         try:
             while True:
+                if self._gaps:   # huecos por reconstruir (velas de la red): antes de gestionar
+                    try:
+                        await self.reconcile()
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        self._log_err("hueco", "Paper trading: fallo al reconstruir un hueco")
                 try:
                     self.step()
                 except Exception:
@@ -1619,7 +1877,7 @@ class PaperBroker:
                 "tp1_done": p.get("tp1_done", False), "realized": round(p.get("realized", 0.0), 2),
                 "be_r": p.get("be_r", 1.0), "trail_start_r": p.get("trail_start_r"),
                 "instrument": p.get("instrument") or "spot", "funding": round(p.get("funding", 0.0), 2),
-                "tags": p.get("tags"),
+                "tags": p.get("tags"), "reconstruyendo": p["story"] in self._gaps, "huecos": p.get("huecos"),
                 # Cerrojo: activación, suelo y seguimiento (R), si ya está activado, el precio del suelo, el cierre por
                 # tiempo de ahora (hold_until) y el que tendrá activado (hold_active); qty0 = cantidad inicial.
                 "hold_label": p.get("hold_label"), "qty0": round(p.get("qty0") or p["qty"], 8),

@@ -70,7 +70,8 @@ STOP_EXTRA = 5.0 / 1e4                       # extra en los stops de BTC y ETH (
 STOP_EXTRA_ALT = 20.0 / 1e4                  # extra en los stops de SOL y XRP (escenario central de 15-30 pb)
 ALT_COINS = ("SOL", "XRP")
 TP_THROUGH = 2.0 / 1e4                       # el objetivo se cobra si el precio lo supera en 2 pb (no basta tocarlo)
-FEE_PERP = 0.05 / 100                        # comisión por lado de un perpetuo (OKX, sin verificar para X-Perps EU)
+FEE_PERP = 0.05 / 100                        # comisión por lado de un perpetuo: 0,05 % taker de OKX X-Perps EU
+                                             # (confirmado: okx.com/help/okx-x-perps-eea-fees-overview, 01-09-2026)
 
 # Horquillas (reglas del usuario) y vecinos de estabilidad (3,5 solo para los vecinos: también cumplen las reglas)
 SL_GRID = (1.5, 2.0, 2.5, 3.0)

@@ -1,5 +1,6 @@
 import asyncio
 import json
+import math
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -585,3 +586,14 @@ async def test_operaciones_binance_por_websocket():
     assert s.urls == ["wss://data-stream.binance.vision/stream?streams="
                       "btcusdt@aggTrade/ethusdt@aggTrade/solusdt@aggTrade/xrpusdt@aggTrade"]
     assert t.windows["BTC"].b[-1][1] == 0.01 and t.windows["XRP"].b[-1][2] == 500.0 and t.ok["trades"] is True
+
+
+def test_desequilibrio_del_libro_es_una_media_de_un_minuto():
+    """Hallazgo n.º 12: el libro de BTC en OKX EU es tan fino que el desequilibrio pasaba de +0,88 a −0,94 en 20 s; el
+    que se publica (y usan las predicciones) es una media exponencial de ~1 min, y el del instante va aparte."""
+    from bot.trend import IMB_TAU_S, smooth_imbalance
+    assert smooth_imbalance(None, None, 0.88, 0) == 0.88
+    v = smooth_imbalance(0.88, 0, -0.94, 20_000)
+    assert v == pytest.approx(0.88 + (1 - math.exp(-20 / IMB_TAU_S)) * (-0.94 - 0.88)) and v > 0.2
+    assert smooth_imbalance(0.5, 0, None, 1000) == 0.5
+    assert smooth_imbalance(0.0, 0, 1.0, 600_000) == pytest.approx(1.0, abs=1e-4)   # tras 10 min, el de ahora
