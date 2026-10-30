@@ -2,11 +2,15 @@
 
 Uso (con el bot PARADO y también su vigilante: scripts/vigilante-bot.ps1 relanza el bot unos 2 min después de que caiga;
 antes de pararlo, crear el archivo DATA_DIR\\parar-vigilante y borrarlo después de volver a arrancar):
+    M:\\BotFundamental-runtime\\venv\\Scripts\\python.exe -X utf8 scripts\\activar_estrategia.py --preset seis4r
     M:\\BotFundamental-runtime\\venv\\Scripts\\python.exe -X utf8 scripts\\activar_estrategia.py --preset ruptura3
     M:\\BotFundamental-runtime\\venv\\Scripts\\python.exe -X utf8 scripts\\activar_estrategia.py --preset seis2
     M:\\BotFundamental-runtime\\venv\\Scripts\\python.exe -X utf8 scripts\\activar_estrategia.py --preset seis
     M:\\BotFundamental-runtime\\venv\\Scripts\\python.exe -X utf8 scripts\\activar_estrategia.py --preset impulso
-«ruptura3» activa «Ruptura V3: rango de apertura con tendencia, volumen y régimen» (apertura.RUPTURA3, modelo
+«seis4r» activa «6 diarias 4R: stop 2 %, objetivo 4R, hasta 7 días» (apertura.SEIS4R: las entradas de «6 diarias» con
+una horquilla de stop 2 % y objetivo 4R, como mucho 7 días; la n.º 1 del ranking de estrategias, la variante F0 de
+controles/salidas_motor.py; su backtest, seis4r_resumen.json, de scripts/replica_seis4r.py); «ruptura3» activa «Ruptura
+V3: rango de apertura con tendencia, volumen y régimen» (apertura.RUPTURA3, modelo
 «ruptura3»: solo la moneda con el régimen cripto y su tendencia a favor, ruptura del rango de 15 min con volumen y
 expansión, stop 2-3 %, como mucho 2 por apertura y la salida A; su backtest, ruptura3_resumen.json); «seis2» activa
 «6 diarias v2» (apertura.SEIS2: las entradas de «6 diarias» con la mitad en 3R y el resto con el cerrojo); «seis»
@@ -21,7 +25,8 @@ Qué hace:
    dinámico antes del cerrojo). Si no las cumple, no escribe nada.
 3. Apunta el cambio en el historial de la evolución (evolution_log, tipo «estrategia_cambiada», origen «usuario»): «Estrategia
    cambiada por decisión del usuario el DD-MM-AAAA: 6 diarias (…)», con la estrategia entera antes y después (se puede
-   revertir desde la pestaña Evolución) y las cifras del backtest si están. También marca el último cambio de
+   revertir desde la pestaña Evolución), las cifras del backtest si están y, si el preset lo tiene, cómo se eligió (AVISO:
+   «6 diarias 4R» es frágil, la mejor de 378 salidas elegida después de ver los datos). También marca el último cambio de
    estrategia (la evolución automática espera 14 días para promocionar otra). Los dos apuntes van en una sola
    transacción: si falla cualquiera, no queda ninguno y el archivo vuelve a como estaba.
 El motor lo carga al arrancar (y en caliente entre aperturas). Con --simular solo enseña lo que escribiría.
@@ -40,10 +45,18 @@ from zoneinfo import ZoneInfo
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from bot import apertura, config, evolucion  # noqa: E402
-from bot.resumen_backtest import RUPTURA3_FILE, SEIS2_FILE, SEIS_FILE  # noqa: E402
+from bot.resumen_backtest import RUPTURA3_FILE, SEIS2_FILE, SEIS4R3_FILE, SEIS4R_FILE, SEIS_FILE  # noqa: E402
 
 MAD = ZoneInfo("Europe/Madrid")
-BACKTEST = {"ruptura3": RUPTURA3_FILE, "seis2": SEIS2_FILE, "seis": SEIS_FILE, "impulso": "impulso_7d.json"}
+BACKTEST = {"seis4r3": SEIS4R3_FILE, "seis4r": SEIS4R_FILE, "ruptura3": RUPTURA3_FILE, "seis2": SEIS2_FILE,
+            "seis": SEIS_FILE, "impulso": "impulso_7d.json"}
+# Lo que el historial dice de un preset además de sus cifras: cómo se eligió (docs/05, sección 25)
+AVISO = {"seis4r": "Frágil: es la mejor fuera de muestra en % de la cuenta por jornada (la 2.ª en R por operación) "
+                   "de 378 salidas medidas sobre las mismas entradas, elegida después de ver los datos, y dentro de "
+                   "muestra pierde.",
+         "seis4r3": "Elegida por ser la que más ganó en 3 años con los costes del paper (sin contar E2) y ganar en los "
+                    "dos tramos, mirando los dos: una de 50 combinaciones que no pasa la corrección por el número de "
+                    "pruebas; fuera de muestra gana por los cortos y sin cuenta X-Perps pierde."}
 
 
 def bot_en_marcha(url: str, timeout: float = 2.0) -> bool:
@@ -95,7 +108,8 @@ def construir(preset: str, ahora: int, eid: str, bt: dict | None = None, extra: 
              "params": {k: v for k, v in info["params"].items() if k not in ("estrategia", "lab")},
              "lab_id": None, "lab_twin": None, "twin_filtro": None, "codigo": None, "pausada": False}
     motivo = (f"Estrategia cambiada por decisión del usuario el {fecha}: {info['nombre']} ({info['descripcion']}). "
-              "Solo paper." + _txt_bt(bt) + (f" {extra.strip()}" if extra and extra.strip() else ""))
+              "Solo paper." + _txt_bt(bt) + (f" {AVISO[preset]}" if preset in AVISO else "")
+              + (f" {extra.strip()}" if extra and extra.strip() else ""))
     d.update(preset=preset, nombre=info["nombre"], descripcion=info["descripcion"], desde=ahora, actualizado=ahora,
              motivo=motivo, registro=eid, solo_paper=True)
     d["firma"] = evolucion.firma_estrategia(d)
@@ -159,9 +173,10 @@ def activar(preset: str, datos: Path, ahora: int | None = None, extra: str | Non
 def main(argv: list[str] | None = None, ahora: int | None = None) -> int:
     ap = argparse.ArgumentParser(description="Cambia la estrategia del motor de aperturas (solo paper).")
     ap.add_argument("--preset", required=True, choices=sorted(apertura.PRESETS),
-                    help="ruptura3 = «Ruptura V3» (rango de apertura con tendencia, volumen y régimen); seis2 = «6 "
-                         "diarias v2» (la mitad en 3R y el resto con el cerrojo); seis = «6 diarias»; impulso = volver "
-                         "a E2 (el preset de siempre)")
+                    help="seis4r = «6 diarias 4R» (stop 2 %% y objetivo 4R, como mucho 7 días); ruptura3 = «Ruptura "
+                         "V3» (rango de apertura con tendencia, volumen y régimen); seis2 = «6 diarias v2» (la mitad en "
+                         "3R y el resto con el cerrojo); seis = «6 diarias»; impulso = volver a E2 (el preset de "
+                         "siempre)")
     ap.add_argument("--datos", type=Path, default=config.DATA_DIR, help="carpeta de datos (por defecto DATA_DIR)")
     ap.add_argument("--url", default=f"http://{config.HOST}:{config.PORT}/health",
                     help="dirección de /health del bot (si responde, no se cambia nada)")

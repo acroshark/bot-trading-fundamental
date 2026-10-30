@@ -1,4 +1,5 @@
-﻿# Abre el Radar Fundamental: arranca el bot si no está en marcha y pone una ventana en cada monitor.
+﻿# Abre el Radar Fundamental: arranca el bot si no está en marcha, su vigilante y el laboratorio vivo (si ya están en
+# marcha no hace nada con ellos) y pone una ventana en cada monitor.
 #   Monitor principal: Mundo (globo). Segundo monitor: Mando (todo de un vistazo).
 #   Con un solo monitor abre solo la principal; el botón «2.ª pantalla» de la web abre la otra.
 # Opciones: -Principal mundo|mando|directo|...  -Secundario ...  -PantallaCompleta  -Prueba (solo dice qué haría)
@@ -24,6 +25,16 @@ if (-not (BotVivo)) {
             exit 1
         }
     }
+}
+
+# El vigilante del bot (lo relanza si cae) y el laboratorio vivo (scripts/lab-vivo.ps1, con su propio vigilante),
+# sueltos con Win32_Process.Create: no dependen de esta ventana. Cada uno tiene su mutex: si ya está en marcha, el nuevo
+# sale solo. Para pararlos: los archivos M:\BotFundamental-datos\parar-vigilante y lab_vivo\parar.
+$sueltos = @("powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$proyecto\scripts\vigilante-bot.ps1`"",
+             "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$proyecto\scripts\lab-vivo.ps1`" -Suelto")
+foreach ($orden in $sueltos) {
+    if ($Prueba) { Write-Host "Arrancaría suelto (si ya está en marcha, sale solo): $orden" }
+    else { Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $orden; CurrentDirectory = $proyecto } | Out-Null }
 }
 
 $navegador = @("$env:ProgramFiles\Google\Chrome\Application\chrome.exe", "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",

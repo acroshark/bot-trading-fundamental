@@ -568,3 +568,50 @@ async def test_api_ranking_sin_el_modulo_lee_la_carpeta_por_defecto(tmp_path, mo
         assert [f["id"] for f in j["filas"]] == ["a"]
     assert (tmp_path / "datos" / "ranking_estado.json").exists()
     store.close()
+
+
+def test_seis4r3_en_marcha_es_su_fila_de_salidas_motor():
+    """«6 diarias 4R · stop 3 %» (preset seis4r3) es la salida «F0 stop 3 % · objetivo 4R · tope 7d» de salidas_motor.py:
+    en marcha se marca esa fila, como con seis4r."""
+    assert ranking.SEIS4R3_FILA == "salidas_motor:F0 stop 3 % · objetivo 4R · tope 7d"
+    assert ranking.PRESET_FILA["seis4r3"] == ranking.SEIS4R3_FILA != ranking.SEIS4R_FILA
+
+
+def test_seis4r_en_marcha_es_su_fila_de_salidas_motor_sin_repetirla(tmp_path):
+    """«6 diarias 4R» (preset seis4r) es la salida «F0 stop 2 % · objetivo 4R · tope 7d» de salidas_motor.py sobre las
+    entradas de «6 diarias» (su réplica da las mismas operaciones): el ranking marca en marcha esa fila, la n.º 1, con
+    sus operaciones del paper, sin crear otra «seis4r» repetida ni una de solo en vivo."""
+    from bot import apertura as ap
+    car = tmp_path / "ranking"
+    fid = ranking.SEIS4R_FILA
+    assert fid == "salidas_motor:F0 stop 2 % · objetivo 4R · tope 7d" and ranking.PRESET_FILA["seis4r"] == fid
+    assert set(ranking.PRESET_FILA) == set(ap.PRESETS)   # cada preset del motor tiene su fila
+    poner(car, "s4r.json", fila(fid, R=0.1228, n=757, op=2.474, dentro=-0.0413, origen="salidas",
+                                estudio="salidas_motor", probadas=378))
+    poner(car, "rup3.json", fila("ruptura3", R=0.4285, n=118, op=0.386, dentro=-0.033))
+    poner(car, "seis.json", fila("seis", R=-0.119, op=4.8))
+    trades = [{"strategy": "impulso-corto-sin-noticia", "tags": {"preset": "seis4r", "origen": "motor_aperturas"},
+               "R": 3.9, "pnl": 1.9, "bruto": 2.0, "opened": 10, "closed": 20},
+              {"strategy": "impulso-ruptura3-largo-sin-noticia", "tags": {"preset": "ruptura3", "modelo": "ruptura3"},
+               "R": -1.0, "pnl": -0.5, "opened": 1, "closed": 5}]
+    r = rk(tmp_path, get_resultados=lambda: {"trades": trades},
+           get_openings=lambda: openings("seis4r", ap.PRESETS["seis4r"]["nombre"]),
+           get_cartera=lambda: {"positions": [{"tags": {"preset": "seis4r"}, "opened": 30}]})
+    res = r.calcular(r.foto_vivo())
+    ids = [f["id"] for f in res["filas"]]
+    assert sorted(ids) == sorted([fid, "ruptura3", "seis"]) and res["n_total"] == 3   # ni «seis4r» ni otra de en vivo
+    em = res["en_marcha"]
+    assert em["id"] == fid and em["preset"] == "seis4r" and em["posicion"] == 1 and em["en_ranking"]
+    assert em["texto"] == "Puesto 1 de 2 en el ranking" and em["fila"]["en_marcha"] and em["fila"]["estado"] == "en_paper"
+    por = {f["id"]: f for f in res["filas"]}
+    f = por[fid]
+    assert f["posicion"] == 1 and f["origen"] == "salidas" and f["fragil"] and f["pct_dia"] == pytest.approx(0.1521, abs=1e-3)
+    assert (f["en_vivo"]["n"], f["en_vivo"]["R"], f["en_vivo"]["abiertas"], f["en_vivo"]["neto_usdc"]) == (1, 3.9, 1, 1.9)
+    r3 = por["ruptura3"]
+    assert not r3["en_marcha"] and r3["estado"] == "backtest" and r3["posicion"] == 2 and r3["en_vivo"]["n"] == 1
+    assert [x["id"] for x in res["filas"] if x["en_marcha"]] == [fid]
+    # sin el estado del motor, lo dice estrategia_activa.json (scripts/activar_estrategia.py --preset seis4r)
+    (tmp_path / "estrategia_activa.json").write_text(json.dumps({"preset": "seis4r", "nombre": "6 diarias 4R"}),
+                                                     encoding="utf-8")
+    em2 = rk(tmp_path).calcular({})["en_marcha"]
+    assert em2["id"] == fid and em2["fuente"] == "estrategia_activa.json" and em2["posicion"] == 1

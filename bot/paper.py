@@ -572,8 +572,9 @@ class PaperBroker:
                 + sum(self._upnl(p, prices.get(p["coin"])) for p in self.positions.values()))
 
     def _day_start_equity(self, now: int) -> float:
-        """Capital con que empezó el día de Madrid: la foto a precio de mercado de la primera ronda tras la medianoche.
-        Sin foto (el bot no estaba en marcha a medianoche) se usa lo realizado hasta entonces."""
+        """Capital con que empezó el día de Madrid: la foto a precio de mercado de la primera ronda tras la medianoche
+        (o, si el bot arrancó después con posiciones de antes, la rehecha con su último precio guardado: _roll_day).
+        Sin foto (sin posiciones que pasen la noche, o antes de la primera ronda) se usa lo realizado hasta entonces."""
         if self.day_base.get("date") == _day(now).isoformat():
             return float(self.day_base["equity"])
         cut = day_start_ms(now)
@@ -581,11 +582,26 @@ class PaperBroker:
 
     def _roll_day(self, now: int, prices: dict) -> None:
         """En la primera ronda tras la medianoche de Madrid fija el capital de partida del día, con las posiciones que
-        pasan la noche a precio de mercado: así su resultado de ayer no cuenta en la pérdida de hoy."""
+        pasan la noche a precio de mercado: así su resultado de ayer no cuenta en la pérdida de hoy. Si el bot no estaba
+        en marcha a medianoche (primera ronda tras arrancar, sin foto de hoy) y hay posiciones abiertas desde antes, la
+        foto se rehace con lo cerrado antes de la medianoche y el resultado de esas posiciones a su último precio
+        guardado (el de antes de parar: save_positions lo guarda cada 30 s), y se guarda para los reinicios de ese día.
+        Sin ella, lo que se movieron antes de la medianoche contaría como resultado de hoy (con posiciones de varios
+        días, como las de «6 diarias 4R», podría parar las entradas sin una pérdida de hoy o dejar pasar una)."""
         today = _day(now).isoformat()
-        if self.day_base.get("date") != today and self._live_day and self._live_day < today:
-            self.day_base = {"date": today, "equity": round(self.equity(prices), 4)}
-            self._set_state("day_start", self.day_base)
+        if self.day_base.get("date") != today:
+            cut = day_start_ms(now)
+            noche = [p for p in self.positions.values() if p["opened"] < cut]
+            if self._live_day and self._live_day < today:
+                self.day_base = {"date": today, "equity": round(self.equity(prices), 4)}
+                self._set_state("day_start", self.day_base)
+            elif self._live_day is None and noche:
+                eq = (self.start_equity + sum(t["pnl"] for t in self.closed if t["closed"] < cut)
+                      + sum(self._upnl(p) for p in noche))   # sin precio: el último guardado (p["last"])
+                self.day_base = {"date": today, "equity": round(eq, 4), "origen": "ultimo_precio_guardado"}
+                self._set_state("day_start", self.day_base)
+                log.info("Paper: arranque tras la medianoche con %d posiciones de antes: capital de partida del día "
+                         "%.2f con su último precio guardado", len(noche), eq)
         self._live_day = today
 
     def day_pnl(self, now: int, prices: dict | None = None) -> tuple[float, float]:
