@@ -118,6 +118,13 @@ def admision(tr: dict, punto: dict | None, por_senal: int | None = None, pausa=N
             continue
         fam = obtener(v["familia"])
         mot = []
+        if "noticias_3a" in fam.datos and not v.get("exploratoria"):
+            nt = m.noticias   # A6 con datos: sin el archivo compilado (o con poca cobertura) no se mide nada
+            cob = nt.cobertura(per["inicio"], per["fin"]) if nt is not None else 0.0
+            if cob < criterios.c("admision", "cobertura_min"):
+                mot.append(f"A6: las noticias de 3 años cubren el {cob * 100:.0f} % de los días del periodo (mínimo "
+                           f"{criterios.c('admision', 'cobertura_min') * 100:.0f} %): falta compilarlas "
+                           "(python -m bot.noticias_historia lab)")
         t0 = time.time()
         s = fam.senales(m, v["params"], per["inicio"], per["fin"])
         seg = time.time() - t0

@@ -9,9 +9,14 @@
   index_data, conocidos 15 min después del cierre: backtest.CLOSE_MARGIN_MS), calendario macro y aperturas reales
   (backtest_aperturas.build_openings con LAB_WINDOWS y sin las sesiones especiales).
 
+- Noticias de 3 años (clave «noticias_3a», bot/lab_vivo/noticias.py), si está compilado su archivo: historias en
+  racimo con el triaje de la IA local, por el minuto desde el que se pudieron usar. Sin el archivo, Mercado.noticias
+  es None y la firma de la época no cambia.
+
 Sin mirar al futuro: Mercado.recortado(T) es la misma vista sin nada posterior a T (velas que cierran después de T,
-barras sin cerrar, funding, miedo y codicia y cierres de bolsa publicados después). Deja el calendario de aperturas y
-el de datos macro (sus horas se saben de antemano). La prueba del recorte de cada familia se apoya en esto.
+barras sin cerrar, funding, miedo y codicia, cierres de bolsa publicados después y noticias que aún no se podían usar).
+Deja el calendario de aperturas y el de datos macro (sus horas se saben de antemano). La prueba del recorte de cada
+familia se apoya en esto.
 
 Caché: lab_vivo\\cache\\<época>-<firma>\\<MONEDA>\\*.npy (float64 / int64), que las tareas abren con mmap_mode="r": varios
 subprocesos comparten las páginas del sistema y no copian nada."""
@@ -28,6 +33,7 @@ import numpy as np
 
 from .. import config
 from . import ajustes
+from . import noticias as noticias_mod
 
 log = logging.getLogger("lab_vivo.datos")
 
@@ -343,6 +349,7 @@ class Fuente:
     firma: str = ""
     carpeta: Path | None = None
     meta: dict = field(default_factory=dict)
+    noticias: object = None           # noticias_mod.Noticias o None (sin el archivo compilado)
 
     def barras_de(self, moneda: str, tf: int) -> Barras:
         k = (moneda, int(tf))
@@ -389,10 +396,15 @@ def construir_fuente(desde_ms: int, hasta_ms: int, periodo: dict, monedas=None, 
     fund = {c: cargar_funding(c) for c in monedas}
     fng, bol, mac = cargar_fng(), cargar_bolsas(), cargar_macro()
     aps = cargar_aperturas(desde_ms, hasta_ms) if aperturas else []
+    nots = noticias_mod.cargar()
+    nots = nots.tramo(desde_ms, hasta_ms) if nots is not None else None
     meta = {"formato": FORMATO_CACHE, "desde": desde_ms, "hasta": hasta_ms, "periodo": periodo, "firma": firma,
             "monedas": list(monedas), "archivos": {c: [p.name for p in usados[c]] for c in monedas},
-            "creado": ajustes.ahora_ms(), "tf_cache": list(tf_cache)}
+            "creado": ajustes.ahora_ms(), "tf_cache": list(tf_cache),
+            "noticias": None if nots is None else {"firma": nots.meta.get("firma"), "n": len(nots)}}
     if carpeta is not None:
+        if nots is not None:
+            noticias_mod.guardar(nots, tmp / "noticias")
         np.save(tmp / "aux_fng_t.npy", fng[0])
         np.save(tmp / "aux_fng_v.npy", fng[1])
         np.save(tmp / "aux_macro_t.npy", mac[0])
@@ -408,7 +420,7 @@ def construir_fuente(desde_ms: int, hasta_ms: int, periodo: dict, monedas=None, 
             shutil.rmtree(carpeta, ignore_errors=True)
         os.replace(tmp, carpeta)
         return abrir_fuente(Path(carpeta))
-    return Fuente(monedas, periodo, velas, densos, barras, fund, fng, bol, mac, aps, firma, None, meta)
+    return Fuente(monedas, periodo, velas, densos, barras, fund, fng, bol, mac, aps, firma, None, meta, nots)
 
 
 def guardar_fuente(fu: Fuente, carpeta: Path, tf_cache=TF_CACHE) -> Fuente:
@@ -447,7 +459,10 @@ def guardar_fuente(fu: Fuente, carpeta: Path, tf_cache=TF_CACHE) -> Fuente:
     meta = {"formato": FORMATO_CACHE, "desde": int(min(int(fu.velas[c].t[0]) for c in fu.monedas)),
             "hasta": int(max(int(fu.velas[c].t[-1]) for c in fu.monedas)) + MIN, "periodo": fu.periodo,
             "firma": fu.firma or "sintetica", "monedas": list(fu.monedas), "archivos": {}, "creado": ajustes.ahora_ms(),
-            "tf_cache": list(tf_cache)}
+            "tf_cache": list(tf_cache),
+            "noticias": None if fu.noticias is None else {"firma": fu.noticias.meta.get("firma"), "n": len(fu.noticias)}}
+    if fu.noticias is not None:
+        noticias_mod.guardar(fu.noticias, tmp / "noticias")
     (tmp / "meta.json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
     if carpeta.exists():
         shutil.rmtree(carpeta, ignore_errors=True)
@@ -478,10 +493,11 @@ def abrir_fuente(carpeta: Path, mmap: bool = True) -> Fuente:
         fund[c] = (np.load(carpeta / f"aux_fund_{c}_t.npy"), np.load(carpeta / f"aux_fund_{c}_r.npy"))
     bol = {k: (np.array(v["t"], np.int64), list(v["dia"]), np.array(v["cierre"], float), np.array(v["ret"], float))
            for k, v in (aux.get("bolsas") or {}).items()}
+    nots = noticias_mod.cargar(carpeta / "noticias") if (carpeta / "noticias").exists() else None
     return Fuente(tuple(meta["monedas"]), meta["periodo"], velas, densos, barras, fund,
                   (np.load(carpeta / "aux_fng_t.npy"), np.load(carpeta / "aux_fng_v.npy")), bol,
                   (np.load(carpeta / "aux_macro_t.npy"), list(aux.get("macro_nombres") or [])),
-                  list(aux.get("aperturas") or []), meta.get("firma", ""), carpeta, meta)
+                  list(aux.get("aperturas") or []), meta.get("firma", ""), carpeta, meta, nots)
 
 
 class Mercado:
@@ -589,7 +605,16 @@ class Mercado:
     def aperturas(self) -> list[dict]:
         return self.f.aperturas
 
-    noticias = None   # fase 2 (noticias_vivas)
+    @property
+    def noticias(self):
+        """noticias_mod.Noticias con desde ≤ t < hasta (las que ya se podían usar), o None sin el archivo compilado.
+        Las noticias en vivo (noticias_vivas, fase 2) no van aquí."""
+        n = self.f.noticias
+        if n is None:
+            return None
+        if ("n",) not in self._cache:
+            self._cache[("n",)] = n.tramo(self.L, self.T) if (self.L is not None or self.T is not None) else n
+        return self._cache[("n",)]
 
 
 # ---------------------------------------------------------------- caché de la época
@@ -609,7 +634,9 @@ def firma_epoca(epoca: str) -> str:
     per = periodo_epoca(epoca)
     a, b = rango_epoca(per)
     meses = meses_entre(a, per["fin"])   # el mes de la cola (en curso) cambia cada hora: no entra en la firma
-    return firma_archivos([p for c in config.COINS for p in archivos_moneda(c, meses)])
+    fir = firma_archivos([p for c in config.COINS for p in archivos_moneda(c, meses)])
+    fn = noticias_mod.firma()   # con noticias compiladas, otra firma: la caché se rehace y se repite el canario
+    return fir if not fn else hashlib.sha1(f"{fir}|noticias:{fn}".encode()).hexdigest()[:12]
 
 
 def cache_existente(epoca: str) -> Path | None:
@@ -655,10 +682,10 @@ def mercado_vivo(desde_ms: int, hasta_ms: int | None = None, periodo: dict | Non
 # ---------------------------------------------------------------- datos sintéticos (pruebas y conformidad)
 
 def fuente_sintetica(dias: int = 90, monedas=None, semilla: int = 7, t0: int | None = None, huecos: bool = True,
-                     periodo: dict | None = None) -> Fuente:
+                     periodo: dict | None = None, noticias=None) -> Fuente:
     """Velas de 1 min sintéticas (paseo aleatorio con rachas de tendencia y volatilidad cambiante), funding cada 8 h,
     miedo y codicia, cierres de bolsa y aperturas reales del calendario. Sin red ni disco: para la conformidad de las
-    familias y las pruebas."""
+    familias y las pruebas. noticias: unas Noticias hechas a mano (o True: noticias_sinteticas de las mismas velas)."""
     monedas = tuple(monedas or config.COINS)
     rng = np.random.default_rng(semilla)
     t0 = t0 if t0 is not None else int(datetime(2025, 3, 3, tzinfo=timezone.utc).timestamp() * 1000)
@@ -725,4 +752,33 @@ def fuente_sintetica(dias: int = 90, monedas=None, semilla: int = 7, t0: int | N
     except Exception:   # sin calendario: sin aperturas
         aps = []
     per = periodo or {"epoca": "sintetica", "inicio": t0, "fin": t0 + n * MIN, "corte": t0 + int(n * 0.6) * MIN}
-    return Fuente(monedas, per, velas, densos, {}, fund, fng, bol, (mt, mn), aps, f"sint{semilla}", None, {})
+    if noticias is True:
+        noticias = noticias_sinteticas(monedas, t0, t0 + n * MIN, semilla)
+    return Fuente(monedas, per, velas, densos, {}, fund, fng, bol, (mt, mn), aps, f"sint{semilla}", None, {},
+                  noticias)
+
+
+TIPOS_SINT = ("macro", "regulatorio", "institucional", "exchange", "seguridad", "on-chain", "red", "mercado",
+              "geopolítica", "política", "empresas", "energía", "catástrofe", "otro")   # el orden de local_ai.TIPOS
+
+
+def noticias_sinteticas(monedas, desde_ms: int, hasta_ms: int, semilla: int = 7, por_dia: float = 6.0):
+    """Unas noticias al azar sobre las velas sintéticas (unas por_dia al día; la mitad nombran una moneda, el resto son
+    generales o macro), con racimos de 3 a 12 medios y un triaje inventado. Para la conformidad de las familias de
+    noticias: no tienen nada que ver con el precio."""
+    rng = np.random.default_rng(semilla + 101)
+    k = int(rng.poisson(por_dia * (hasta_ms - desde_ms) / DAY))
+    t0 = np.sort(rng.integers(desde_ms, hasta_ms, k)).astype(np.int64)
+    filas = []
+    for x in t0:
+        clase = int(rng.random() < 0.3)
+        mon = 0 if clase or rng.random() < 0.4 else 1 << int(rng.integers(0, len(monedas)))
+        n30 = int(rng.integers(3, 13))
+        filas.append({"t": (int(x) // MIN + 1 + int(rng.integers(2, 30))) * MIN, "t0": int(x), "n30": n30,
+                      "nmed": n30 + int(rng.integers(0, 6)), "clase": clase, "mon": mon,
+                      "dir": int(rng.integers(-100, 101)), "imp": int(rng.integers(0, 11)),
+                      "tipo": int(rng.integers(0, len(TIPOS_SINT))), "cred": int(rng.integers(20, 101)),
+                      "nov": int(rng.integers(0, 101)), "mag": int(rng.integers(0, 101)), "fuente": int(rng.random() < 0.5),
+                      "medio": int(rng.integers(0, 30))})
+    return noticias_mod.Noticias.de_filas(filas, TIPOS_SINT, [f"medio{i}.com" for i in range(30)],
+                                          {"firma": f"sint{semilla}"})

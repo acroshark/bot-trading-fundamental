@@ -45,13 +45,13 @@ def variantes_de(nombre: str, maximo: int = 3) -> list[dict]:
 
 
 @pytest.fixture(scope="module")
-def m180():
-    return datos.Mercado(fuente(dias=180, semilla=21))
+def m180():   # con noticias sintéticas, para que las familias de noticias también den señales (y se prueben)
+    return datos.Mercado(fuente(dias=180, semilla=21, noticias=True))
 
 
 @pytest.fixture(scope="module")
 def m90():
-    return datos.Mercado(fuente(dias=90, semilla=22))
+    return datos.Mercado(fuente(dias=90, semilla=22, noticias=True))
 
 
 def test_todas_las_familias_cargan():

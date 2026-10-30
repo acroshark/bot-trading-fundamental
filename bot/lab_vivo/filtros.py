@@ -9,7 +9,11 @@ tope de 3 cuando no está en su valor neutro. Todos son causales: miran solo lo 
 | dias | todos · mar-jue · sin_fin_de_semana | Día de Madrid de la decisión |
 | aperturas | todas_horas · solo_en_apertura · fuera_de_apertura | Si la decisión cae entre la apertura y +120 min de una ventana del laboratorio |
 | regimen_cripto | ninguno · no_en_contra · a_favor_estricto | Zona del crypto-regime-analyzer con las 4 monedas (como medir_selectiva.regimen) |
-| noticias_en_contra | no | Solo en vivo (exploratoria, fase 2) |"""
+| noticias_en_contra | no | Solo en vivo (exploratoria, fase 2) |
+| noticias_previas | todas · no_contra · a_favor · mayoria | Noticias de 3 años (noticias_3a): el signo de la suma de los sentidos de las historias de esa moneda (y, con noticias_generales «todas», de las que no nombran ninguna) que se podían usar en las noticias_horas antes de la decisión, con importancia ≥ noticias_imp_min. «no_contra»: no entra si van en contra; «a_favor»: solo si van a favor (como news_mode del motor); «mayoria»: solo si más de la mitad de todas las noticias de la ventana (también las neutrales) van a favor. |
+
+noticias_horas y noticias_generales no son filtros (no cuentan para el tope): ajustan noticias_previas. noticias_imp_min sí
+cuenta."""
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -45,8 +49,18 @@ PARAMS = {
                             neutro="ninguno", texto="régimen cripto (crypto-regime-analyzer)"),
     "noticias_en_contra": Param("str", "no", ("no",), filtro=True, neutro="no",
                                 texto="noticias en contra (solo en vivo, fase 2)"),
+    "noticias_previas": Param("str", "todas", ("todas", "no_contra", "a_favor", "mayoria"), filtro=True, neutro="todas",
+                              texto="noticias de las horas previas (no en contra / a favor / mayoría a favor)"),
+    "noticias_horas": Param("int", 8, (4, 8, 12), texto="horas de noticias antes de la decisión"),
+    "noticias_imp_min": Param("int", 0, (0, 5, 7), filtro=True, neutro=0,
+                              texto="importancia mínima de las noticias que cuentan"),
+    "noticias_generales": Param("str", "todas", ("todas", "no"),
+                                texto="las noticias que no nombran moneda cuentan para las cuatro"),
+    "noticias_medios": Param("str", "todos", ("todos", "sin_malos", "solo_buenos"), filtro=True, neutro="todos",
+                             texto="medios por su acierto hasta la fecha (fuera los malos / solo los buenos)"),
 }
 TODOS = tuple(PARAMS)
+NOTICIAS = ("noticias_previas", "noticias_horas", "noticias_imp_min", "noticias_generales", "noticias_medios")
 
 
 # ---------------------------------------------------------------- cada filtro: True = la señal pasa
@@ -113,6 +127,40 @@ def en_apertura(m, t: np.ndarray, minutos: int = 120) -> np.ndarray:
     res = np.zeros(len(t), bool)
     res[ok] = t[ok] < om[k[ok]] + minutos * MIN
     return res
+
+
+def suma_noticias(m, s: Senales, horas: int, imp_min: int = 0, generales: bool = True, medios: str = "todos",
+                  cuenta: str = "suma") -> np.ndarray:
+    """Suma de los sentidos (+1 alcista, −1 bajista) de las noticias de 3 años de la moneda de cada señal que se podían
+    usar en [t − horas, t), con importancia ≥ imp_min; con generales, también las que no nombran ninguna moneda (cripto
+    en general y macro). Sin noticias (m.noticias None), ceros."""
+    out = np.zeros(len(s), np.int64)
+    nt = getattr(m, "noticias", None)
+    if nt is None or not len(nt) or not len(s):
+        return out
+    sen = nt.sentido().astype(np.int64)
+    if cuenta == "todas":      # cuántas hay (también las neutrales)
+        sen = np.ones(len(nt), np.int64)
+    elif cuenta == "alcistas":
+        sen = (sen > 0).astype(np.int64)
+    elif cuenta == "bajistas":
+        sen = (sen < 0).astype(np.int64)
+    base = ((sen != 0) | (cuenta == "todas")) & (nt.imp >= imp_min)
+    if medios != "todos":
+        from .familias.base import mascara_medios
+        base &= mascara_medios(m, nt, tuple(m.monedas), generales, medios)
+    for k in range(len(m.monedas)):
+        sel = s.moneda == k
+        if not sel.any():
+            continue
+        mk = base & nt.de_moneda(k, generales)
+        tn = nt.t[mk]
+        acum = np.r_[0, np.cumsum(sen[mk])]
+        ts = s.t[sel]
+        a = np.searchsorted(tn, ts - horas * H, "left")
+        b = np.searchsorted(tn, ts, "left")   # solo las de antes de la decisión
+        out[sel] = acum[b] - acum[a]
+    return out
 
 
 def dia_semana_mad(t: np.ndarray) -> np.ndarray:
@@ -223,4 +271,14 @@ def aplicar(m, s: Senales, p: dict, admitidos=TODOS) -> Senales:
         else:
             ok = ((d > 0) & (z == "RISK_ON")) | ((d < 0) & (z == "RISK_OFF"))
         mask &= ok
+    if "noticias_previas" in admitidos and p.get("noticias_previas", "todas") != "todas":
+        args = (int(p.get("noticias_horas", 8)), int(p.get("noticias_imp_min", 0) or 0),
+                p.get("noticias_generales", "todas") == "todas", p.get("noticias_medios", "todos"))
+        if p["noticias_previas"] == "mayoria":   # más de la mitad de TODAS las noticias de la ventana, a favor
+            tot = suma_noticias(m, s, *args, cuenta="todas")
+            fav = np.where(d > 0, suma_noticias(m, s, *args, cuenta="alcistas"), suma_noticias(m, s, *args, cuenta="bajistas"))
+            mask &= 2 * fav > tot
+        else:
+            sg = np.sign(suma_noticias(m, s, *args))
+            mask &= (sg != -d) if p["noticias_previas"] == "no_contra" else (sg == d)
     return s.filtrar(mask)

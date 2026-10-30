@@ -426,3 +426,201 @@ def stop_desde(precio_ref: np.ndarray, nivel: np.ndarray, d: np.ndarray, extra_p
 
 def en_rango_tiempo(t: np.ndarray, desde_ms: int, hasta_ms: int, margen_ms: int = 0) -> np.ndarray:
     return (t >= desde_ms - margen_ms) & (t < hasta_ms)
+
+
+# ---------------------------------------------------------------- noticias (clave «noticias_3a», docs/07, 4.1)
+# Las familias de noticias ven m.noticias (bot/lab_vivo/noticias.py): historias en racimo con el triaje de la IA local,
+# con t = desde cuándo se pudo usar cada una (m.recortado las corta como a las velas). Si algo de aquí cambia, sube la
+# versión de las familias que lo usan (noticia_racimo y noticia_apertura).
+
+SENTIDO_MIN = 15   # |repercusion.direccion| que ya es alcista o bajista (local_ai.sentiment_of y reflejo.DIR_MIN)
+FIABLE = {"n_min": 30, "dias_min": 3, "n_dia": 5, "acierto_min": 0.60, "wilson90_min": 0.50, "dia_min": 0.50,
+          "z": 1.645, "horizonte_min": 240, "ventana_dias": 30, "margen_ms": 240 * MIN + 2 * H}   # bot/fiables.py
+REFLEJO = {"umbral_pct": 0.5, "k_sigma": 2.0, "sigma_h": 24, "sigma_min_n": 600, "ventana_min": 60}   # bot/reflejo.py
+
+
+def wilson_bajo(k, n, z: float = 1.645):
+    """Cota inferior del intervalo de Wilson (fiables.wilson_bajo); con n = 0, 0."""
+    k, n = np.asarray(k, float), np.asarray(n, float)
+    m = np.maximum(n, 1.0)
+    p = k / m
+    den = 1 + z * z / m
+    c = p + z * z / (2 * m)
+    r = z * np.sqrt(np.maximum(p * (1 - p) / m + z * z / (4 * m * m), 0.0))
+    return np.where(n > 0, (c - r) / den, 0.0)
+
+
+def rango_previo(m, moneda: str, t_ms: int, minutos: int) -> tuple[float, float, float]:
+    """(máximo, mínimo, fracción de velas válidas) de las velas de 1 min que abren en [t − minutos, t)."""
+    d = m.denso(moneda)
+    if d is None or d.n == 0:
+        return np.nan, np.nan, 0.0
+    b = int((t_ms - d.t0) // MIN)
+    a = b - int(minutos)
+    if a < 0 or b > d.n or b <= a:
+        return np.nan, np.nan, 0.0
+    v = np.asarray(d.valid[a:b], bool)
+    if not v.any():
+        return np.nan, np.nan, 0.0
+    return float(np.asarray(d.h[a:b])[v].max()), float(np.asarray(d.l[a:b])[v].min()), float(v.mean())
+
+
+def sigma60_pct(m, moneda: str, t_ms: int, horas: int = REFLEJO["sigma_h"]) -> float | None:
+    """σ (en %) del movimiento de 60 min con los rendimientos de 1 min de las `horas` antes de t, solo minutos seguidos
+    con vela (reflejo.sigma60 de una moneda); None con menos de 600."""
+    d = m.denso(moneda)
+    if d is None or d.n == 0:
+        return None
+    b = int((t_ms - d.t0) // MIN)
+    a = b - horas * 60
+    if a < 0 or b > d.n:
+        return None
+    c = np.asarray(d.c[a:b], float)
+    v = np.asarray(d.valid[a:b], bool)
+    ok = v[1:] & v[:-1] & (c[1:] > 0) & (c[:-1] > 0)
+    if ok.sum() < REFLEJO["sigma_min_n"]:
+        return None
+    r = np.diff(np.log(np.where(c > 0, c, 1.0)))[ok]
+    return float(np.std(r) * np.sqrt(60) * 100)
+
+
+def unidades_noticias(n, monedas: tuple, generales: bool) -> tuple[np.ndarray, np.ndarray]:
+    """(fila de la noticia, índice de la moneda) de cada historia×moneda (la unidad de bot/fiables.py): las monedas
+    que nombra el triaje y, con generales, las cuatro para las que no nombran ninguna (cripto en general y macro)."""
+    filas, mons = [], []
+    for k in range(len(monedas)):
+        sel = np.flatnonzero(n.de_moneda(k, generales))
+        filas.append(sel)
+        mons.append(np.full(len(sel), k, np.int64))
+    if not filas:
+        return np.zeros(0, np.int64), np.zeros(0, np.int64)
+    f, c = np.concatenate(filas), np.concatenate(mons)
+    o = np.lexsort((c, f))
+    return f[o], c[o]
+
+
+def fiables_por_dia(dia, grupo, acierto, G: int, d0: int, d1: int, c: dict = FIABLE) -> np.ndarray:
+    """ok[L − d0, g]: ¿el grupo g es «fiable» con los criterios fijados de bot/fiables.py, con los casos de los días UTC
+    [L − ventana + 1, L]? (n ≥ 30; ≥ 3 días con ≥ 5; acierto ≥ 60 %; Wilson al 90 % ≥ 50 %; ≥ 50 % en cada semana
+    UTC con ≥ 5.) dia: día UTC de cada caso (ms // DAY); grupo: 0..G−1 (−1, sin grupo); acierto: 0/1."""
+    out = np.zeros((max(0, d1 - d0 + 1), max(0, G)), bool)
+    if not len(dia) or G <= 0:
+        return out
+    dia = np.asarray(dia, np.int64)
+    o = np.argsort(dia, kind="stable")
+    dia, grupo, acierto = dia[o], np.asarray(grupo, np.int64)[o], np.asarray(acierto, float)[o]
+    W = int(c["ventana_dias"])
+    for L in range(d0, d1 + 1):
+        i = int(np.searchsorted(dia, L - W + 1, "left"))
+        j = int(np.searchsorted(dia, L, "right"))
+        if j - i < c["n_min"]:
+            continue
+        g, h, dd = grupo[i:j], acierto[i:j], dia[i:j]
+        mk = g >= 0
+        g, h, dd = g[mk], h[mk], dd[mk]
+        if not len(g):
+            continue
+        n = np.bincount(g, minlength=G).astype(float)
+        k = np.bincount(g, weights=h, minlength=G)
+        nd = np.bincount(g * W + (dd - (L - W + 1)), minlength=G * W).reshape(G, W)
+        ndias = (nd >= c["n_dia"]).sum(axis=1)
+        su, si = np.unique((dd + 3) // 7, return_inverse=True)   # semanas UTC de lunes a domingo
+        P = len(su)
+        npd = np.bincount(g * P + si, minlength=G * P).reshape(G, P).astype(float)
+        kpd = np.bincount(g * P + si, weights=h, minlength=G * P).reshape(G, P)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            frac = np.where(npd >= c["n_dia"], kpd / np.maximum(npd, 1.0), np.inf)
+        constante = frac.min(axis=1) >= c["dia_min"] - 1e-12
+        p = k / np.maximum(n, 1.0)
+        out[L - d0] = ((n >= c["n_min"]) & (ndias >= c["dias_min"]) & (p >= c["acierto_min"] - 1e-12)
+                       & (wilson_bajo(k, n, c["z"]) >= c["wilson90_min"] - 1e-12) & constante)
+    return out
+
+
+def grupos_fiables(m, n, monedas: tuple, generales: bool, d0: int, d1: int) -> tuple[np.ndarray, int]:
+    """Tabla de fiables_por_dia de los grupos tipo×sentido (los de bot/fiables.py) con lo que se sabía cada día:
+    acierto = sentido × (rendimiento a 4 h desde t − media de ese rendimiento de las historias de esa moneda y día UTC)
+    > 0. Devuelve (tabla, nº de tipos); el grupo de una noticia es tipo × 2 + (sentido > 0)."""
+    T = len(n.tipos) or int(n.tipo.max(initial=0)) + 1
+    f, k = unidades_noticias(n, monedas, generales)
+    sen = n.sentido()[f]
+    keep = sen != 0
+    f, k, sen = f[keep], k[keep], sen[keep]
+    if not len(f):
+        return np.zeros((max(0, d1 - d0 + 1), 2 * T), bool), T
+    t = n.t[f]
+    r = np.full(len(f), np.nan)
+    for ci, c in enumerate(monedas):
+        sel = k == ci
+        if sel.any():
+            p0, p1 = cierre_en(m, c, t[sel]), cierre_en(m, c, t[sel] + FIABLE["horizonte_min"] * MIN)
+            with np.errstate(divide="ignore", invalid="ignore"):
+                r[sel] = p1 / p0 - 1
+    ok = np.isfinite(r)
+    f, k, sen, t, r = f[ok], k[ok], sen[ok], t[ok], r[ok]
+    dia = t // DAY
+    clave = k * 1_000_000 + dia
+    u, inv = np.unique(clave, return_inverse=True)
+    deriva = (np.bincount(inv, weights=r) / np.bincount(inv))[inv]
+    hit = (sen * (r - deriva) > 0).astype(float)
+    g = n.tipo[f].astype(np.int64) * 2 + (sen > 0)
+    return fiables_por_dia(dia, g, hit, 2 * T, d0, d1), T
+
+
+def ultimo_dia_completo(t_ms) -> np.ndarray:
+    """Último día UTC cuyos casos ya se habían medido en t: han pasado sus 4 h de medida y 2 h de margen (fiables)."""
+    return (np.asarray(t_ms, np.int64) - FIABLE["margen_ms"]) // DAY - 1
+
+
+# Medios por su acierto hasta cada fecha (30-10-2026, lo pidió el usuario: «si hay medios que aciertan menos de un 50 %
+# de las veces, FUERA»). Solo con sus historias de días UTC completos anteriores (como fiables); acierto ajustado a 4 h.
+MEDIOS = {"casos_min": 20, "dias_min": 10, "malo_max": 0.50, "bueno_min": 0.60, "bueno_wilson_min": 0.50, "z": 1.645}
+MEDIOS_MODOS = ("todos", "sin_malos", "solo_buenos")
+
+
+def mascara_medios(m, n, monedas: tuple, generales: bool, modo: str) -> np.ndarray:
+    """¿Cuenta cada noticia según el acierto de su medio (el de su primera pieza) hasta el último día completo antes de
+    poder usarla? «sin_malos»: fuera si el medio tiene muestra (≥ 20 historias en ≥ 10 días) y la cota ALTA de Wilson
+    al 90 % < 50 %; sin muestra, cuenta. «solo_buenos»: solo si tiene muestra, acierto ≥ 60 % y cota baja ≥ 50 %.
+    El acierto de una historia es la media de sus aciertos ajustados a 4 h por moneda (la unidad de fiables)."""
+    if modo == "todos" or not len(n):
+        return np.ones(len(n), bool)
+    f, k = unidades_noticias(n, monedas, generales)
+    sen = n.sentido()[f]
+    ok = sen != 0
+    f, k, sen = f[ok], k[ok], sen[ok]
+    t = n.t[f]
+    r = np.full(len(f), np.nan)
+    for ci, c in enumerate(monedas):
+        sel = k == ci
+        if sel.any():
+            with np.errstate(divide="ignore", invalid="ignore"):
+                r[sel] = cierre_en(m, c, t[sel] + FIABLE["horizonte_min"] * MIN) / cierre_en(m, c, t[sel]) - 1
+    ok = np.isfinite(r)
+    f, k, sen, t, r = f[ok], k[ok], sen[ok], t[ok], r[ok]
+    if len(f):
+        _, inv = np.unique(k * 1_000_000 + t // DAY, return_inverse=True)
+        der = (np.bincount(inv, weights=r) / np.bincount(inv))[inv]
+        hit = (sen * (r - der) > 0).astype(float)
+        uf, invf = np.unique(f, return_inverse=True)            # una historia, un caso
+        h_hist = np.bincount(invf, weights=hit) / np.bincount(invf)
+        med, dia = n.medio[uf].astype(np.int64), n.t[uf] // DAY
+    else:
+        med = dia = h_hist = np.zeros(0)
+    # por medio y día, sumas acumuladas: lo de cada noticia con los días ≤ su último día completo
+    o = np.lexsort((dia, med))
+    clave = med[o] * 1_000_000 + dia[o]
+    ck = np.r_[0.0, np.cumsum(h_hist[o])]
+    nuevo = np.r_[True, clave[1:] != clave[:-1]] if len(clave) else np.zeros(0, bool)
+    cd = np.r_[0, np.cumsum(nuevo)]
+    mi = n.medio.astype(np.int64)
+    a = np.searchsorted(clave, mi * 1_000_000, "left")
+    j = np.searchsorted(clave, mi * 1_000_000 + ultimo_dia_completo(n.t), "right")
+    nn = (j - a).astype(float)
+    kk = ck[j] - ck[a]
+    muestra = (nn >= MEDIOS["casos_min"]) & (cd[j] - cd[a] >= MEDIOS["dias_min"])
+    if modo == "sin_malos":
+        return ~(muestra & (1 - wilson_bajo(nn - kk, nn, MEDIOS["z"]) < MEDIOS["malo_max"]))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return muestra & (kk / np.maximum(nn, 1) >= MEDIOS["bueno_min"]) &             (wilson_bajo(kk, nn, MEDIOS["z"]) >= MEDIOS["bueno_wilson_min"])
+

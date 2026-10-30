@@ -14,7 +14,7 @@ from . import criterios, salidas
 
 ID_RE = re.compile(r"^h-\d{8}-\d{4}-[a-z0-9_-]{3,60}$")
 VID_RE = re.compile(r"^V[1-6]$")
-AUTORES = ("generador-claude", "usuario", "coordinador", "implementador")
+AUTORES = ("generador-claude", "usuario", "coordinador", "implementador", "sesion-noticias")
 TIPOS_FUENTE = ("articulo", "libro", "estrategia_publica", "resultado_propio")
 DATOS = {   # docs/07, 4.1: clave → (tiene historia de 3 años, texto)
     "velas_1m": (True, "velas de 1 min de BTC, ETH, SOL y XRP (Binance al contado en USDT)"),
@@ -25,6 +25,8 @@ DATOS = {   # docs/07, 4.1: clave → (tiene historia de 3 años, texto)
     "macro": (True, "calendario macro (IPC, empleo y FOMC)"),
     "flujo_tomador": (True, "compra del tomador de las velas de 1 min (columna 9)"),
     "noticias_historia": (False, "91 días de titulares (dentro del fuera de muestra: solo exploratoria)"),
+    "noticias_3a": (True, "historias de 3 años (GDELT y 24 medios de cripto) en racimo, con el triaje de la IA local "
+                          "del bot, desde que se pudieron usar (bot/noticias_historia.py)"),
     "noticias_vivas": (False, "noticias del bot en vivo (solo prueba en avance)"),
 }
 REGLAS_USUARIO = {"riesgo_pct": 0.5, "max_entradas_dia": 6, "max_riesgo_dia_pct": 3.0, "largos": "spot",
