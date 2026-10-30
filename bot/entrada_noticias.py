@@ -13,9 +13,10 @@ nombra el triaje o, si es una macro que la cripto confirmó según el reflejo, l
    riesgo → aprobación → paper (submit del PaperBroker), con horquilla pura desde el precio real de OKX EU: stop 1,5 %,
    objetivo 3R (+4,5 %), como mucho 24 h, largos al contado y cortos en perpetuo, riesgo config.RISK_PER_TRADE_PCT,
    origen «noticia_fiable» y la story de la noticia (en el ticket y en sus etiquetas).
-3. Respeta: una posición por moneda (ni otra abierta ni en curso, de este módulo, del motor o de la fase 2), el tope de 6
-   entradas por día de Madrid y el 3 % de riesgo del día COMPARTIDOS con el motor (apertura.paper_day_entries: cuentan
-   todas las entradas del paper del día), MAX_POSITIONS, el paper detenido y las reglas del usuario (stop ≥ 1,5 %,
+3. Respeta: una posición por moneda (ni otra abierta ni en curso, de este módulo, del motor o de la fase 2), los topes
+   del día de Madrid COMPARTIDOS con el motor (apertura.paper_day_entries: cuentan todas las entradas del paper del día):
+   los del preset que tenga en marcha el motor («6 diarias»: 6 entradas y 3 % de riesgo; E2: 4 y 2 %) y nunca más de 6
+   y 3 % (topes_dia), MAX_POSITIONS, el paper detenido y las reglas del usuario (stop ≥ 1,5 %,
    R:R ≥ 2, objetivo ≥ 3 % neto de costes y funding esperado, sin break-even ni stop dinámico), que se comprueban aquí
    aunque BOT_USER_RULES=0.
 Sin grupos fiables que pasen la puerta para operar (fiables.PUERTA: azar que conserva la hora, noticias distintas, acierto
@@ -38,6 +39,7 @@ from datetime import datetime
 import numpy as np
 
 from . import apertura, aprendizaje, config, fiables, paper, reflejo
+from .market import fresh_flow
 from .models import now_ms
 
 log = logging.getLogger("entrada_noticias")
@@ -47,9 +49,9 @@ ENABLED = os.environ.get("BOT_ENTRADA_NOTICIAS", "1") != "0"
 TICK_S = 20
 VENTANA_MIN = 60                 # minutos tras el triaje para que el precio confirme
 LATE_MS = 3 * MIN                # una confirmación vista más tarde de esto ya no se persigue
-MAX_DIA = 6                      # entradas por día de Madrid, compartidas con el motor (todas las del paper)
-RIESGO_DIA_PCT = 3.0             # riesgo comprometido en stop por día de Madrid (0,5 % × 6), compartido
-MIN_NET_PCT = 3.0                # regla del usuario: el objetivo deja ≥ 3 % neto de costes
+MAX_DIA = paper.DAY_MAX_ENTRIES  # entradas por día de Madrid como mucho, compartidas con el motor (todas las del paper)
+RIESGO_DIA_PCT = paper.DAY_MAX_RISK_PCT   # riesgo comprometido en stop por día de Madrid como mucho (0,5 % × 6)
+MIN_NET_PCT = config.RULE_MIN_NET_PCT   # regla del usuario: el objetivo deja ≥ 3 % neto de costes
 PARAMS = {"sl_pct": 1.5, "target_r": 3.0, "max_hold_h": 24, "min_net_pct": MIN_NET_PCT, "avg_hold_h": 13,
           "long_instrument": "spot", "short_instrument": "perp"}
 SRC = "Entrada por noticia fiable"
@@ -142,13 +144,21 @@ def reglas_ko(plan: dict) -> str | None:
     return None
 
 
-def limites_dia(entradas: dict[str, float], nuevo: float) -> str | None:
-    """Tope de 6 entradas y 3 % de riesgo por día de Madrid (compartidos con el motor). Motivo o None."""
-    if len(entradas) >= MAX_DIA:
-        return f"tope de {MAX_DIA} entradas del día alcanzado (compartido con el motor de aperturas, día de Madrid)"
+def topes_dia(motor: dict | None) -> tuple[int, float]:
+    """(entradas, riesgo en %) del día compartidos con el motor: los de su preset en marcha (max_day_entries y
+    max_day_risk_pct; E2 da 4 y 2 %, «6 diarias» 6 y 3 %) y nunca más de MAX_DIA y RIESGO_DIA_PCT (paper.day_caps: el
+    paper los comprueba también para todos los orígenes). Sin dato, los de siempre."""
+    return paper.day_caps(motor)
+
+
+def limites_dia(entradas: dict[str, float], nuevo: float, max_dia: int = MAX_DIA,
+                riesgo_dia: float = RIESGO_DIA_PCT) -> str | None:
+    """Tope de entradas y de riesgo por día de Madrid (compartidos con el motor; por defecto 6 y 3 %). Motivo o None."""
+    if len(entradas) >= max_dia:
+        return f"tope de {max_dia} entradas del día alcanzado (compartido con el motor de aperturas, día de Madrid)"
     usado = sum(entradas.values())
-    if usado + nuevo > RIESGO_DIA_PCT + 1e-9:
-        return (f"riesgo del día agotado: {_n(usado)} % comprometido + {_n(nuevo)} % > {_n(RIESGO_DIA_PCT)} % "
+    if usado + nuevo > riesgo_dia + 1e-9:
+        return (f"riesgo del día agotado: {_n(usado)} % comprometido + {_n(nuevo)} % > {_n(riesgo_dia)} % "
                 "(compartido con el motor)")
     return None
 
@@ -180,11 +190,13 @@ def umbral_de(arr, coin: str, ta: int) -> tuple[float, bool]:
 class EntradaNoticias:
     """Recibe captadas, triadas y reflejos por el gancho del bus (observe) y, cada TICK_S, comprueba las candidatas con
     las velas de bars(moneda, desde_ms, hasta_ms) y entra en el paper con submit(ticket, story, titular, estrategia,
-    ventana) cuando el precio confirma. get_portfolio() da la cartera del paper (contrato 2.5)."""
+    ventana) cuando el precio confirma. get_portfolio() da la cartera del paper (contrato 2.5) y get_motor() los
+    parámetros del motor de aperturas en marcha (sus topes del día)."""
 
-    def __init__(self, bus, store, submit, get_portfolio, bars=None, clock=now_ms, enabled: bool | None = None):
+    def __init__(self, bus, store, submit, get_portfolio, bars=None, clock=now_ms, enabled: bool | None = None,
+                 get_motor=None):
         self.bus, self.store, self.submit, self.get_portfolio = bus, store, submit, get_portfolio
-        self.bars, self.clock = bars, clock
+        self.bars, self.clock, self.get_motor = bars, clock, get_motor
         self.enabled = ENABLED if enabled is None else bool(enabled)
         self.captured: OrderedDict[str, dict] = OrderedDict()   # historia → medio, feed, clase, estado de la fuente
         self.queue: list[tuple] = []                            # triadas por mirar (story, título, triaje, ts)
@@ -194,7 +206,8 @@ class EntradaNoticias:
         self.cands: dict[tuple, dict] = {}                        # (story, moneda) → candidata esperando al precio
         self.done: OrderedDict[tuple, str] = OrderedDict()        # (story, moneda) → estado final
         self.sent: set[tuple] = set()                             # (story, moneda) con «esperando» ya publicado
-        self.own: dict = {"date": None, "entries": {}}            # entradas enviadas hoy (el paper aún puede no verlas)
+        self.own: dict = {"date": None, "entries": {}}            # entradas enviadas hoy (el paper aún puede no verlas):
+                                                                  # story → (riesgo %, hora del envío)
         self.counts: dict[str, int] = {e: 0 for e in ESTADOS}
         self._restored = False
         self._err_at: dict[str, float] = {}
@@ -424,7 +437,7 @@ class EntradaNoticias:
 
     def _funding(self, coin: str) -> float | None:
         m = (getattr(self.bus, "state", None) or {}).get("market") or {}
-        return paper.funding_8h((m.get("flow") or {}).get(coin))
+        return paper.funding_8h(fresh_flow(m, self.clock()).get(coin))
 
     async def _entrar(self, c: dict, r: dict, extra: dict, now: int) -> int:
         story, coin, d = c["story"], c["coin"], c["dir"]
@@ -454,8 +467,17 @@ class EntradaNoticias:
             return veto(f"ya hay {n_open} operaciones abiertas o en curso (máximo {config.MAX_POSITIONS})",
                         "max_posiciones")
         risk = float(config.RISK_PER_TRADE_PCT)
-        entradas = {**self._own_today(now), **apertura.paper_day_entries(pf, now)}
-        lim = limites_dia(entradas, risk)
+        pf_ent = apertura.paper_day_entries(pf, now)
+        own = self._own_today(now)
+        for s_, (_r, at_) in list(own.items()):   # enviada y, pasado el plazo, sin rastro en el paper: no cuenta
+            if s_ not in pf_ent and now - at_ > apertura.SUBMIT_GRACE_MS:
+                del own[s_]
+        entradas = {**{s_: r_ for s_, (r_, _at) in own.items()}, **pf_ent}
+        try:
+            motor = self.get_motor() if self.get_motor is not None else None
+        except Exception:
+            motor = None
+        lim = limites_dia(entradas, risk, *topes_dia(motor))
         if lim:
             return veto(lim, "tope_dia" if len(entradas) >= MAX_DIA else "riesgo_dia")
         entry = self._live(coin, now)
@@ -504,7 +526,7 @@ class EntradaNoticias:
             ok = False
         if not ok:
             return veto("vetada por el control de riesgo del paper")
-        self._own_today(now)[story_p] = risk
+        self._own_today(now)[story_p] = (risk, now)   # cuenta ya, aunque el paper aún no la enseñe
         self._event(story, coin, d, "confirmada",
                     f"{why_t} · {verb.lower()} {apertura.INST_TEXT[inst]} a {apertura._px(entry)}, stop "
                     f"{apertura._px(plan['stop_px'])} y objetivo {apertura._px(plan['target_px'])} (+"

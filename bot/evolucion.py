@@ -129,7 +129,7 @@ TIPOS = {"fuente_añadida": "Medio añadido", "fuente_silenciada": "Medio silenc
          "peso_cambiado": "Peso cambiado", "estrategia_promovida": "Estrategia promovida",
          "estrategia_degradada": "Estrategia degradada", "parametro_cambiado": "Parámetro cambiado",
          "informe_semanal": "Informe semanal", "veredicto_medio": "Veredicto de un medio",
-         "propuesta_descartada": "Propuesta descartada", "filtro_cambiado": "Filtro de noticias cambiado",
+         "propuesta_descartada": "Propuesta descartada", "filtro_cambiado": "Cambio del código en el paper",
          "estrategia_cambiada": "Estrategia cambiada"}   # por decisión del usuario (scripts/activar_estrategia.py)
 PROPIOS = ("estrategia_promovida", "estrategia_degradada", "parametro_cambiado",
            "estrategia_cambiada")   # los revierte este módulo
@@ -184,6 +184,26 @@ CAMBIOS_CODIGO.append({
                   "pasan_la_puerta": 0, "hacia_delante_28_oct_acierto_pct": 41.6,
                   "nota": ("Los grupos que pasan los criterios no se distinguen del azar y el 28 fallaron hacia "
                            "delante: la puerta impide operar con ellos.")}})
+CAMBIOS_CODIGO.append({
+    "id": "codigo-auditoria-2026-10-28", "tipo": "filtro_cambiado",
+    "sujeto": "Cartera paper: posiciones que pasan un apagado, objetivo ≥ 3 % neto y topes del día para todos",
+    "antes": {"huecos": ("una posición abierta mientras el bot estaba parado se gestionaba con el primer precio al volver: "
+                         "un stop o un objetivo tocados en el hueco se cerraban tarde y a otro precio"),
+              "regla_neto": "el paper exigía stop ≥ 1,5 % y objetivo ≥ 2R, pero no el 3 % neto de costes",
+              "fase_2": "sus tickets no contaban en los topes del día y podían dejar 2,76 % neto (1,5 % y 2R)"},
+    "despues": {"huecos": ("se reconstruyen con las velas de 1 min de Binance a la escala de OKX EU: cierra al nivel y a "
+                           "la hora en que tocó el stop, el objetivo o el tope de tiempo, con el funding de por medio; "
+                           "sin velas, sigue marcada y se reintenta"),
+                "regla_neto": "con las reglas del usuario, toda entrada debe dejar ≥ 3 % neto de costes",
+                "fase_2": ("cuenta en los topes del día del preset del motor y sube el objetivo lo justo para dejar el "
+                           "3 % neto")},
+    "motivo": ("Arreglos de la auditoría del 28-10-2026 (hallazgos n.º 23, 24 y 47). Los presets («6 diarias»: 1,5 % "
+               "y 3R; E2: 3 % y 3R) ya dejaban más del 3 % neto y la fase 2 está apagada sin clave, así que en la "
+               "práctica cambia cómo se cierran las posiciones que pasan un apagado: más fiel a lo que habría pasado. "
+               "La cartera de prueba de 100 € mezcla los dos regímenes desde este reinicio; para medirla limpia, "
+               "empezar otra con scripts/nueva_cartera_paper.py."),
+    "evidencia": {"cambio_codigo": "auditoria-2026-10-28", "hallazgos": [23, 24, 47],
+                  "neto_seis_pct": 4.26, "neto_e2_pct": 8.76}})
 # Operaciones paper que no son del motor de aperturas aunque no lleven firma: no cuentan para el campeón
 ORIGENES_AJENOS = ("noticia_fiable",)
 # Acciones de fuentes_vivas → tipos del historial («activar» = una fuente en prueba pasa a activa: sube su peso)
@@ -2057,7 +2077,15 @@ class Evolucion:
     async def _auto(self, ahora: int) -> None:
         """Modo automático: aplica la promoción (con ENFRIAR_D días desde el último cambio o reversión) y la pausa (si
         sigue propuesta PAUSA_ESPERA_D días después: en la evaluación semanal siguiente). Nunca lo que el usuario
-        descartó o revirtió."""
+        descartó o revirtió. Tampoco si la estrategia activa la eligió el usuario (fuente «usuario»,
+        scripts/activar_estrategia.py): se mide tal cual y las propuestas quedan para que las aplique él."""
+        try:
+            activa = await asyncio.to_thread(self.activa)
+        except Exception:
+            activa = None
+        if isinstance(activa, dict) and activa.get("fuente") == "usuario":
+            log.info("Evolución (automático): la estrategia activa la eligió el usuario; no se cambia sola")
+            return
         ultimo = self._estado("ultimo_cambio")
         for tipo in ("estrategia_promovida", "estrategia_degradada"):
             for p in self._propuestas("pendiente", 1000):

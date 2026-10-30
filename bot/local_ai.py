@@ -18,12 +18,13 @@ import aiohttp
 
 from . import config
 from .bus import Bus
-from .market import bias_of
+from .market import bias_of, fresh_flow
 from .models import now_ms
 from .regions import MARKETS, REGIONS
 from .topics import TOPIC_NAMES, TOPICS
 
 log = logging.getLogger("local_ai")
+NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)   # sin ventana en Windows; 0 en Linux (pruebas en la nube)
 MAD = ZoneInfo("Europe/Madrid")
 # Ventanas de apertura (las mismas que la web): nombre, zona, hora local, días.
 WINDOWS = [("Apertura Tokio", "Asia/Tokyo", 9, 0, "wk"), ("Apertura Londres", "Europe/London", 8, 0, "wk"),
@@ -84,7 +85,7 @@ def _obj(props: dict) -> dict:
 
 # El orden importa: el modelo escribe primero la traducción y así entiende mejor el titular antes de puntuar.
 SCHEMA = _obj({
-    "resumen": {"type": "string", "maxLength": 200},
+    "resumen": {"type": "string", "maxLength": 160},   # lo que pide el prompt: menos tokens por triaje (n.º 1 y 42)
     "tipo": {"type": "string", "enum": TIPOS},
     "temas": {"type": "array", "items": {"type": "string", "enum": TEMAS}, "maxItems": MAX_TEMAS},
     "credibilidad": _NOTA,
@@ -99,7 +100,7 @@ SCHEMA = _obj({
         "bolsas": {"type": "array", "items": {"type": "string", "enum": BOLSAS}, "maxItems": len(BOLSAS)},
     }),
     "novedad": _NOTA,
-    "motivo": {"type": "string", "maxLength": 160},
+    "motivo": {"type": "string", "maxLength": 120},
     "importancia": {"type": "integer", "minimum": 0, "maximum": 10},
 })
 SYSTEM = (
@@ -266,11 +267,26 @@ def normalize_triage(raw: dict, title: str, coins: list[str] | None) -> dict:
 # Cola del triaje: con unos 7 s por titular (de 4 a 9 s; los globales con 14 activos, 7-7,5 s) salen unos 8 por
 # minuto, así que 120 en espera son unos 15 min de retraso como mucho.
 QUEUE_MAX = 120
+TRIAGE_MAX_TOKENS = 500   # antes 700 (n.º 1 y 42)
 TRIADAS_MAX = 5000   # historias ya triadas que se recuerdan (la mesa reenvía una si sube de estado: no se repite)
 RETRY_MIN_S, RETRY_MAX_S = 2, 60   # espera entre intentos de encender la IA local cuando no se puede
 SHARED_WAIT_S = 60   # con el servidor de la fábrica, espera máxima a que quede libre (la fábrica tiene prioridad)
 START_MAX_S = 180    # espera máxima a que llama-server cargue el modelo
 GPU_NOTE = "La GPU la está usando la fábrica de contenidos; se reintenta con la próxima noticia."
+
+
+def rotate_log(path, max_mb: float) -> bool:
+    """Si el registro pasa de max_mb, lo renombra a .1 (pisando el anterior): llama-server.log se abría en «ab» en cada
+    arranque y crecía sin límite, unos 16,6 MB al día (hallazgo n.º 50). Nunca lanza."""
+    try:
+        if path.stat().st_size <= max_mb * 1_000_000:
+            return False
+        old = path.with_name(path.name + ".1")
+        old.unlink(missing_ok=True)
+        path.rename(old)
+        return True
+    except OSError:
+        return False
 
 
 class TriageQueue:
@@ -399,7 +415,7 @@ class LocalAI:
         lines = [f"Ventana: {window}, {when.astimezone(MAD):%H:%M} hora de Madrid.", "Noticias de las últimas 4 horas (importancia/10):"]
         lines += [f"- {t['importancia']}/10 {t['sentimiento']} {','.join(t['monedas'])}: {t['resumen']}" for t in news] or ["- Ninguna relevante."]
         lines.append("Posicionamiento minorista:")
-        for c, f in (self.bus.state.get("market", {}).get("flow") or {}).items():
+        for c, f in fresh_flow(self.bus.state.get("market")).items():
             b = bias_of(f["ls"], f["funding"], f.get("pctl"))
             rank = f", percentil {f['pctl']:.0f} de los últimos 7 días" if f.get("pctl") is not None else ""
             lines.append(f"- {c}: {b['label']}, {b['longPct']:.0f} % de cuentas en largo{rank}, funding {f['funding']:.4f} %/8 h")
@@ -466,7 +482,7 @@ class LocalAI:
             return GPU_NOTE
         try:
             out = subprocess.run(["nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
-                                 capture_output=True, text=True, timeout=10, creationflags=subprocess.CREATE_NO_WINDOW)
+                                 capture_output=True, text=True, timeout=10, creationflags=NO_WINDOW)
             free = int(out.stdout.strip().splitlines()[0])
             if free < config.LOCAL_AI_MIN_FREE_MB:
                 return f"Solo hay {free} MB de VRAM libres (hacen falta {config.LOCAL_AI_MIN_FREE_MB}); se reintenta con la próxima noticia."
@@ -547,10 +563,12 @@ class LocalAI:
                     "--host", "127.0.0.1", "--port", str(config.LOCAL_AI_PORT), "--reasoning", "off", "--no-webui"]
             self.last_use = time.monotonic()   # la carga cuenta como uso: _idle_loop no la corta
             try:
+                llama_log = config.LOG_DIR / "llama-server.log"
+                rotate_log(llama_log, config.LLAMA_LOG_MAX_MB)
                 # Popen duplica el descriptor del log para el proceso hijo; el nuestro se cierra al salir del with.
-                with open(config.LOG_DIR / "llama-server.log", "ab") as log_file:
+                with open(llama_log, "ab") as log_file:
                     proc = self.proc = subprocess.Popen(args, cwd=str(config.LLAMA_SERVER.parent), stdout=log_file,
-                                                        stderr=log_file, creationflags=subprocess.CREATE_NO_WINDOW)
+                                                        stderr=log_file, creationflags=NO_WINDOW)
             except OSError as e:   # exe bloqueado, sin permiso o log inaccesible
                 log.warning("No se pudo arrancar llama-server: %s", e)
                 self.proc = None
@@ -604,7 +622,8 @@ class LocalAI:
     async def classify(self, title: str, src: str, tier: str, coins: list[str]) -> dict:
         """Puntúa un titular en el formato triage del contrato 2.7 (sin ms ni model, que los pone el worker)."""
         body = {
-            "model": config.LOCAL_AI_ALIAS, "temperature": 0, "max_tokens": 700,
+            # ~350 tokens por triaje (llama-server.log): 500 deja margen y corta antes una respuesta desbocada
+            "model": config.LOCAL_AI_ALIAS, "temperature": 0, "max_tokens": TRIAGE_MAX_TOKENS,
             "messages": [{"role": "system", "content": SYSTEM},
                          {"role": "user", "content": f"Titular: {title}\nFuente: {src} (nivel {tier})\n"
                                                      f"Monedas detectadas por reglas: {', '.join(coins) or 'ninguna'}"}],
@@ -696,14 +715,14 @@ class LocalAI:
         en español sale en cp850: se leen bytes y se decodifica con tolerancia (con -X utf8, text=True tumbaba el bot)."""
         try:
             raw = subprocess.run(["netstat", "-ano", "-p", "TCP"], capture_output=True, timeout=10,
-                                 creationflags=subprocess.CREATE_NO_WINDOW).stdout or b""
+                                 creationflags=NO_WINDOW).stdout or b""
             for line in raw.decode("ascii", errors="replace").splitlines():
                 parts = line.split()
                 if (len(parts) >= 5 and parts[1] == f"127.0.0.1:{config.LOCAL_AI_PORT}" and parts[3] == "LISTENING"
                         and parts[4] == str(pid)):
                     log.info("IA local: cierro el llama-server que dejó una ejecución anterior (PID %d)", pid)
                     subprocess.run(["taskkill", "/PID", parts[4], "/T", "/F"], capture_output=True, timeout=10,
-                                   creationflags=subprocess.CREATE_NO_WINDOW)
+                                   creationflags=NO_WINDOW)
                     return True
         except Exception as e:
             log.warning("No se pudo cerrar el llama-server heredado: %s", e)

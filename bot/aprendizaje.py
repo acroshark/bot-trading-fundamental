@@ -24,8 +24,8 @@ Tablas propias en bot.db (las crea este módulo):
   catálogo lo conoce (alias), como hacen feeds y la mesa.
 - aportaciones: parte de cada operación paper cerrada que se debe a cada noticia y medio de su señal.
 - postmortems: explicación corta de cada operación cerrada (paper y vigilancia) con sus hechos. La escribe la IA local
-  en baja prioridad (solo si ya está encendida y sin triajes en cola); sin ella queda pendiente. Es explicación, nunca
-  decisión.
+  en baja prioridad (solo si ya está encendida; con triajes en cola, uno cada 10 min como mucho: su hueco reservado);
+  sin ella queda pendiente. Es explicación, nunca decisión.
 - medios_peso y medios_peso_hist: peso en uso de cada medio y CADA cambio de peso con su motivo y sus cifras (tipo
   auto, manual, automatico o revertir), más los cambios de veredicto que van o vienen de «acierta», «falla» o «ruido»
   (tipo veredicto, tras repetirse en veredicto_rondas cálculos; no cambian el peso y no se revierten); un cambio se
@@ -96,6 +96,7 @@ SCAN_S = 300               # operaciones cerradas nuevas
 PM_GAP_S = 60              # un post-mortem por minuto como mucho (baja prioridad)
 PM_IDLE_S = 120            # sin IA local disponible se vuelve a mirar tras esto
 PM_TRIES = 3
+PM_RESERVA_S = 600         # con triajes en cola, un post-mortem cada 10 min como mucho: hueco reservado (n.º 15 y 4)
 INGEST_MAX = 20_000        # eventos por lote; en el primer arranque se rellenan varios lotes por ronda
 INGEST_ROUNDS = 5
 MEASURE_MAX = 4_000        # filas medidas por moneda y ronda
@@ -170,7 +171,8 @@ MEASURE_COLS = ("p0", "previo", "desde_pub", "r15", "r60", "r240", "r1440", "max
 MIGRATE = (("news_outcomes", "senal", "INTEGER"), ("news_outcomes", "n_medios", "INTEGER"),
            ("news_outcomes", "ts_triaje", "INTEGER"), ("news_outcomes", "bolsas", "TEXT"),
            ("news_outcomes", "adelanto_pub", "INTEGER"), ("news_outcomes", "acc60", "REAL"),
-           ("news_outcomes", "acc240", "REAL"), ("medios_info", "tipo", "TEXT"))
+           ("news_outcomes", "acc240", "REAL"), ("medios_info", "tipo", "TEXT"),
+           ("medios_info", "ficha_directo", "INTEGER"))
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS news_outcomes(
@@ -194,7 +196,7 @@ CREATE TABLE IF NOT EXISTS medios_conteo(clase TEXT NOT NULL, clave TEXT NOT NUL
   confirmaciones INTEGER DEFAULT 0, PRIMARY KEY(clase, clave, dia));
 CREATE INDEX IF NOT EXISTS medios_conteo_dia ON medios_conteo(dia);
 CREATE TABLE IF NOT EXISTS medios_info(outlet TEXT PRIMARY KEY, nombre TEXT, nivel TEXT, region TEXT, idioma TEXT,
-  directo INTEGER DEFAULT 0, primera_vez INTEGER, ultima_vez INTEGER, tipo TEXT);
+  directo INTEGER DEFAULT 0, primera_vez INTEGER, ultima_vez INTEGER, tipo TEXT, ficha_directo INTEGER);
 CREATE TABLE IF NOT EXISTS medio_fuente(outlet TEXT NOT NULL, fuente TEXT NOT NULL, PRIMARY KEY(outlet, fuente));
 CREATE TABLE IF NOT EXISTS aportaciones(trade TEXT NOT NULL, story TEXT NOT NULL, outlet TEXT NOT NULL, cuota REAL,
   signo INTEGER, R REAL, cerrada INTEGER, PRIMARY KEY(trade, story, outlet));
@@ -328,6 +330,23 @@ def outlet_info(patch: dict | None) -> tuple[str, str, int]:
     return norm_outlet(p.get("srcId") or p.get("src") or ""), "feed", 0
 
 
+def ficha_mejor(directo: int, nivel: str | None, directo_antes: int | None, nivel_antes: str | None) -> bool:
+    """¿Manda la ficha nueva (nombre, nivel, región, idioma) sobre la guardada? Primero la fuente directa (el feed del
+    propio medio) y luego el nivel más alto (T0 > T3; sin nivel, lo último). A igualdad se queda la guardada: si no, la
+    ficha de un medio era la del último Google News que lo trajo (CoinDesk como T3 de Corea: hallazgo n.º 10)."""
+    d, d0 = int(directo or 0), int(directo_antes or 0)
+    return d > d0 or (d == d0 and (nivel or "T9") < (nivel_antes or "T9"))
+
+
+# La misma regla en el ON CONFLICT de medios_info (los niveles «T0»…«T3» se ordenan como texto). Se compara con si la
+# FICHA guardada salió de un feed directo (ficha_directo), no con «directo» (si el medio llegó alguna vez directo): si
+# no, una ficha de Google News de un medio con feed propio no se corregía nunca. En las filas de antes (ficha_directo
+# NULL) se supone lo de siempre, salvo frente a un feed directo, que siempre corrige.
+_FICHA_ANTES = ("COALESCE(ficha_directo, CASE WHEN excluded.ficha_directo = 1 THEN 0 ELSE COALESCE(directo, 0) END)")
+_FICHA_MEJOR = (f"(excluded.ficha_directo > {_FICHA_ANTES} OR (excluded.ficha_directo = {_FICHA_ANTES} AND "
+                "COALESCE(excluded.nivel, 'T9') < COALESCE(nivel, 'T9')))")
+
+
 def outlet_from_patch(patch: dict | None) -> str:
     """Medio que firma una captada (ver outlet_info)."""
     return outlet_info(patch)[0]
@@ -412,10 +431,6 @@ def adjusted_credibility(cred, outlet: str | None = None, weight: float | None =
         return None
     w = source_weight(outlet) if weight is None else weight
     return int(max(0, min(100, round(c * w))))
-
-
-def pesos_actuales() -> dict[str, float]:
-    return dict(_PESOS)
 
 
 # ---------------------------------------------------------------- ventanas de apertura
@@ -848,9 +863,13 @@ def ingest_chunk(db, cursor: int, upto: int, limit: int, p: dict) -> dict:
     def note(o, nombre, nivel, region, idioma, directo, ts, tipo):
         x = info.get(o)
         if x is None:
-            info[o] = [nombre, nivel, region, idioma, directo, ts, ts, tipo]
+            info[o] = [nombre, nivel, region, idioma, directo, ts, ts, tipo, directo]
             return
-        x[:4] = [nombre or x[0], nivel or x[1], region or x[2], idioma or x[3]]
+        nuevo = [nombre, nivel, region, idioma]
+        mejor = ficha_mejor(directo, nivel, x[8], x[1])   # x[8]: si la ficha guardada salió de un feed directo
+        a, b = (nuevo, x[:4]) if mejor else (x[:4], nuevo)
+        x[:4] = [a[i] or b[i] for i in range(4)]
+        x[8] = directo if mejor else x[8]
         x[4] = max(x[4], directo)
         x[5], x[6] = min(x[5], ts), max(x[6], ts)
         x[7] = x[7] or tipo
@@ -1478,14 +1497,24 @@ def pm_messages(hechos: dict) -> list[dict]:
     return [{"role": "system", "content": PM_SYSTEM}, {"role": "user", "content": hechos.get("texto") or ""}]
 
 
-def local_generator(ai, max_tokens: int = 320, timeout_s: float = 120):
-    """generate(messages) con la IA local en BAJA prioridad: solo si ya está encendida (no la enciende para esto) y no
-    hay triajes esperando; si no, None y el post-mortem sigue pendiente."""
+def local_generator(ai, max_tokens: int = 320, timeout_s: float = 120, reserva_s: float = PM_RESERVA_S,
+                    clock=time.monotonic):
+    """generate(messages) con la IA local en BAJA prioridad: solo si ya está encendida (no la enciende para esto). Sin
+    triajes esperando, cuando quiera; con la cola llena (en este PC casi siempre: hallazgos n.º 15 y 4), uno cada
+    reserva_s como mucho, que es su hueco reservado (unos 6 s de cada 10 min: los post-mortems son pocos, ~6 al día). Si
+    no le toca, None y el post-mortem sigue pendiente."""
+    turno = {"t": float("-inf")}   # último post-mortem que pasó por delante de la cola
+
     async def generate(messages: list[dict]) -> str | None:
-        if ai is None or not getattr(ai, "ready", False) or not ai.q.empty():
+        if ai is None or not getattr(ai, "ready", False):
             return None
-        if not await ai.acquire() or not ai.q.empty():   # llegó triaje mientras tanto: primero lo suyo
+        reserva = not ai.q.empty()
+        if reserva and clock() - turno["t"] < reserva_s:
+            return None   # con triajes esperando, ya tuvo su hueco hace poco
+        if not await ai.acquire():
             return None
+        if reserva:
+            turno["t"] = clock()
         ai.last_use = time.monotonic()
         body = {"model": config.LOCAL_AI_ALIAS, "temperature": 0.2, "max_tokens": max_tokens,
                 "chat_template_kwargs": {"enable_thinking": False}, "messages": messages}
@@ -1815,10 +1844,11 @@ class Aprendizaje:
                        "triadas = triadas + excluded.triadas, archivadas = archivadas + excluded.archivadas, "
                        "confirmaciones = confirmaciones + excluded.confirmaciones", res["counts"])
         db.executemany("INSERT INTO medios_info (outlet, nombre, nivel, region, idioma, directo, primera_vez, ultima_vez, "
-                       "tipo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(outlet) DO UPDATE SET "
-                       "nombre = COALESCE(excluded.nombre, nombre), nivel = COALESCE(excluded.nivel, nivel), "
-                       "region = COALESCE(excluded.region, region), idioma = COALESCE(excluded.idioma, idioma), "
-                       "directo = MAX(directo, excluded.directo), primera_vez = MIN(primera_vez, excluded.primera_vez), "
+                       "tipo, ficha_directo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(outlet) DO UPDATE SET "
+                       + ", ".join(f"{c} = CASE WHEN {_FICHA_MEJOR} THEN COALESCE(excluded.{c}, {c}) "
+                                   f"ELSE COALESCE({c}, excluded.{c}) END" for c in ("nombre", "nivel", "region", "idioma"))
+                       + f", ficha_directo = CASE WHEN {_FICHA_MEJOR} THEN excluded.ficha_directo ELSE ficha_directo END"
+                       + ", directo = MAX(directo, excluded.directo), primera_vez = MIN(primera_vez, excluded.primera_vez), "
                        "ultima_vez = MAX(ultima_vez, excluded.ultima_vez), tipo = COALESCE(tipo, excluded.tipo)",
                        res["info"])
         db.executemany("INSERT OR IGNORE INTO medio_fuente VALUES (?, ?)", res["pairs"])

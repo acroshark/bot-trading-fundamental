@@ -381,6 +381,62 @@ async def test_directo_y_google_news_del_mismo_medio_se_juntan(env):
     assert A.source_weight("bloomberg") == 1.3 == A.source_weight("bloomberg.com") and apr.weight_of_story("g1") == 1.3
 
 
+async def test_la_ficha_del_medio_es_la_de_su_feed_directo_o_la_de_mas_nivel(env):
+    """Hallazgo n.º 10: la ficha (nivel, región, idioma) era la del último Google News que trajo el medio (CoinDesk
+    salía como T3 de Corea). Manda el feed directo y, luego, el nivel más alto; a igualdad, la que ya estaba. Vale en un
+    mismo lote y entre lotes (ON CONFLICT)."""
+    store, bus = env
+    gn = "https://news.google.com/rss/articles/"
+
+    def gnews(story, t, tier, region, lang, via="coindesk.com"):
+        return captured(story, t, url=gn + story, src=f"GNews {region} · CoinDesk", src_id=f"{region}-gnews", via=via,
+                        tier=tier, region=region, lang=lang)
+
+    ficha = lambda o: store.db.execute("SELECT nivel, region, idioma, directo FROM medios_info WHERE outlet = ?",
+                                       (o,)).fetchone()
+    bus.publish(gnews("k1", T, "T3", "kr", "ko"))
+    now = T + DAY
+    apr = make(bus, store, FakeBars({"BTC": flat()}), now)
+    await apr.step(now, force=True)
+    assert ficha("coindesk.com") == ("T3", "kr", "ko", 0)
+    t = T + 2 * DAY   # después del cursor del primer cálculo
+    for ev in (gnews("j1", t + H, "T3", "jp", "ja"),                                       # mismo nivel: no cambia
+               captured("c1", t + 2 * H, url="https://www.coindesk.com/a", src="CoinDesk", src_id="cripto-coindesk",
+                        tier="T2", region="cripto", lang="en"),
+               gnews("u1", t + 3 * H, "T1", "us", "en"),                                    # más nivel, pero no directo
+               gnews("o1", t + H, "T3", "kr", "ko", via="otro.example"),                   # en un mismo lote:
+               gnews("o2", t + 2 * H, "T2", "jp", "ja", via="otro.example"),               # sube el nivel
+               gnews("o3", t + 3 * H, "T3", "de", "de", via="otro.example")):              # y no baja
+        bus.publish(ev)
+    now = T + 3 * DAY
+    apr = make(bus, store, FakeBars({"BTC": flat()}), now)
+    await apr.step(now, force=True)
+    assert ficha("coindesk.com") == ("T2", "cripto", "en", 1)
+    assert ficha("otro.example") == ("T2", "jp", "ja", 0)
+    assert apr.stats["medios"]["coindesk.com"]["directo"]
+    bus.publish(gnews("k2", T + 4 * DAY, "T3", "kr", "ko"))
+    now = T + 5 * DAY
+    apr = make(bus, store, FakeBars({"BTC": flat()}), now)
+    await apr.step(now, force=True)
+    assert ficha("coindesk.com") == ("T2", "cripto", "en", 1)
+    assert A.ficha_mejor(1, "T3", 0, "T0") and not A.ficha_mejor(0, "T0", 1, "T3") and A.ficha_mejor(0, "T2", 0, None)
+    # Filas de antes (sin ficha_directo): una ficha de Google News de un medio que alguna vez llegó directo (directo 1)
+    # se corrige con el feed directo aunque no traiga más nivel; una buena no la estropea un Google News de más nivel.
+    store.db.executemany("INSERT INTO medios_info (outlet, nombre, nivel, region, idioma, directo, tipo) VALUES "
+                         "(?, ?, ?, ?, ?, 1, 'dominio')", [("sucia.example", "x", "T1", "kr", "ko"),
+                                                           ("buena.example", "x", "T2", "cripto", "en")])
+    store.db.commit()
+    for ev in (captured("s1", T + 6 * DAY, url="https://sucia.example/a", src="Sucia", src_id="cripto-sucia", tier="T2",
+                        region="cripto", lang="en"),
+               gnews("b1", T + 6 * DAY, "T1", "jp", "ja", via="buena.example")):
+        bus.publish(ev)
+    now = T + 7 * DAY
+    apr = make(bus, store, FakeBars({"BTC": flat()}), now)
+    await apr.step(now, force=True)
+    assert ficha("sucia.example") == ("T2", "cripto", "en", 1) and ficha("buena.example") == ("T2", "cripto", "en", 1)
+    assert store.db.execute("SELECT ficha_directo FROM medios_info WHERE outlet = 'sucia.example'").fetchone() == (1,)
+
+
 async def test_solo_cuenta_lo_que_usaria_la_senal(env):
     store, bus = env
 
@@ -899,8 +955,14 @@ async def test_generador_local_baja_prioridad():
     msgs = [{"role": "user", "content": "hechos"}]
     off = FakeAI(ready=False)
     assert await A.local_generator(off)(msgs) is None and off.acq == 0   # no la enciende para esto
-    busy = FakeAI(queued=3)
-    assert await A.local_generator(busy)(msgs) is None and busy.acq == 0   # primero el triaje
+    # Con la cola de triaje llena (n.º 15 y 4): un post-mortem cada 10 min como mucho pasa por delante (hueco reservado)
+    busy, reloj = FakeAI(queued=120), [1000.0]
+    gen = A.local_generator(busy, clock=lambda: reloj[0])
+    assert await gen(msgs) == "Explicación corta." and busy.acq == 1
+    reloj[0] += A.PM_RESERVA_S - 1
+    assert await gen(msgs) is None and busy.acq == 1   # ya tuvo su hueco: primero el triaje
+    reloj[0] += 2
+    assert await gen(msgs) == "Explicación corta." and busy.acq == 2
     ai = FakeAI()
     assert await A.local_generator(ai)(msgs) == "Explicación corta."
     url, body = ai.s.posts[0]

@@ -6,7 +6,8 @@ post-mortems), fuentes vivas (estado de cada fuente y descubrimiento), evolució
 propuestas e informe semanal), reacción (la cripto en cada apertura de bolsa: «cripto_aperturas»), reflejo (¿la cripto
 refleja las noticias macro y geopolíticas?), noticias fiables (los grupos que aciertan ≥ 60 % de forma constante), la
 entrada por noticia fiable confirmada por el precio y las decisiones de las aperturas (por qué entra o no, tabla
-decisiones_apertura). Si uno no arranca, el bot sigue sin él.
+decisiones_apertura). Si uno no arranca, el bot sigue sin él (optional), y si uno se cae mientras corre,
+se relanza con espera creciente sin parar al resto (supervise; hallazgos n.º 27 y 46).
 Modo real con OKX EU (docs/06): el conector (RealBroker) se construye siempre y queda APAGADO sin las claves del usuario
 (secretos/okx.env): no hace ninguna petición privada. Los tickets van al paper (BOT_BROKER=paper, por defecto); con
 BOT_BROKER=real irían al conector, que además necesita las claves, BOT_MODO_REAL=1 y la confirmación escrita en la web.
@@ -22,16 +23,20 @@ import os
 import ssl
 import sys
 import tempfile
-from logging.handlers import RotatingFileHandler
+import time
+from datetime import datetime
+from logging.handlers import TimedRotatingFileHandler
+from zoneinfo import ZoneInfo
 
 import aiohttp
 import truststore
 from aiohttp import web
 
 from . import agenda, comisiones, config
-from .apertura import OpeningEngine, pick_strategy, signal_getter
+from .apertura import PAIRS, OpeningEngine, pick_strategy, signal_getter
 from .aprendizaje import Aprendizaje, CacheBars
 from .backtest import Backtester
+from .backtest_aperturas import fetch_api as klines_1m
 from .bus import Bus
 from .claude_agents import Phase2
 from .decisiones import Decisiones
@@ -53,8 +58,10 @@ from .predict import Predictor, results_getter
 from .ranking import Ranking
 from .reaccion import Reaccion
 from .reflejo import Reflejo
+from .reloj import Reloj
+from .salud import Salud, proceso
 from .server import Services, make_app, velas_de
-from .store import Store, in_batches
+from .store import Store, copia_diaria, in_batches
 from .trend import Trend
 from .velas_okx import VelasOKX
 from .vigilancia import Vigilancia
@@ -74,6 +81,59 @@ def data_tmp() -> None:
     tempfile.tempdir = str(config.TMP_DIR)
 
 
+_JOB = None   # el Job Object de Windows: se queda abierto mientras viva el proceso
+
+
+def atar_hijos(k32=None) -> bool:
+    """Windows: mete el proceso en un Job Object con KILL_ON_JOB_CLOSE. Los lectores de feeds (ProcessPoolExecutor) y
+    llama-server lo heredan, así que si el bot muere de golpe Windows los cierra con él y no quedan huérfanos ocupando
+    VRAM o esperando su cola (hallazgo n.º 49). En Linux, o con BOT_JOB_OBJECT=0, no hace nada. Si Windows no deja
+    (el proceso ya está en un trabajo que no admite otro), se registra y el bot sigue como antes."""
+    global _JOB
+    if os.environ.get("BOT_JOB_OBJECT", "1") == "0" or (k32 is None and os.name != "nt"):
+        return False
+    import ctypes
+    from ctypes import wintypes
+
+    class Basic(ctypes.Structure):   # JOBOBJECT_BASIC_LIMIT_INFORMATION
+        _fields_ = [("PerProcessUserTimeLimit", ctypes.c_int64), ("PerJobUserTimeLimit", ctypes.c_int64),
+                    ("LimitFlags", ctypes.c_uint32), ("MinimumWorkingSetSize", ctypes.c_size_t),   # DWORD = 32 bits
+                    ("MaximumWorkingSetSize", ctypes.c_size_t), ("ActiveProcessLimit", ctypes.c_uint32),
+                    ("Affinity", ctypes.c_size_t), ("PriorityClass", ctypes.c_uint32), ("SchedulingClass", ctypes.c_uint32)]
+
+    class Extended(ctypes.Structure):   # JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+        _fields_ = [("BasicLimitInformation", Basic), ("IoInfo", ctypes.c_uint64 * 6),
+                    ("ProcessMemoryLimit", ctypes.c_size_t), ("JobMemoryLimit", ctypes.c_size_t),
+                    ("PeakProcessMemoryUsed", ctypes.c_size_t), ("PeakJobMemoryUsed", ctypes.c_size_t)]
+
+    err = getattr(ctypes, "get_last_error", lambda: 0)   # solo existe en Windows
+    try:
+        if k32 is None:
+            k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            k32.CreateJobObjectW.restype = wintypes.HANDLE   # sin esto, un HANDLE de 64 bits se cortaría a 32
+            k32.CreateJobObjectW.argtypes = (ctypes.c_void_p, wintypes.LPCWSTR)
+            k32.SetInformationJobObject.argtypes = (wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD)
+            k32.SetInformationJobObject.restype = wintypes.BOOL
+            k32.GetCurrentProcess.restype = wintypes.HANDLE
+            k32.AssignProcessToJobObject.argtypes = (wintypes.HANDLE, wintypes.HANDLE)
+            k32.AssignProcessToJobObject.restype = wintypes.BOOL
+        job = k32.CreateJobObjectW(None, None)
+        if not job:
+            raise OSError(f"CreateJobObject: error {err()}")
+        info = Extended()
+        info.BasicLimitInformation.LimitFlags = 0x2000   # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        if not k32.SetInformationJobObject(job, 9, ctypes.byref(info), ctypes.sizeof(info)):   # 9: ExtendedLimit
+            raise OSError(f"SetInformationJobObject: error {err()}")
+        if not k32.AssignProcessToJobObject(job, k32.GetCurrentProcess()):
+            raise OSError(f"AssignProcessToJobObject: error {err()}")
+    except Exception as e:
+        log.warning("No se pudo atar los procesos hijos al bot (%s): si el bot muere de golpe, pueden quedar abiertos", e)
+        return False
+    _JOB = job
+    log.info("Procesos hijos atados al bot: si se cierra, Windows los cierra con él")
+    return True
+
+
 def optional(name: str, make):
     """Construye un módulo que no es imprescindible: si falla, queda registrado y el bot sigue sin él."""
     try:
@@ -81,6 +141,45 @@ def optional(name: str, make):
     except Exception:
         log.exception("%s no arrancó: el bot sigue sin este módulo", name)
         return None
+
+
+SUPERVISE_MIN_S, SUPERVISE_MAX_S = 5, 300   # espera antes de relanzar un bucle caído (crece al repetirse)
+SUPERVISE_OK_S = 600                        # si llevaba esto en marcha, la espera vuelve a la mínima
+
+
+async def supervise(name: str, factory, min_s: float = SUPERVISE_MIN_S, max_s: float = SUPERVISE_MAX_S) -> None:
+    """Ejecuta factory() (crea la corrutina de un bucle) y, si sale con un error, lo registra y la relanza con espera
+    creciente: un fallo suelto en un módulo (p. ej. «database is locked») ya no tumba el proceso entero (hallazgo
+    n.º 46; antes asyncio.gather paraba el bot con la primera excepción). Si termina sin error, no se relanza."""
+    wait = min_s
+    while True:
+        t0 = time.monotonic()
+        try:
+            await factory()
+            log.info("%s terminó", name)
+            return
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            if time.monotonic() - t0 >= SUPERVISE_OK_S:
+                wait = min_s
+            log.exception("%s se cayó: se relanza en %.0f s (el resto del bot sigue)", name, wait)
+        await asyncio.sleep(wait)
+        wait = min(max_s, wait * 2)
+
+
+def db_health(path, carpeta) -> dict:
+    """Tamaño de bot.db y de su WAL en MB y la última copia diaria (para /health; hallazgos n.º 39 y 51)."""
+    def mb(p) -> float | None:
+        try:
+            return round(os.path.getsize(p) / 1e6, 1)
+        except OSError:
+            return None
+    try:
+        copias = sorted(p.name for p in carpeta.glob("bot-????-??-??.db"))
+    except OSError:
+        copias = []
+    return {"mb": mb(path), "wal_mb": mb(f"{path}-wal"), "copias": len(copias), "ultima_copia": copias[-1] if copias else None}
 
 
 def observe_bus(bus: Bus, fn) -> None:
@@ -101,7 +200,9 @@ def log_handlers() -> list[logging.Handler]:
     enmascarada."""
     config.LOG_DIR.mkdir(parents=True, exist_ok=True)
     fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
-    fh = RotatingFileHandler(config.LOG_DIR / "bot.log", maxBytes=5_000_000, backupCount=5, encoding="utf-8")
+    # Un archivo por día, LOG_KEEP_DAYS días (n.º 50): con 5 MB × 5 solo cabían unos 4 días (unos 7,3 MB al día)
+    fh = TimedRotatingFileHandler(config.LOG_DIR / "bot.log", when="midnight", backupCount=config.LOG_KEEP_DAYS,
+                                  encoding="utf-8")
     sh = logging.StreamHandler(sys.stdout)
     for h in (fh, sh):
         h.setFormatter(fmt)
@@ -115,26 +216,41 @@ def setup_logging() -> None:
 
 
 async def maintenance(store: Store) -> None:
-    """Cada hora: borra los descartes viejos, las captadas y demás eventos masivos de más de 30 días y las claves de
-    piezas ya vistas que ningún feed va a repetir."""
+    """Cada hora: borra los descartes viejos, las captadas de más de KEEP_CAPTURED_S (7 días) y demás eventos masivos
+    de más de 30 días y las claves de piezas ya vistas que ningún feed va a repetir. Una vez al día (día de Madrid):
+    copia en caliente de bot.db en DATA_DIR/copias (7 copias; hallazgo n.º 39) y PRAGMA optimize (n.º 51)."""
+    hecho = None
     while True:
         try:
             now = now_ms()
             gone = await in_batches(store.prune, ("filtered",), now - config.KEEP_FILTERED_S * 1000)
+            cap = await in_batches(store.prune, config.PRUNE_CAPTURED_KINDS, now - config.KEEP_CAPTURED_S * 1000)
             old = await in_batches(store.prune, config.PRUNE_EVENT_KINDS, now - config.KEEP_EVENTS_S * 1000)
             seen = await in_batches(store.prune_seen, now - config.KEEP_SEEN_S * 1000)
-            if gone or old or seen:
-                log.info("Limpieza: %d descartes, %d eventos antiguos y %d claves vistas borrados", gone, old, seen)
+            if gone or cap or old or seen:
+                log.info("Limpieza: %d descartes, %d captadas, %d eventos antiguos y %d claves vistas borrados",
+                         gone, cap, old, seen)
         except Exception:
             log.exception("La limpieza de la base falló")
+        dia = datetime.now(ZoneInfo("Europe/Madrid")).date().isoformat()
+        if hecho != dia:
+            try:
+                dest = await asyncio.to_thread(copia_diaria, store.path, config.COPIAS_DIR, dia)
+                if dest is not None:
+                    log.info("Copia de bot.db hecha en %s (%.0f MB)", dest, dest.stat().st_size / 1e6)
+                store.db.execute("PRAGMA optimize")
+                hecho = dia
+            except Exception:
+                log.exception("La copia diaria de bot.db falló: se reintenta en la próxima ronda")
         await asyncio.sleep(3600)
 
 
 async def main() -> None:
     setup_logging()
+    atar_hijos()
     data_tmp()
     store = Store(config.DB_PATH)
-    bus = Bus(store)
+    bus = Bus(store, latido=config.LATIDO)
     states = [SourceState(s) for s in SOURCES]
 
     # Certificados del sistema (Windows): sin ellos fallan muchas webs oficiales asiáticas (.go.jp, .gov.hk…).
@@ -148,6 +264,7 @@ async def main() -> None:
         trend = Trend(bus, session)
         feeds = FeedPoller(bus, desk, session, store, load_registry())
         backtester = Backtester(bus, session)
+        reloj = Reloj(bus, session)   # el desfase de la hora frente a OKX (n.º 53)
         bt = results_getter()   # resultados del backtest con caché por fecha del archivo (pesa varios MB)
         state = bus.state.get
         predictor = Predictor(bus, store, lambda: state("trend"), lambda: state("orderflow"), lambda: state("market"), bt,
@@ -157,7 +274,13 @@ async def main() -> None:
         decs = optional("Las decisiones de las aperturas", lambda: Decisiones(bus, store))
         if decs is not None:
             observe_bus(bus, decs.observe)
-        broker = PaperBroker(bus, store, lambda: state("market", {}), lambda: state("orderflow", {}))
+        async def velas_hueco(coin: str, a: int, b: int) -> list[list]:
+            """Velas de 1 min de Binance de [a, b) para reconstruir el hueco de una posición paper (n.º 47)."""
+            return await klines_1m(session, PAIRS[coin], a, b, now_ms())
+
+        # day_limits: los topes del día del preset del motor (se lee al enviar cada ticket; el motor se crea después)
+        broker = PaperBroker(bus, store, lambda: state("market", {}), lambda: state("orderflow", {}),
+                             fetch_bars=velas_hueco, day_limits=lambda: getattr(openings, "p", None))
         # Modo real con OKX EU (docs/06, contrato de cableado): sin secretos/okx.env queda apagado y no hace ninguna
         # petición privada. Con las claves del usuario lee su cuenta en solo lectura (saldo y comisiones); opera solo con
         # BOT_MODO_REAL=1 y su confirmación escrita en la web. Mismo mercado del bus que el paper.
@@ -187,16 +310,22 @@ async def main() -> None:
                                  decisiones=decs)
         log.info("Motor de aperturas en modo %s (parámetros: %s)", getattr(openings, "strategy", "ruptura"),
                  getattr(openings, "source", "?"))
-        # Vigilancia: prueba en avance (sin operar) de las estrategias congeladas del laboratorio.
-        vigil = Vigilancia(bus, store, session)
+        # Vigilancia: prueba en avance (sin operar) de las estrategias congeladas del laboratorio. Si no arranca, el resto
+        # sigue con las velas de la caché (hallazgo n.º 27).
+        vigil = optional("La vigilancia", lambda: Vigilancia(bus, store, session))
+
+        def live_bars(c: str):
+            """Velas de 1 min que la vigilancia tiene en memoria (None sin vigilancia: solo la caché)."""
+            return vigil.bars.get(c) if vigil is not None else None
+
         # Aprendizaje: mide cada noticia y cada medio con las velas de 1 min (las de la vigilancia en memoria y la caché).
         learn = optional("El aprendizaje", lambda: Aprendizaje(
-            bus, store, local_ai=local, bars=CacheBars(live=lambda c: vigil.bars.get(c))))
+            bus, store, local_ai=local, bars=CacheBars(live=live_bars)))
         if learn is not None:
             observe_bus(bus, learn.observe)
         # Reflejo: una noticia macro o geopolítica solo cuenta si la cripto la confirma (el mayor de 0,5 % y 2σ de 60 min,
         # en 60 min). Recibe las captadas y las triadas por el gancho del bus; velas de la vigilancia y la caché.
-        refl = optional("El reflejo", lambda: Reflejo(bus, bars=CacheBars(live=lambda c: vigil.bars.get(c)).get))
+        refl = optional("El reflejo", lambda: Reflejo(bus, bars=CacheBars(live=live_bars).get))
         if refl is not None:
             observe_bus(bus, refl.observe)
         # Noticias fiables: los grupos (medio, feed, tipo×sentido, medio×sentido) que aciertan ≥ 60 % de forma constante,
@@ -208,12 +337,13 @@ async def main() -> None:
         entrada = None
         if ENTRADA_NOTICIAS:
             entrada = optional("La entrada por noticia fiable", lambda: EntradaNoticias(
-                bus, store, ticket_submit, ticket_pf, bars=CacheBars(live=lambda c: vigil.bars.get(c)).get))
+                bus, store, ticket_submit, ticket_pf, bars=CacheBars(live=live_bars).get,
+                get_motor=lambda: getattr(openings, "p", None)))
         if entrada is not None:
             observe_bus(bus, entrada.observe)
         # Reacción: la cripto en cada apertura de bolsa (cripto_aperturas); la historia, en un hilo y una vez al día.
         react = optional("La reacción de la cripto en las aperturas", lambda: Reaccion(
-            bus, bars=CacheBars(live=lambda c: vigil.bars.get(c)).get))
+            bus, bars=CacheBars(live=live_bars).get))
         # Fuentes vivas: estado de cada fuente (lo respetan feeds y la mesa) y descubrimiento. Antes de feeds.run().
         vivas = optional("Fuentes vivas", lambda: FuentesVivas(bus, store, session))
         if vivas is not None:
@@ -241,10 +371,17 @@ async def main() -> None:
             return {"phase": config.PHASE, "sources": [st.view() for st in states],
                     "market": {"ok": market.ok, "err": market.err, "prices": market.prices},
                     "trend": {"ok": trend.ok, "err": trend.err}, "feeds": feeds.summary(),
-                    "local_ai": {"queue": local.q.qsize(), "done": local.done},
-                    "clients": len(bus.clients), "broker": "real" if usar_real else "paper",
+                    "local_ai": {"queue": local.q.qsize(), "done": local.done, "dropped": local.dropped},
+                    "db": db_health(store.path, config.COPIAS_DIR),
+                    "arranque": bus.started, "en_marcha_s": round((now_ms() - bus.started) / 1000),
+                    "hueco_al_arrancar": bus.hueco, "reloj": reloj.ultimo, "proceso": proceso(),
+                    "retraso_bucle": salud.retraso, "congelado": salud.congelado, "clients": len(bus.clients),
+                    "broker": "real" if usar_real else "paper",
                     "real": {"modo": real.estado.modo} if real is not None else {"modo": "apagado"},
                     "comisiones": comisiones.activo()}
+
+        # Cada 5 min, una fila para la prueba de 72 h (n.º 40); cada minuto, el latido con el que el bus mide el hueco.
+        salud = Salud(health, config.LOG_DIR / "salud.csv", latido=config.LATIDO)
 
         # Velas de la gráfica de cada posición (GET /api/velas): por defecto las públicas de OKX EU del par que se operaría
         # (BTC-USDC…, sin claves, con caché y límite de peticiones); si OKX falla, las del bot: las de la vigilancia en
@@ -278,13 +415,22 @@ async def main() -> None:
                     bus.publish({"type": "sources", "sources": view})
                 await asyncio.sleep(3)
 
-        extra = [m.run() for m in (learn, vivas, evo, refl, react, fiab, entrada, real, labv, rank)
-                 if m is not None]   # cada run() atrapa sus fallos (el del modo real, apagado, no pide nada a OKX)
+        # Cada bucle, supervisado: si uno se cae se relanza y el resto sigue (n.º 46). Cada run() atrapa ya sus fallos
+        # habituales; supervise es la red para lo que se escape.
+        tareas = [(f"La fuente {st.src.name}", lambda st=st: run_source(st, session, desk)) for st in states]
+        tareas += [("El mercado", market.run), ("La agenda", lambda: agenda.run(bus, session)), ("La IA local", local.run),
+                   ("El resumen de fuentes", report_sources), ("La tendencia", trend.run), ("Los feeds", feeds.run),
+                   ("El backtest", backtester.run), ("Las predicciones", predictor.run), ("El paper", broker.run),
+                   ("La fase 2", phase2.run), ("El motor de aperturas", openings.run),
+                   ("La limpieza de la base", lambda: maintenance(store)), ("El reloj", reloj.run),
+                   ("La salud", salud.run)]
+        tareas += [(nombre, mod.run) for nombre, mod in (
+            ("La vigilancia", vigil), ("El aprendizaje", learn), ("Las fuentes vivas", vivas), ("La evolución", evo),
+            ("El reflejo", refl), ("La reacción", react), ("Las noticias fiables", fiab),
+            ("La entrada por noticia", entrada), ("El modo real", real), ("El laboratorio vivo", labv),
+            ("El ranking", rank)) if mod is not None]   # el del modo real, apagado, no pide nada a OKX
         try:
-            await asyncio.gather(*(run_source(st, session, desk) for st in states),
-                                 market.run(), agenda.run(bus, session), local.run(), report_sources(),
-                                 trend.run(), feeds.run(), backtester.run(), predictor.run(), broker.run(), phase2.run(),
-                                 openings.run(), vigil.run(), maintenance(store), *extra)
+            await asyncio.gather(*(supervise(nombre, fab) for nombre, fab in tareas))
         except Exception:
             log.exception("El bot se detuvo por un error no controlado")   # que la causa quede en bot.log
             raise
@@ -296,7 +442,8 @@ async def main() -> None:
                 except Exception:
                     log.exception("Fuentes vivas no pudo guardar lo pendiente al cerrar")
             try:   # las velas nuevas de la vigilancia, a la caché
-                await vigil.close()
+                if vigil is not None:
+                    await vigil.close()
             except Exception:
                 log.exception("La vigilancia no pudo guardar sus velas al cerrar")
             await phase2.close()

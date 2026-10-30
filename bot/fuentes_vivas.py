@@ -161,6 +161,7 @@ FEED_RECIENTE_DIAS = 7
 DESCARGA_MAX = 3_000_000
 TIMEOUT = aiohttp.ClientTimeout(total=20)
 ACCEPT = "text/html, application/rss+xml, application/atom+xml, application/xml;q=0.9, */*;q=0.5"
+PRUEBA_TLD = ".invalid"      # dominio reservado (RFC 2606): un medio así es un resto de prueba, no cuenta ni sale
 RELAYS = ("tree",)           # cazadores que reenvían a otros medios (su enlace dice el medio)
 # Redes sociales y plataformas: no tienen un RSS de medio que añadir.
 NO_RSS = {"x.com", "twitter.com", "t.me", "telegram.org", "reddit.com", "youtube.com", "youtu.be", "facebook.com",
@@ -310,7 +311,7 @@ class Cifras:
 @dataclass
 class Tecnico:
     fallos: int              # fallos seguidos (feed_state)
-    horas: float             # horas de bot en marcha seguidas fallando (source_health)
+    horas: float             # horas reales seguidas fallando, desde el primer fallo visto (source_health)
     ok: bool | None
     err: str = ""
 
@@ -525,7 +526,8 @@ class FuentesVivas:
         self.descubrir = DESCUBRIR if descubrir is None else descubrir
         self.poller = None
         self.filas: dict[str, Fila] = {}
-        self.salud: dict[str, float] = {}       # id → horas seguidas fallando
+        self.salud: dict[str, float] = {}       # id → horas seguidas fallando (reales, desde el primer fallo visto)
+        self.salud_inicio: dict[str, int] = {}  # id → ms del primer fallo visto de la racha
         self.cifras: dict[str, Cifras] = {}
         self.q0 = NEUTRO                        # ruido medio de todas las fuentes
         self.sugerencias: dict[str, tuple[str, str, str]] = {}   # con auto apagado (o por el tope): lo que se haría
@@ -536,7 +538,6 @@ class FuentesVivas:
         self._buf: list[tuple] = []
         self._robots: dict[str, tuple[float, RobotFileParser | None]] = {}
         self._ultima_peticion = 0.0
-        self._ultima_salud: int | None = None
         self._scan_ts = 0
         self._last_pub: str | None = None
         self._ext_errors = 0
@@ -585,7 +586,11 @@ class FuentesVivas:
             self.filas[r[0]] = Fila(r[0], r[1], r[2] or 0, r[3] or "", r[4] or "", bool(r[5]), r[6] or "registro",
                                     r[7] if r[7] in ("activa", "prueba") else "activa", r[8] or "",
                                     _loads(r[9]), _loads(r[10]))
-        self.salud = {i: float(h) for i, h in db.execute("SELECT id, horas FROM source_health").fetchall()}
+        # source_health guarda (id, horas, hora de la última revisión): el inicio de la racha es esa hora menos las
+        # horas. Las filas de antes (horas de bot en marcha) dan, en general, un inicio más tardío que el real.
+        for i, h, ts in db.execute("SELECT id, horas, desde FROM source_health").fetchall():
+            self.salud[i] = float(h)
+            self.salud_inicio[i] = int(ts - float(h) * H)
         row = db.execute(f"SELECT MAX(ts) FROM fv_noticias WHERE feed IN ({','.join('?' * len(RELAYS))})", RELAYS).fetchone()
         self._scan_ts = row[0] or now_ms() - 6 * H
 
@@ -865,14 +870,15 @@ class FuentesVivas:
 
     # ----- salud técnica (en el bucle: es poco trabajo)
     def _salud(self, ahora: int) -> bool:
-        """Suma las horas seguidas que falla cada feed (solo cuenta el tiempo con el bot en marcha, entre revisiones).
-        Devuelve True si parece caída nuestra red (falla más del 30 % de lo sondeado): entonces no se cuenta nada."""
+        """Horas seguidas que falla cada feed: tiempo REAL desde el primer fallo visto de la racha, también con el bot
+        parado entre medias (hallazgo n.º 5: contando solo las horas en marcha, con el bot parado el 90 % del tiempo, las
+        72 h no llegaban nunca). Un feed que funcionaba al parar el bot empieza de cero si falla al volver; uno que
+        fallaba al parar y sigue fallando al volver lleva todo el tiempo. Devuelve True si parece caída nuestra red
+        (falla más del 30 % de lo sondeado): entonces no se cuenta nada."""
         if self.poller is None:
             return False
         polled = [st for st in self.poller.states.values() if st.estado != "retirada" and st.ok is not None]
         failing = [st for st in polled if st.ok is False]
-        inc = 0.0 if self._ultima_salud is None else min((ahora - self._ultima_salud) / H, 2.0)
-        self._ultima_salud = ahora
         if polled and len(failing) > TEC_MAX_RED * len(polled):
             log.warning("Fallan %d de %d feeds: parece un problema de nuestra red, no se cuenta como caída de nadie",
                         len(failing), len(polled))
@@ -881,10 +887,12 @@ class FuentesVivas:
         for st in polled:
             fid = st.spec.id
             if st.ok is False and st.fails > 0:
-                self.salud[fid] = self.salud.get(fid, 0.0) + inc
+                inicio = self.salud_inicio.setdefault(fid, ahora)
+                self.salud[fid] = max(0.0, (ahora - inicio) / H)
                 rows.append((fid, self.salud[fid], ahora))
-            elif fid in self.salud:
-                del self.salud[fid]
+            elif fid in self.salud or fid in self.salud_inicio:
+                self.salud.pop(fid, None)
+                self.salud_inicio.pop(fid, None)
                 gone.append((fid,))
         db = self.store.db
         db.executemany("INSERT OR REPLACE INTO source_health VALUES (?,?,?)", rows)
@@ -1388,7 +1396,7 @@ class FuentesVivas:
     def estado(self) -> dict:
         """Mensaje «fuentes_vivas» del bus (sin ts)."""
         feeds = Counter(st.estado for st in self.poller.states.values()) if self.poller else Counter()
-        medios = Counter(f.estado for f in self.filas.values() if f.origen == "medio")
+        medios = Counter(f.estado if (f := self.filas.get(k)) else "activa" for k in self._medios(todos=True))
         cand = Counter(r[0] for r in self.store.db.execute("SELECT estado FROM fv_candidatos").fetchall())
         return {"type": "fuentes_vivas", "auto": self.auto, "descubrir": self.descubrir,
                 "feeds": {e: feeds.get(e, 0) for e in ESTADOS}, "medios": {e: medios.get(e, 0) for e in ESTADOS},
@@ -1430,6 +1438,15 @@ class FuentesVivas:
                                     "horas_fallando": round(self.salud.get(clave, 0.0), 1)}})
         return out
 
+    def _medios(self, todos: bool = False) -> set[str]:
+        """Medios conocidos: los que tienen fila (algún cambio de estado) y los medidos; un medio sin fila está activo.
+        La lista enseña solo los medidos con muestra (`CAND_MIN_CASOS`); los contadores, todos (hallazgo n.º 9: daba
+        «0 medios activos» con miles medidos). Los dominios .invalid (RFC 2606, nunca existen) son restos de pruebas
+        y no cuentan ni salen (hallazgo n.º 34); su fila y el historial se quedan como están."""
+        claves = {k for k in self.filas if k.startswith(MEDIO)}
+        claves |= {k for k, c in self.cifras.items() if k.startswith(MEDIO) and (todos or c.indep >= CAND_MIN_CASOS)}
+        return {k for k in claves if not k.endswith(PRUEBA_TLD)}
+
     def lista(self, region: str | None = None, estado: str | None = None, tipo: str | None = None,
               limite: int = 10_000) -> list[dict]:
         """Fuentes con estado, peso, motivo, cifras, protección a mano y nota: primero las retiradas y silenciadas,
@@ -1439,9 +1456,7 @@ class FuentesVivas:
             out += [self._vista(fid, st) for fid, st in self.poller.states.items()
                     if (not region or st.spec.region == region) and (not estado or st.estado == estado)]
         if tipo in (None, "medio") and not region:
-            claves = {k for k in self.filas if k.startswith(MEDIO)}
-            claves |= {k for k, c in self.cifras.items() if k.startswith(MEDIO) and c.indep >= CAND_MIN_CASOS}
-            out += [v for v in (self._vista(k) for k in claves) if not estado or v["estado"] == estado]
+            out += [v for v in (self._vista(k) for k in self._medios()) if not estado or v["estado"] == estado]
         out.sort(key=lambda v: (-ESTADOS.index(v["estado"]), v["nombre"].casefold(), v["id"]))
         return out[:max(1, int(limite))]
 

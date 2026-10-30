@@ -1529,6 +1529,7 @@ async def test_motor_pausado_por_la_evolucion_mide_pero_no_entra(tmp_path, live_
     eng, sent, _ = evo_engine(tmp_path, now, {"BTC": (1, 0.3)})
     assert eng.paused and eng.notice.startswith("Campeón pausado por la evolución (solo paper)")
     assert "Pierde -0,6 R" in eng.notice and eng.view()["estrategia_cargada"]["pausada"] is True
+    assert eng.view()["estrategia_cargada"]["motivo"] == "Pierde -0,6 R en 30 operaciones"   # n.º 20: la web lo enseña
     await eng.step()
     run = _rimp(eng, "BTC")
     assert not sent and run.done and "pausado por la evolución" in run.end_why
@@ -2065,3 +2066,58 @@ async def test_motor_seis4r_estado_y_ticket_de_7_dias(monkeypatch):
     why = _rimp(eng, "BTC").last_why
     assert why.endswith("; como mucho 7 días") and "seguridad" not in why
     assert t["tags"]["preset"] is None   # con ventanas y monedas cambiadas no es el preset entero
+def test_veto_de_las_fiables_falla_en_cerrado_sin_senal():
+    """Revisión del 28-10: con «6 diarias» y grupos fiables que operan, si la señal no se pudo leer (o sin el medio de
+    las noticias) el veto no sabe si hay una noticia fiable en contra: no se entra. Sin grupos que operan, nada cambia."""
+    from bot import fiables
+    p = ap.impulse_params(ap.SEIS)[0]
+    tags = ap.impulse_tags(1, 0.3, {}, {"dir": 0, "sin_dato": True}, p)
+    assert tags["noticia_fiable"] == "sin_dato"
+    assert ap.impulse_tags(1, 0.3, {}, {"dir": 0}, p)["noticia_fiable"] == "ninguna"
+    fiables.usar(None)
+    assert ap.impulse_filters(1, tags, {}, p) is None
+    fiables.usar({"grupos": [{"clave": "medio:x.com", "estado": "fiable", "opera": True}]})
+    try:
+        assert "no se pudieron leer" in ap.impulse_filters(1, tags, {}, p)
+        assert ap.impulse_filters(1, {**tags, "noticia_fiable": "ninguna"}, {}, p) is None
+        e2 = ap.impulse_params(ap.IMPULSO)[0]
+        assert ap.impulse_filters(1, {**tags, "btc": "a_favor"}, {}, e2) is None   # E2 no usa ese veto
+    finally:
+        fiables.usar(None)
+
+
+def test_v2_pasa_el_precio_de_okx_a_la_escala_de_binance():
+    """Hallazgo n.º 61: en el modo v2 («ruptura») el cierre y el stop salen de Binance en USDT y el precio de ahora es
+    de OKX EU en USDC (unos 10 pb por debajo). Con la base del momento (mediana de los cierres frente a OKX visto a la
+    vez, con 10 muestras como mínimo) el cruce del stop y la peor entrada se comparan en la misma escala."""
+    bus = FakeBus()
+    eng = ap.OpeningEngine(bus, None, lambda c, w: {}, lambda *a: True, lambda: {}, params={"range_min": 5},
+                           clock=lambda: T0 + 30 * MIN)
+    assert not eng.impulso and eng.basis_of("BTC") is None
+    now = T0 + 10 * MIN + 3000
+    bar = lambda t, c: [t, c, c, c, c, 1.0, c, 0.5]
+    okx = [99.90, 99.91, 99.89] * 4 + [120.0]      # 120: un precio movido no cambia la mediana
+    for k, px in enumerate(okx):
+        t = now + k * MIN
+        bus.publish({"type": "market", "prices": {"BTC": px}, "updated": {"BTC": t - 1000}})
+        eng._basis_note("BTC", [bar(T0 + (9 + k) * MIN, 100.0)], t)
+        eng._basis_note("BTC", [bar(T0 + (9 + k) * MIN, 100.0)], t + 1000)   # la misma vela no cuenta dos veces
+        if k == 8:
+            assert eng.basis_of("BTC") is None                                 # 9 muestras: aún no se usa
+    t = now + len(okx) * MIN
+    bus.publish({"type": "market", "prices": {"BTC": 99.0}, "updated": {"BTC": t - 60_000}})   # viejo: no cuenta
+    eng._basis_note("BTC", [bar(T0 + (9 + len(okx)) * MIN, 100.0)], t)
+    assert len(eng.basis["BTC"]) == 13 and eng.basis_of("BTC") == pytest.approx(100 / 99.90)
+    k = eng.basis_of("BTC")
+    assert eng.basis_of("BTC", T0 + 13 * 3600_000) is None                     # muestras de más de 12 h: no valen
+    act = {"dir": 1, "price": 100.0, "stop_px": 99.95}
+    bus.publish({"type": "market", "prices": {"BTC": 99.92}, "updated": {"BTC": t}})
+    # Antes: 99,92 (USDC) < 99,95 (stop en USDT) y se daba por cruzado. En la escala de Binance es 100,02: no lo está.
+    assert eng._entry_price("BTC", act, t) == pytest.approx(99.92 * k) and 99.92 * k > 100.0
+    bus.publish({"type": "market", "prices": {"BTC": 99.80}, "updated": {"BTC": t}})
+    assert eng._entry_price("BTC", act, t) == pytest.approx(99.80 * k)          # cruzado de verdad: entry_plan lo rechaza
+    assert not ap.entry_plan(1, eng._entry_price("BTC", act, t), act, eng.p)["ok"]
+    eng.basis["BTC"] = type(eng.basis["BTC"])([(i, 1.02) for i in range(12)], maxlen=ap.BASIS_N)
+    assert eng.basis_of("BTC") is None                                           # un 2 % no es una base: no se usa
+    bus.publish({"type": "market", "prices": {"BTC": 99.96}, "updated": {"BTC": t}})
+    assert eng._entry_price("BTC", act, t) == 100.0                              # sin base: como antes

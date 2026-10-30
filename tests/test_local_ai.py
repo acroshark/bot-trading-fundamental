@@ -739,6 +739,9 @@ async def test_classify_pide_el_esquema_y_normaliza():
     # +30 con apetito «baja» sale bajista; 12 → 10, y la magnitud 95 lo permite.
     assert (tr["importancia"], tr["credibilidad"], tr["sentimiento"], tr["monedas"]) == (10, 100, "bajista", ["ETH"])
     assert tr["repercusion"]["direccion"] == -30 and list(tr) == KEYS
+    # Hallazgos n.º 1 y 42: menos tokens por triaje (antes 700) y los límites del prompt también en el esquema.
+    assert body["max_tokens"] == 500 and SCHEMA["properties"]["resumen"]["maxLength"] == 160
+    assert SCHEMA["properties"]["motivo"]["maxLength"] == 120
 
 
 @pytest.mark.parametrize("content", [

@@ -134,8 +134,9 @@ def activar(preset: str, datos: Path, ahora: int | None = None, extra: str | Non
     ok, why = evolucion.validar_activa(nueva)
     if not ok:
         return {"ok": False, "why": f"no se escribe: {why}"}
-    if antes.get("preset") == preset and evolucion.firma(antes) == evolucion.firma(nueva) \
-            and bool(antes.get("pausada")) == bool(nueva.get("pausada")):
+    # misma versión (firma) y sin pausa distinta: ya opera eso (también sin archivo, con el preset E2, o tras revertir un
+    # cambio, aunque el archivo no lleve la clave «preset»); no se reescribe ni se apunta otro cambio
+    if evolucion.firma(antes) == evolucion.firma(nueva) and bool(antes.get("pausada")) == bool(nueva.get("pausada")):
         return {"ok": True, "why": f"«{apertura.PRESETS[preset]['nombre']}» ya era la estrategia activa: nada que "
                                    "cambiar", "activa": antes, "registro": None}
     if simular:

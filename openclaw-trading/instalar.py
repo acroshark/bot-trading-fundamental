@@ -69,14 +69,31 @@ def config(token: str) -> dict:
     }
 
 
+# Comandos de la skill radar (radar.py, solo GET a la API del bot) que puede ejecutar el agente, con argumentos exactos.
+# Cualquier otro comando o argumento se deniega. Si cambias esto, cambia también SKILL.md y AGENTS.md.
+SIMPLES = ("estado", "flujo", "agenda", "balanza", "tendencia", "predicciones", "backtest", "cartera", "aperturas",
+           "estrategia", "aprendizaje", "postmortems", "evolucion", "propuestas", "fuentes", "vigilancia", "fiables")
+BOLSAS = ("tokio", "seul", "shanghai", "hongkong", "dubai", "frankfurt", "londres", "madrid", "nuevayork", "saopaulo")
+APR_POR = ("nivel", "region", "idioma", "tipo", "ventana", "fase", "rol", "moneda")   # /api/aprendizaje/estadisticas
+PM_ORIGEN = ("paper", "vigilancia")                                                    # /api/aprendizaje/postmortems
+PROP_ESTADOS = ("pendiente", "aplicada", "descartada", "caducada", "revertida")        # /api/evolucion/propuestas
+
+
+def _alt(xs) -> str:
+    return "(" + "|".join(xs) + ")"
+
+
 def approvals() -> dict:
     pre = f"^-I -B {RADAR} "
+    allow = [pre + _alt(SIMPLES) + "$",
+             pre + "noticias( --horas ([1-9]|[1-3][0-9]|4[0-8]))?( --min ([0-9]|10))?( --bolsa " + _alt(BOLSAS) + ")?$",
+             pre + "aprendizaje --por " + _alt(APR_POR) + "$",
+             pre + "postmortems --origen " + _alt(PM_ORIGEN) + "$",
+             pre + "propuestas --estado " + _alt(PROP_ESTADOS) + "$"]
     return {"version": 1,
             "defaults": {"security": "deny", "ask": "off", "askFallback": "deny", "autoAllowSkills": False},
             "agents": {"trading": {"security": "allowlist", "ask": "off", "askFallback": "deny", "autoAllowSkills": False,
-                                   "allowlist": [{"pattern": PY, "argPattern": pre + "(estado|flujo|agenda|balanza|tendencia|predicciones|backtest|cartera|aperturas)$"},
-                                                 {"pattern": PY, "argPattern": pre + "noticias( --horas ([1-9]|[1-3][0-9]|4[0-8]))?( --min ([0-9]|10))?"
-                                                  "( --bolsa (tokio|seul|shanghai|hongkong|dubai|frankfurt|londres|madrid|nuevayork|saopaulo))?$"}]}}}
+                                   "allowlist": [{"pattern": PY, "argPattern": a} for a in allow]}}}
 
 
 def main() -> None:

@@ -54,6 +54,13 @@ MAX_PER_HOST = 3             # peticiones a la vez por host: uno colgado no acap
 HOST_TRIP = 5                # fallos de red seguidos en un host antes de frenarlo entero
 HOST_BACKOFF_S = 30          # primera pausa de un host que corta (429/503) o no responde; crece ×2
 THROTTLE_STATUS = (429, 503)
+# Sin red (hallazgo n.º 44): si en OFFLINE_WINDOW_S fallan por la red casi todos los hosts (≥ OFFLINE_FRAC de al menos
+# OFFLINE_MIN_HOSTS), es un corte del PC, no de las fuentes: no se suman fallos ni pausas, se prueba la red con un solo
+# feed cada OFFLINE_PROBE_S y, al volver, se ponen a cero los fallos y pausas de red y se reprograma todo repartido.
+OFFLINE_WINDOW_S = 60
+OFFLINE_FRAC = 0.8
+OFFLINE_MIN_HOSTS = 10
+OFFLINE_PROBE_S = 15
 SUMMARY_EVERY_S = 10
 START_SPREAD_S = 60          # el primer sondeo de cada feed se reparte en al menos este tiempo (más con registros grandes)
 TICK_S = 0.5                 # el planificador mira el heap al menos con esta frecuencia
@@ -226,6 +233,11 @@ def short_error(e: BaseException) -> str:
     return (f"Error inesperado ({type(e).__name__}: {msg})" if msg else f"Error inesperado ({type(e).__name__})")[:120]
 
 
+def is_network_error(e: BaseException) -> bool:
+    """Fallo de red (sin conexión, tiempo agotado, conexión cortada): no responde nadie, a diferencia de un 4xx o 5xx."""
+    return isinstance(e, (asyncio.TimeoutError, TimeoutError, aiohttp.ClientConnectionError))
+
+
 def retry_after(e: BaseException) -> float | None:
     """Segundos que pide el servidor en Retry-After (número o fecha HTTP)."""
     v = ((getattr(e, "headers", None) or {}).get("Retry-After") or "").strip()
@@ -338,6 +350,7 @@ class FeedState:
         self.hits: deque[tuple[int, bool]] = deque()   # (ms, relevante) de lo que la mesa aceptó
         self.lats: deque[float] = deque(maxlen=LAT_SAMPLES)
         self.estado = "activa"           # ciclo de vida (ESTADOS); lo cambia FeedPoller.set_estado
+        self.net_fail = False            # el último fallo fue de red (se perdona al volver la conexión)
 
     @property
     def peso(self) -> float:
@@ -521,6 +534,11 @@ class FeedPoller:
         self.dirty: set[str] = set()
         self._closed = False
         self._last_summary: dict | None = None
+        self.inflight: set[str] = set()   # feeds con una petición en vuelo (fuera del heap)
+        self.recent: deque[tuple[float, str, bool]] = deque()   # (hora, host, fallo de red) de OFFLINE_WINDOW_S
+        self.offline_since: float | None = None   # sin red desde (reloj del planificador) o None
+        self.next_probe = 0.0
+        self.offline_episodes = 0
         self.parse_workers = PARSE_WORKERS   # 0 = leer en un hilo (pruebas)
         self.parse_pool: ProcessPoolExecutor | None = None   # lo crea run(); sin él se lee en un hilo
         # Se pueden sustituir en las pruebas (reloj falso).
@@ -669,6 +687,11 @@ class FeedPoller:
             if st.estado == "retirada":   # no se sondea; set_estado la devuelve al heap si se restaura
                 self.parked.add(fid)
                 continue
+            if self.offline_since is not None:   # sin red: solo una prueba cada OFFLINE_PROBE_S; el resto espera
+                if now < self.next_probe:
+                    self.sched.push(fid, self.next_probe + random.uniform(0, OFFLINE_PROBE_S))
+                    continue
+                self.next_probe = now + OFFLINE_PROBE_S
             wait = self.gate.delay(st.host, now)
             if wait > 0 or self.gate.busy(st.host):   # el host aún no admite otra petición: vuelve a la cola
                 self.sched.push(fid, now + (wait or self.gate.gap(st.host)))
@@ -684,6 +707,7 @@ class FeedPoller:
                 self.sched.push(fid, now + wait)
                 continue
             self.gate.start(st.host, now)
+            self.inflight.add(fid)
             task = asyncio.create_task(self._poll(st))
             self.tasks.add(task)
             task.add_done_callback(self.tasks.discard)
@@ -694,16 +718,26 @@ class FeedPoller:
         except asyncio.CancelledError:
             raise
         except Exception as e:  # un feed caído no debe tumbar al resto
-            st.on_error(short_error(e))
-            pause = self.gate.failed(st.host, self.clock(), e)
-            if st.fails == 1 or st.fails % 10 == 0:
-                log.warning("Feed %s falla (%d seguidos): %s · reintento en %.0f s",
-                            st.spec.id, st.fails, st.err, st.next_wait())
-            if pause:
-                log.warning("Host %s corta o no responde (%s): pausa de %.0f s para todos sus feeds", st.host, st.err, pause)
+            net = is_network_error(e)
+            if net and self.offline_since is not None:   # sin red: ni fallo del feed ni pausa del host
+                st.ok, st.err, st.net_fail = False, "Sin red en este PC", True
+            else:
+                st.on_error(short_error(e))
+                st.net_fail = net
+                pause = self.gate.failed(st.host, self.clock(), e)
+                if st.fails == 1 or st.fails % 10 == 0:
+                    log.warning("Feed %s falla (%d seguidos): %s · reintento en %.0f s",
+                                st.spec.id, st.fails, st.err, st.next_wait())
+                if pause:
+                    log.warning("Host %s corta o no responde (%s): pausa de %.0f s para todos sus feeds", st.host,
+                                st.err, pause)
+            self._net_result(st.host, net)
         else:
             self.gate.ok(st.host)
+            st.net_fail = False
+            self._net_result(st.host, False)
         finally:
+            self.inflight.discard(st.spec.id)
             self.sem.release()
             self.gate.done(st.host)
             self.dirty.add(st.spec.id)
@@ -714,6 +748,52 @@ class FeedPoller:
                     log.exception("No se pudo calcular la próxima espera de %s", st.spec.id)
                     wait = BACKOFF_MAX_S
                 self.sched.push(st.spec.id, self.clock() + wait)
+
+    # ---- sin red (hallazgo n.º 44)
+
+    def _net_result(self, host: str, net_fail: bool) -> None:
+        """Apunta el resultado de un sondeo (¿fallo de red?) y entra o sale del modo sin red."""
+        now = self.clock()
+        if self.offline_since is not None:
+            if not net_fail:   # alguien responde (también un 4xx/5xx): la red ha vuelto
+                self._back_online(now)
+            return
+        self.recent.append((now, host, net_fail))
+        while self.recent and now - self.recent[0][0] > OFFLINE_WINDOW_S:
+            self.recent.popleft()
+        if not net_fail:
+            return
+        hosts: dict[str, bool] = {}
+        for _t, h, f in self.recent:
+            hosts[h] = hosts.get(h, True) and f   # el host solo cuenta como caído si todo lo suyo falló por la red
+        if len(hosts) >= OFFLINE_MIN_HOSTS and sum(hosts.values()) >= OFFLINE_FRAC * len(hosts):
+            self.offline_since, self.next_probe = now, now + OFFLINE_PROBE_S
+            self.offline_episodes += 1
+            log.warning("Sin red: %d de %d hosts fallan por la red en %d s; se pausa el sondeo y se prueba la conexión "
+                        "cada %d s (los fallos no cuentan)", sum(hosts.values()), len(hosts), OFFLINE_WINDOW_S,
+                        OFFLINE_PROBE_S)
+
+    def _back_online(self, now: float) -> None:
+        """Vuelve la red: fallos y pausas de red a cero y todos los feeds reprogramados, repartidos en el tiempo del
+        arranque (antes tardaban hasta 30 min, lo que hubieran acumulado de espera)."""
+        down = now - (self.offline_since or now)
+        self.offline_since = None
+        self.recent.clear()
+        self.gate.fails.clear()
+        self.gate.next.clear()
+        reset = 0
+        for st in self.states.values():
+            if st.net_fail:
+                st.fails, st.net_fail = 0, False
+                reset += 1
+        sched = Scheduler()
+        for fid, st in self.states.items():
+            if fid in self.inflight or fid in self.parked or st.estado == "retirada":
+                continue
+            sched.push(fid, now + random.uniform(0, self.start_spread_s))
+        self.sched = sched
+        log.warning("La red ha vuelto tras %.0f s: %d feeds sin sus fallos de red y todos reprogramados en %.0f s",
+                    down, reset, self.start_spread_s)
 
     async def _get(self, st: FeedState) -> tuple[int, bytes, str | None, str | None]:
         """GET condicional. Devuelve (estado, cuerpo, ETag, Last-Modified)."""
@@ -885,7 +965,9 @@ class FeedPoller:
             lats = [m for m in (st.median_lat() for st in sts) if m is not None]
             out.append({"region": key, "name": name, "market": market, **self._counts(sts, now),
                         "median_lat_s": round(statistics.median(lats)) if lats else None})
-        return {"totals": self._counts(alive, now), "regions": out}
+        totals = self._counts(alive, now)
+        totals["sin_red"] = self.offline_since is not None   # corte de red del PC (n.º 44)
+        return {"totals": totals, "regions": out}
 
     def publish_summary(self) -> bool:
         """Publica «sources_summary» solo si ha cambiado desde la última vez."""

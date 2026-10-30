@@ -325,6 +325,25 @@ def test_noticias_macro_solo_con_reflejo_confirmado_y_sin_saturar(store):
     assert abs(de["effect_pp"]) < 0.3 and "descontado el tono medio de las noticias de 24 h (-0,28)" in de["source"]
 
 
+def test_macro_confirmada_sin_monedas_vale_para_las_cuatro(store):
+    """Revisión del 28-10: una macro (clase del prefiltro) que la cripto confirmó con la media de las cuatro y que no
+    nombra monedas vale para las cuatro, como en el motor; sin confirmar, para ninguna."""
+    p, bus, _ = make(store)
+    t = ms(NOW)
+    for sid, refl in (("m1", "confirmada"), ("m2", None)):
+        bus.publish({"type": "event", "kind": "captured", "agent": "hunter", "story": sid, "ts": t - H - 60_000,
+                     "title": "Aranceles", "coins": [], "text": "", "patch": {"clase": "macro"}})
+    news(bus, "m1", t - H, {"direccion": -80, "magnitud": 70, "activos": [], "bolsas": []},
+         resumen="EE. UU. impone aranceles del 100 % a China")
+    news(bus, "m2", t - H, {"direccion": 80, "magnitud": 70, "activos": [], "bolsas": []},
+         resumen="China responde con aranceles", reflejo=None)
+    msg = p.run_round(NOW_CR)
+    for c in ("BTC", "ETH", "SOL", "XRP"):
+        it = item(msg, f"{c}-londres-2026-10-21")
+        d = next(x for x in it["drivers"] if x["factor"].startswith(f"1 noticia sobre {c}"))
+        assert d["effect_pp"] < 0 and "aranceles del 100 %" in d["source"]
+
+
 def test_bolsa_futuros(store):
     # En este backtest Nueva York no tiene estrategias operables: se mide de cierre a cierre y el futuro cuenta.
     trend = {"markets": {"nuevayork": {"futures": {"symbol": "ES=F", "change_pct": 0.5}, "updated": ms(NOW) - 60_000}}}

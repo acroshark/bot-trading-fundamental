@@ -427,7 +427,7 @@ def test_sin_recomendacion_valida_preset_v2_con_aviso_nunca_la_v1(tmp_path, monk
             path.unlink(missing_ok=True)
         else:
             path.write_text(body if isinstance(body, str) else json.dumps(body), encoding="utf-8")
-        assert ap.recommended_params() == {}
+        assert ap.load_recommendation()[0] == {}
         eng = ap.OpeningEngine(None, None, lambda c, w: {}, lambda *a: True, lambda: {})
         assert eng.p == {**ap.PARAMS, **ap.V2} and not eng.p["gate"] and eng.p["stop_mode"] == "or_mid", why
         assert eng.source == "preset_v2" and why in eng.notice and "no la v1" in eng.notice

@@ -19,6 +19,22 @@ OKX_WS = "wss://wseea.okx.com/ws/v5/public"   # puerto 443: OKX retira el 8443 (
 BN = "https://fapi.binance.com"
 FUNDING_INFO_S = 6 * 3600    # el periodo de funding casi nunca cambia
 FUNDING_H_DEFAULT = 8.0      # Binance liquida cada 8 h salvo los símbolos que lista fundingInfo
+FLOW_STALE_MS = 5 * 60_000   # una fila del flujo minorista más vieja que esto no se usa (Binance caído; n.º 44)
+
+
+def fresh_flow(market: dict | None, now: int | None = None, max_age_ms: int = FLOW_STALE_MS) -> dict:
+    """Las filas de market.flow (funding, L/S…) con hora reciente («ts», puesto al leerlas de Binance): si Binance
+    deja de responder, el último dato se seguía usando sin aviso en las predicciones, el motor, el paper y el estratega
+    (hallazgo n.º 44). Una fila sin «ts» (de antes del 28-10-2026) se acepta."""
+    now = now_ms() if now is None else now
+    out = {}
+    for c, f in ((market or {}).get("flow") or {}).items():
+        if not isinstance(f, dict):
+            continue
+        ts = f.get("ts")
+        if not isinstance(ts, (int, float)) or now - ts <= max_age_ms:
+            out[c] = f
+    return out
 
 
 def funding_8h(f: dict) -> float:
@@ -172,6 +188,7 @@ class Market:
                     log.warning("Periodo de funding de Binance no disponible: %s", e)
                 rows = await asyncio.gather(*(self._flow_coin(c) for c in config.COINS))
                 for c, f in zip(config.COINS, rows):
+                    f["ts"] = now_ms()   # hora del dato: quien lo lea descarta el viejo (fresh_flow)
                     f["spread"] = self.spread.get(c)
                     f["pctl"] = self._pctl(c, f["ls"])
                     if self.funding_h.get(c):
@@ -213,4 +230,5 @@ class Market:
                 self._dirty = False
                 # ts = llegada del último precio: si el WebSocket cae, el flujo sigue publicando pero ts no avanza.
                 self.bus.publish({"type": "market", "ts": max(self.updated.values(), default=now_ms()), "prices": dict(self.prices),
-                                  "updated": dict(self.updated), "flow": dict(self.flow), "spread": dict(self.spread)})
+                                  "updated": dict(self.updated), "flow": fresh_flow({"flow": self.flow}),
+                                  "spread": dict(self.spread)})

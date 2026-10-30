@@ -80,9 +80,11 @@ Estado a 26-10-2026, ampliado el 27-10-2026 con el laboratorio de 2.000 estrateg
 | No funciona | 465 |
 | Pocos datos | 74 |
 
-## 6. Motor de aperturas (tu operativa)
+## 6. Motor de aperturas v2 «ruptura» (histórico)
 
-La regla es la señal → confirmación en los primeros minutos de la apertura → entrada → stop dinámico → reentradas mientras haya volumen.
+> **Histórico (v1 y v2).** Así era el motor antes de tus reglas del 26-10-2026. El que opera ahora es el de la sección 14 (y, desde el 28-10-2026, el preset «6 diarias» de la sección 20): horquilla pura de stop ≥ 1,5 % y ≥ 2R, objetivo ≥ 3 % neto, **sin stop dinámico, break-even ni reentradas**. Las cifras de abajo se quedan como referencia.
+
+La regla de la v2 era la señal → confirmación en los primeros minutos de la apertura → entrada → stop dinámico → reentradas mientras haya volumen.
 
 **Datos:**
 - Velas de 1 minuto de Binance de 24 meses (del 01-10-2024 al 23-10-2026): 2.614 aperturas reales × 4 monedas.
@@ -154,7 +156,9 @@ Cada 5 minutos, la probabilidad de subida de cada bolsa que va a abrir y de cada
 
 Precios reales de OKX EU, comisiones y deslizamiento.
 
-**Salidas configurables por operación:**
+> **Con tus reglas** (`config.USER_RULES`, encendidas por defecto) el paper solo acepta la horquilla pura: stop ≥ 1,5 %, ≥ 2R, objetivo ≥ 3 % neto de costes (sección 21) y **sin break-even, stop dinámico ni salida parcial** (los anula aunque la orden los pida; rechaza la que no cumpla el stop, los 2R o el neto). Además, ≤ 6 entradas y ≤ 3 % de riesgo por día de Madrid, compartidos por el motor y la entrada por noticia (sección 20). La lista de salidas de abajo es lo que el paper sabe hacer con `BOT_USER_RULES=0` (solo las pruebas de la v1).
+
+**Salidas configurables por operación** (sin tus reglas):
 - stop inicial;
 - break-even que cubre costes, cuando se pide;
 - stop dinámico;
@@ -265,8 +269,8 @@ El motor en vivo (`bot/apertura.py`, modo «impulso», por defecto) opera la reg
 
 **Otros detalles:**
 - **Límites diarios:** 4 entradas y 2 % de riesgo. Las 4 monedas se mueven juntas y suelen disparar en la misma apertura.
-- **Comisión del perpetuo:** se supone la misma que la del contado (0,10 % por lado), la prudente. El funding sale de Binance escalado a 8 h con su periodo real (`funding_h`); no es el de OKX X-Perps EU, que está sin confirmar.
-- **Noticias:** no dan la dirección. Filtran (`no_contra`: no se entra si van claramente en contra) y etiquetan cada operación (a favor, en contra, sin noticia) para medir si aportan.
+- **Comisión del perpetuo:** en el paper, por defecto la misma que la del contado (0,10 % por lado), la prudente; la real de OKX X-Perps EU es 0,05 % taker (confirmada, ver la sección 21), que es la del laboratorio. El funding sale de Binance escalado a 8 h con su periodo real (`funding_h`); el de X-Perps es público y ronda el doble (sección 21).
+- **Noticias:** no dan la dirección. Filtran (`no_contra`: no se entra si van claramente en contra) y etiquetan cada operación (a favor, en contra, neutral) para medir si aportan.
 - **Variables de entorno:** `BOT_APERTURAS_ESTRATEGIA=ruptura` vuelve a la v2, y `BOT_IMPULSO_PARAMS` (JSON) cambia parámetros sobre el preset. Si la evolución ha aplicado una estrategia (`estrategia_activa.json`), manda esa.
 
 ## 15. El sistema que aprende (27-10-2026)
@@ -374,6 +378,19 @@ lo dice. La tasa base de cada ventana sale de la historia de la cripto en esa ap
   captadas: política 479, empresas 255, tecnología 187 y elecciones 164, frente a 140 de cripto), entraba con las cuatro
   monedas y saturaba la cola de la IA local (hallazgo n.º 2).
 
+**Cola de la IA local** (hallazgos n.º 1 y 42, revisión del 28-10-2026 por la tarde): aun así triaba unas 570 noticias
+por hora de unas 4.300 relevantes y la cola seguía en 115-120. Ahora:
+- la cripto va siempre antes que la macro (`desk.CRIPTO_BONO`): con la cola llena lo que se pierde es macro, nunca cripto
+  (también se tría la cripto de hace horas);
+- la macro de hace horas (no fresca) se capta y se mide, pero ya no se tría: solo contaría si la cripto la reflejara en
+  los 60 min desde la captura, y ese movimiento ya pasó;
+- la macro de la región cuya bolsa abre en las próximas 3 h, o abrió hace menos de 4 h, pasa por delante de la de las
+  demás regiones (`desk.opening_bonus`);
+- `max_tokens` del triaje baja de 700 a 500 (salen unos 350) y el esquema limita el resumen a 160 caracteres y el motivo a
+  120, lo mismo que ya pedía el prompt;
+- los post-mortems tienen un hueco reservado: con triajes esperando, uno cada 10 min pasa por delante (n.º 15 y 4).
+Falta medirlo en el PC del usuario: que la cola baje de 120 y cuántas noticias por hora se tríen.
+
 **Reflejo en la cripto** (`bot/reflejo.py`): una noticia que no es de cripto (por la clase del prefiltro, nunca por los
 temas o el tipo que le ponga la IA local) y que el triaje dejó alcista o bajista solo cuenta si la cripto la confirma.
 Desde su captura, con la media de las cuatro monedas (o BTC si falta alguna), y con un umbral que es el mayor de 0,5 % y
@@ -383,6 +400,12 @@ casos):
 - *contraria*: al menos el umbral en contra;
 - *sin reflejo*: pasados 60 min, ninguna de las dos;
 - *pendiente*: mientras tanto. Manda lo que pase antes.
+
+Revisión del 28-10-2026 (tarde): si una moneda se queda sin velas nuevas se mide con BTC sola (antes anulaba la media y
+la noticia salía «sin reflejo» con +0,00 %); sin los 60 min de velas completos no se cierra hasta 3 h después de la
+captura (antes, a los 70 min con lo que hubiera, también tras un reinicio); una noticia triada más de 60 min después de
+captarla queda «sin reflejo» (`tarde`): el movimiento ya había pasado cuando el bot pudo usarla. `GET /api/reflejo`
+enseña la tasa de «confirmada» frente a la del azar.
 Solo las confirmadas cuentan en la señal del motor (y entonces valen para las cuatro monedas), en la balanza de la vista
 Mundo, en el contexto del estratega y en las predicciones; en `/api/noticias` las demás salen con credibilidad ajustada 0.
 Las de cripto cuentan como siempre.
@@ -499,8 +522,10 @@ hora, con lo que midió el aprendizaje (`news_outcomes`), sin mirar el futuro (s
   si además: el conjunto supera al azar que conserva la hora (p < 0,05); tiene ≥ 30 noticias distintas y una cota de
   Wilson ≥ 50 % contando un caso por bloque de 30 min; acierta ≥ 50 % en bruto (lo que cobra una operación sin cobertura)
   y la horquilla del usuario (1,5 %/4,5 % a 24 h, aproximada con el máximo a favor y en contra) da > 0 R en ≥ 30 noticias;
-  y **hacia delante**, en los días posteriores a su primera elección y con las noticias que usaría en vivo (`senal` = 1),
-  ≥ 30 noticias distintas con acierto ≥ 60 % y bruto ≥ 50 %. Cada grupo dice lo que le falta.
+  y **hacia delante**, en los días posteriores a su primera elección y con las noticias que usaría en vivo (`senal` 1
+  o 2: una macro cuenta aunque la cripto aún no la haya confirmado, porque quedarse con las confirmadas miraría el futuro;
+  corregido en la revisión del 28-10-2026, versión 3), ≥ 30 noticias distintas con acierto ≥ 60 % y bruto ≥ 50 %. Cada
+  grupo dice lo que le falta.
 - Cada cálculo nuevo se añade a la tabla `noticias_fiables` (no se borra).
 
 **2. Entrada por noticia confirmada (`bot/entrada_noticias.py`, eventos `entrada_noticia`).** Cuando se tría una noticia
@@ -509,7 +534,8 @@ precio de esa moneda se mueva a su favor al menos el umbral del reflejo (el mayo
 0,5 % provisional y se recalcula) en los 60 min siguientes al triaje. Si lo hace, entra por el mismo camino que el motor
 (riesgo, aprobación y paper): stop 1,5 %, objetivo 3R (+4,5 %, ≥ 3 % neto), como mucho 24 h, largos al contado y cortos en
 perpetuo, 0,5 % de riesgo. Si no, caduca; una confirmación vista tarde no se persigue. Respeta una posición por moneda y
-los topes del día, **compartidos** con el motor (cuentan todas las entradas del paper del día de Madrid). Sin grupos que
+los topes del día, **compartidos** con el motor (cuentan todas las entradas del paper del día de Madrid): los del preset
+que tenga en marcha (6 entradas y 3 % con «6 diarias», 4 y 2 % con E2), nunca más de 6 y 3 %. Sin grupos que
 pasen la puerta no entra nunca: las noticias esperan en la cola hasta que ya no se pueden confirmar a tiempo.
 `BOT_ENTRADA_NOTICIAS=0` la apaga. Sus operaciones (`origen` `noticia_fiable`) no cuentan como del campeón E2 en la
 evolución, y la web las separa en Resultados.
@@ -1021,3 +1047,18 @@ etiquetadas con su preset (`tags.preset` = `seis4r`), que el ranking suma a su f
   - Ganadoras: 33 % / 29 %. En 3 años, el 68 % sale por el stop, el 16 % por el objetivo y el 16 % por tiempo; duración media, 59 h.
   - Caída máxima con los costes del paper: ≈ 21 % en 3 años (por orden de cierre; a precio de mercado, algo más).
 - Honesto: se eligió después de ver los dos tramos, entre las 50 combinaciones de stops y objetivos de `controles/anchos/`, y ninguna pasa Holm ni FDR. Fuera de muestra gana por los cortos (+0,28 R) y las compras pierden (−0,05 R), como el mercado (BTC −31 % en ese tramo). En la vecina de stop 3 % y 6R, «siempre corto» con el mismo libro da +0,124 R fuera, más que el impulso (+0,102). Se mide en paper tal cual.
+
+## 27. Funding de OKX X-Perps: lo que decides tú (28-10-2026)
+
+Las comisiones que comprobó la auditoría en las páginas oficiales de OKX (hallazgos n.º 56 y 60: contado 0,10 % como
+tomador con cuenta X-Perps y 0,35 % sin ella, X-Perps 0,05 %) son las del perfil de `bot/comisiones.py` (sección 23).
+
+- **Lo que tienes que confirmar en tu cuenta (n.º 56 y 57):** si en okx.com/en-eu te aparece «Unlock X-Perps» y la tabla
+  de 0,10 % en BTC-USDC. Si no, elige el perfil sin X-Perps en la web (o `BOT_COMISIONES=okx_eu_sin_xperps`), para que el
+  paper cuente lo que pagarías.
+- **Funding (n.º 59), sin cambiar todavía:** el paper usa el de Binance USDT-M escalado a 8 h. El de OKX X-Perps se
+  publica en `eea.okx.com/api/v5/public/funding-rate?instId=<MONEDA>-USD_UM_XPERP-310404`, con el mismo horario (00, 08
+  y 16 UTC), y del 24-09 al 27-10-2026 rondó el doble (X-Perps 0,0068-0,0093 % por 8 h; Binance 0,0032-0,0037 %). Con el
+  de Binance, los cortos cobran de menos (prudente) y un largo en perpetuo pagaría de menos; el efecto ronda el 0,05 % en
+  las 65 h medias de E2 y es menor en las 13 h de «6 diarias». Pasar al de X-Perps cambia los resultados de la cartera
+  paper (a favor de los cortos), así que queda pendiente de tu decisión y de confirmar que X-Perps está activo en España.
