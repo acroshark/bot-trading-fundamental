@@ -3741,3 +3741,21 @@ def test_aviso_si_el_reloj_se_desvia():
       return {a0, a, b, c: vista()};""")
     assert r["a0"]["hidden"] is True and r["a"]["hidden"] is False and r["a"]["txt"].startswith("El reloj de este PC va 3,0 s")
     assert r["b"]["hidden"] is True and r["c"]["hidden"] is True
+
+
+def test_con_seis4r3_en_marcha_e2_no_sale_como_la_que_opera():
+    """«6 diarias 4R · stop 3 %» (la de la cartera desde el 29-10-2026): E2 es la anterior y la apertura cuenta la suya.
+    Con una variante sin preset, ni E2 ni otra salen «en marcha»; sin «openings», la apertura dice que aún no lo sabe."""
+    r = run("const now = Date.now();" + FIAB + f"""S.btImp = {{impulso: {json.dumps(IMP_BT)}, lab: null, seis: null}};
+      const out = {{}};
+      for (const [k, m] of [["s4r3", opn({{preset: "seis4r3", nombre: "6 diarias 4R · stop 3 %"}})], ["otra", opn({{}})], ["nada", null]]){{
+        S.openings = m; S.live = k === "nada"; S.tab = "bt"; S.btSig = null; renderAll(true);
+        out[k] = {{title: H.el("#btLiveTitle").textContent, sub: H.el("#btLiveSub").textContent}};
+        S.tab = "market"; renderAll(true); out[k].open = H.el("#openSub").textContent; S.live = false;
+      }}
+      return out;""", live=False)
+    a, o, n = r["s4r3"], r["otra"], r["nada"]
+    assert a["title"].startswith("Estrategia anterior (E2)") and "«6 diarias 4R · stop 3 %»" in a["sub"]
+    assert "stop 3 % y objetivo 4R (+12 %)" in a["open"] and "E2" not in a["open"]
+    assert "en marcha" not in o["title"] and "que no es ninguno de los presets" in o["open"]
+    assert n["title"].endswith("backtest de referencia") and n["open"].startswith("El motor de aperturas aún no ha publicado")

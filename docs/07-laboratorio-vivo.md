@@ -25,7 +25,7 @@ en la pestaña Evolución. El paso a la cartera paper lo decide el usuario.
 [14 Cableado](#14-contrato-de-cableado-para-el-coordinador) · [15 Generador](#15-el-agente-generador) ·
 [16 Vigilante](#16-scriptslab-vivops1) · [17 Pruebas](#17-pruebas) · [18 Fases](#18-plan-por-fases-y-criterios-de-aceptación) ·
 [19 Decisiones y riesgos](#19-decisiones-del-usuario-y-riesgos) ·
-[20 Implementación](#20-implementación-29-10-2026)
+[20 Implementación](#20-implementación-29-10-2026) · [21 Noticias de 3 años](#21-noticias-de-3-años-29-10-2026)
 
 ---
 
@@ -217,10 +217,12 @@ como en el paper.
 | `fng` | `HIST_DIR/sentimiento/fng.json` | 2018-02 → 26-10-2026. No se actualiza solo: lo baja `historia_extra`. | 01:00 UTC del día (`historia_extra.fng_known_at`) | filtros |
 | `macro` | `HIST_DIR/macro/eventos.json` (IPC, empleo, FOMC) | 2021 → 2026 | la hora, de antemano; su reacción, 15 min después | familias macro |
 | `noticias_historia` | `historia_noticias/noticias.jsonl` (48.272 titulares de 22 medios) más los sentidos puestos por Claude a ciegas (787, `controles/fuentes/`) | 29-07 → 27-10-2026 | su hora de publicación | solo exploratoria: los 91 días caen dentro del fuera de muestra |
+| `noticias_3a` | `noticias_historia/lab/noticias.npz` y `meta.json` (`bot/lab_vivo/noticias.py`): historias de GDELT GKG y de 24 medios de cripto, deduplicadas como la mesa, en racimo y con el triaje de la IA local del bot (apartado [21](#21-noticias-de-3-años-29-10-2026)) | 01-07-2023 → 28-10-2026 cuando acabe el triaje (hasta entonces no hay archivo) | desde el minuto siguiente al sello del medio que completa el racimo | familias de noticias con historia (`noticia_racimo`, `noticia_apertura`) |
 | `noticias_vivas` | `GET /api/noticias` del bot (fase 2) | solo desde que se guarde | al captarse | solo prueba en avance |
 
 Sin historia útil para el backtest:
-- GDELT: solo 2021-01 → 2022-03.
+- GDELT DOC 2.0 (las series de tono y volumen de `historia_extra`): solo 2021-01 → 2022-03. Las noticias de 3 años
+  salen de los archivos GKG de GDELT 2.0, que sí cubren el periodo (`noticias_3a`).
 - Ratio largo/corto: desde el 23-09-2026.
 
 Una familia que los necesite solo puede ser **exploratoria** (8.6). La admisión rechaza una fuente que cubra menos del 50
@@ -451,7 +453,7 @@ class Mercado:
     def bolsas_conocidas(self, t_ms) -> list[tuple]              # (bolsa, día, retorno %) cerradas hace ≥ 15 min
     def fng_en(self, t_ms) -> float | None
     macro: tuple[np.ndarray, list[str]]      # calendario (las horas se saben de antemano)
-    noticias: "Noticias | None"              # solo con noticias_historia o noticias_vivas
+    noticias: "Noticias | None"              # noticias_3a con t < hasta (None sin el archivo compilado; apartado 21)
     def recortado(self, t_ms) -> "Mercado"   # la misma vista sin nada posterior a t (prueba del recorte)
 ```
 
@@ -482,6 +484,7 @@ Se portan, con sus pruebas, de `medir_selectiva.py` (`f_ema`, `f_wilder`, `f_atr
 | `dias` | `todos` · `mar-jue` · `sin_fin_de_semana` | Día de Madrid |
 | `aperturas` | `todas_horas` · `solo_en_apertura` · `fuera_de_apertura` | Si la decisión cae entre la apertura y +120 min de una ventana |
 | `noticias_en_contra` | `no` · `veto` | Solo en vivo (exploratoria): veto de una noticia fiable en contra, como «6 diarias» |
+| `noticias_previas` | `todas` · `no_contra` · `a_favor` | Noticias de 3 años (`noticias_3a`): el signo de la suma de los sentidos de las historias de esa moneda (y de las generales, con `noticias_generales` «todas») de las `noticias_horas` {4, 8, 12} antes de la decisión, con importancia ≥ `noticias_imp_min` {0, 5, 7} (que también cuenta como filtro); «no_contra» no entra si van en contra y «a_favor» solo entra si van a favor, como `news_mode` del motor (21.9) |
 
 ### 6.4 Prueba de conformidad (toda familia, siempre)
 
@@ -676,7 +679,7 @@ No mira ningún resultado y **no cuenta en N**.
 | A3 | De 1 a 6 variantes, distintas, con parámetros dentro de su esquema |
 | A4 | ≤ 3 filtros activos por variante (los `Param.filtro` que no están en su valor neutro) |
 | A5 | Reglas del usuario: riesgo = `config.RISK_PER_TRADE_PCT`, 6 entradas, 3 %, una por moneda, contado y perpetuo, salida del catálogo con `evolucion.cumple_reglas` y plan válido con el stop mínimo (6.5). Si no las cumple: rechazo, salvo `fuera_de_reglas` (5.4). |
-| A6 | Datos: cada clave pedida está en la familia y cubre ≥ 50 % del periodo. Si no, solo como exploratoria (8.6). |
+| A6 | Datos: cada clave pedida está en la familia y cubre ≥ 50 % del periodo. Si no, solo como exploratoria (8.6). Con `noticias_3a`, la admisión con datos lo mide de verdad: si menos del 50 % de los días del periodo tienen alguna noticia (o no hay archivo compilado), no se mide (21.5). |
 | A7 | No duplicada (5.4) |
 | A8 | Conformidad con datos reales: prueba del recorte (un corte en cada señal, hasta 60 por tramo, y 20 al azar; 4.4), determinismo, por flanco y velocidad (6.4) |
 | A9 | Frecuencia, sin resultados: señales por día natural dentro de muestra ≥ 0,25. Si no, «muy pocas señales». |
@@ -1961,3 +1964,228 @@ cambian, ni su versión ni su sha):
 **Lo que no cambia:** los criterios v1, el catálogo de salidas y las cifras de la primera tanda (20.7): con el N nuevo
 la q más baja sigue en 1,0 y el Sharpe deflactado más alto baja de 0,0369 a 0,0367. La firma del código cambia, así que
 el corredor volverá a pasar los dos canarios antes de medir nada.
+
+## 21. Noticias de 3 años (29-10-2026)
+
+**Para qué.** El usuario preguntó el 29-10-2026 si el laboratorio «tiene en cuenta las noticias». Hasta hoy no podía:
+solo había precio, volumen y funding de 3 años. Las noticias del bot empiezan el 23-10-2026 y los titulares públicos
+bajados, el 29-07-2026 (`noticias_historia`, solo exploratoria). Este apartado añade un histórico de noticias de 3 años
+con su hora, la clave de datos `noticias_3a` y dos familias que la usan. Lo programó la sesión de noticias; no cambia
+los criterios v1, los cupos ni el catálogo de salidas.
+
+### 21.1 Fuentes (cómo se eligieron)
+
+Antes de elegir se miró cómo se consiguieron los titulares de `controles/fuentes/` y `controles/bruscos/`:
+- **91 días** (`controles/historia_noticias_descarga.py` y `historia_noticias_gdelt.py`): la API REST de WordPress de 24
+  medios de cripto (hora de publicación al segundo), los mapas del sitio de CoinDesk y Cointelegraph (solo `lastmod`)
+  y la lista de artículos de GDELT DOC 2.0, que solo cubre los últimos 3 meses.
+- **54 bruscos** (`controles/bruscos/descarga_bruscos.py`): la misma API de WordPress de los 24 medios, en las ventanas
+  de 3 años alrededor de cada episodio. Funcionó en los 24.
+
+Con eso, el histórico junta dos fuentes públicas, sin clave ni cuenta:
+
+| Fuente | Qué da | Medido con 1 día de muestra (20-10-2026) |
+|---|---|---|
+| GDELT 2.0 GKG en inglés (`data.gdeltproject.org/gdeltv2/<AAAAMMDDHHMMSS>.gkg.csv.zip`, uno cada 15 min) | Dominio, URL, temas, tono y titular (`<PAGE_TITLE>` de Extras, en el 99,8 % de las filas) | 96 archivos, 488 MB (1.517 MB descomprimidos), 34 s de bajada con 4 hilos; 113.378 artículos, de los que el filtro del bot deja 248 de cripto y 4.588 macro (2 MB guardados) |
+| API REST de WordPress de los 24 medios de cripto | Titular y hora de publicación al segundo (`date_gmt`) | bitcoinist.com, septiembre de 2026: 191 artículos en 3 peticiones (9 s); 107 de cripto |
+
+- **Tamaño de GDELT.** Del 01-07-2023 al 28-10-2026 son 115.132 archivos y 620 GB comprimidos (la lista maestra). En
+  junio de 2025 faltan unos 17 días: GDELT no los tiene. Se bajan en memoria, se comprueba el md5 de cada uno y solo se
+  guarda lo filtrado (≈ 2 MB al día, unos 2,5 GB en total). Con un tope de 10 MB/s (la wifi la usa también el bot) y 2
+  procesos en prioridad de reposo, ≈ 17 h.
+- **Por qué los dos.** GDELT ve ≈ 250 titulares de cripto al día, casi todos de prensa general; los 24 medios publican
+  cientos. GDELT aporta la macro y la prensa general; los medios, la cripto.
+- **Sello (cuándo se pudo conocer).** GDELT publica cada archivo unos 10 min **antes** de la hora de su nombre
+  (`Last-Modified` de seis archivos de 2023 a 2026): el sello es la hora del nombre, o su `Last-Modified` si es
+  posterior. En WordPress, `date_gmt`.
+
+### 21.2 Filtro, historias y selección
+
+- **Filtro:** el del bot en vivo, `filters.classify` con idioma inglés. Solo se guardan las clases «cripto» y «macro», las
+  que en vivo van a la IA local. `noticias_historia.puerta` usa las mismas expresiones y máscaras que `classify` para
+  esas dos clases y evita llamarla en las filas que no lo son. En 22.090 titulares de 12 archivos de 2024 no pierde
+  ninguno de los 1.120 que `classify` da como cripto o macro. Las fuentes llevan prefijo (`gdelt:`, `wp:`): `classify`
+  trata como oficiales las fuentes cuyo id empieza por fed, bls, ecb o sec (fedscoop.com no es la Fed).
+- **Medios:** la mesa del histórico solo ve los medios que sigue el bot (los dominios de `bot/fuentes/*.json`, sin
+  Google News ni relays) y los 24 de cripto, como la de vivo. La lista se congeló el 29-10-2026 en
+  `noticias_historia/medios_vivos.json` (2.231 medios). 13 de los 24 medios de cripto no son feeds del bot en vivo: se
+  dejan porque son la cripto del histórico (y los del estudio de 91 días).
+- **Historias:** `noticias_historia.Mesa` es la deduplicación de `desk.NewsDesk` (`filters.tokens` y `filters.similar`
+  con la primera pieza de cada historia de las últimas `config.DEDUPE_WINDOW_S`, 3 h). Las demás piezas la confirman:
+  medios distintos con su sello.
+- **Selección para la IA local (fijada el 29-10-2026 solo por volumen, antes de mirar ningún precio):** una historia va
+  al triaje si es un **racimo**: ≥ 2 medios distintos en los 30 min desde su primera publicación si es de cripto, y ≥ 4
+  si es macro (`RACIMO_N`). En octubre de 2026 salen 3,4 de cripto y 3,5 macro al día (con ≥ 3 macro serían 5,8): unas
+  8.400 en 3 años.
+  - Por qué hace falta seleccionar: la IA local tarda ≈ 7 s por titular y el triaje en vivo la tiene ocupada del 80 al
+    100 % casi todas las horas (400-730 titulares por hora del 24 al 29-10-2026; el 29-10 a las 22:40, 111 de 112
+    sondeos de su hueco, ocupado). Triar todo (≈ 300 historias de cripto y 600 macro al día) llevaría años de huecos.
+  - Lo que se ve en el volumen y queda dicho: muchos racimos de cripto son notas de prensa pagadas que publican a la
+    vez varios medios (Travala, Bybit, MEXC…), y los de macro, partes de guerra y terrorismo; la prensa local del Reino
+    Unido (Newsquest, Reach) y las cadenas locales de NBC repiten el mismo texto. En vivo pasa igual: es la misma mesa.
+- **Desde cuándo se puede usar** cada historia en racimo: el sello del medio que lo completa más 1 min (en vivo el
+  triaje tarda ≈ 7 s), al minuto siguiente.
+
+### 21.3 Triaje con la IA local (`python -m bot.noticias_historia triaje`)
+
+- **La misma petición que en vivo:** `LocalAI.classify` tal cual (`local_ai.SYSTEM`, el esquema estricto, temperatura 0,
+  700 tokens, sin razonamiento), el titular de la primera pieza, la fuente con el nombre y el nivel de su feed en vivo
+  (sin feed: el dominio y T2) y las monedas que detectan las reglas; la respuesta pasa por `normalize_triage` y la bolsa
+  de la región, como `LocalAI._worker`. La prueba compara la petición con la de `LocalAI.classify`. **A ciegas del
+  precio:** el modelo solo ve el titular, la fuente y las monedas.
+- **Sin quitarle el turno al triaje en vivo:** una petición cada vez, solo cuando el hueco del servidor (`/slots`) lleva
+  3 s libre (el bot no tiene nada esperando) y no hay `gpu.lock` de la fábrica. Si el bot manda algo mientras, espera
+  como mucho una petición (≈ 7 s). Si el servidor está apagado, no lo arranca.
+  - **Problema medido el 29-10-2026:** a las 23:55, 1 de 123 sondeos de 0,5 s encontró el hueco libre. Con solo los
+    huecos, las ≈ 8.400 historias tardarían semanas.
+  - **`--cuota q`** (de `triaje` y `seguir`; 0 por defecto, hasta 0,5; **lo decide el usuario**): pide sin esperar al
+    hueco (la petición espera en la cola del servidor detrás de la que esté en curso) y luego descansa lo justo para no
+    usar más de esa fracción del tiempo. Con 0,2, unas 2.400 historias al día (≈ 3,5 días); el triaje en vivo, con su
+    cola por prioridad, deja sin triar lo menos prioritario de su cola en esa misma proporción.
+  - **En marcha con `--cuota 0.2` desde el 30-10-2026 a las 00:35**, aprobada por la sesión principal: ninguna operación
+    del paper depende de lo menos prioritario de la cola (`seis4r3` solo usa las noticias como veto de grupos fiables y
+    ninguno pasa la puerta). Las T0 y T1 frescas van primero en la cola del bot y esperan como mucho una petición del
+    histórico (≈ 7 s); la importancia solo se sabe después del triaje, así que lo que se protege es lo que la cola pone
+    delante.
+  - **Vuelta sola a los huecos** (`vigilar_vivo` y `vivo_aguanta`, cada 10 min, solo lectura de `bot.db` y `bot.log`):
+    60 min solo en los huecos si el p90 del retraso de captura a triaje de las T0 y T1 frescas de cripto y macro pasa de
+    300 s, si 3 o más llevan 15 min sin triar, si la cola llena tira más de 60 noticias en 30 min o si no se puede leer.
+    La última medida queda en `noticias_historia\vigilancia_vivo.json` (al empezar: p90 de 34 s en 25 noticias y
+    ninguna tirada).
+  - **Cómo quitarla:** crear `noticias_historia\parar_triaje` (para `seguir` en segundos), borrarlo y relanzar `seguir`
+    sin `--cuota` desde su copia del código (`noticias_historia\codigo\seguir-20261030b`): `python -X utf8 -B -m
+    bot.noticias_historia seguir --esperar 15`.
+- **Orden** (solo cuándo, no qué): los 91 días de `controles/fuentes/`, las ventanas «antes» y de control de
+  `controles/bruscos/` y luego el resto, de lo más nuevo a lo más viejo. `triaje/AAAA-MM.jsonl`, una línea por
+  historia; se puede relanzar y no repite nada. El archivo `parar_triaje` lo para.
+- **Ojo (sesgo que no se puede quitar):** Qwen3.5 9B se entrenó con noticias anteriores a su fecha de corte. Para un
+  titular de 2023-2025 puede «saber» qué pasó después aunque el mensaje no traiga ningún precio. Si el acierto del
+  histórico sale muy por encima del 49 % medido en vivo en los años que el modelo conoce, es eso, no ventaja: el
+  informe lo da por año (21.7).
+
+### 21.4 Lo que lee el laboratorio
+
+- `python -m bot.noticias_historia lab` compila `noticias_historia/lab/noticias.npz` y `meta.json` **solo cuando todas
+  las historias seleccionadas están triadas** (si no, el laboratorio mediría otra cosa cada vez). Lleva su firma (sha
+  del contenido y de la selección).
+- `bot/lab_vivo/noticias.py`: `Noticias` con `t` (desde cuándo se puede usar), `t0`, `n30` (medios en 30 min), `nmed`,
+  `clase`, `mon` (bits de las monedas del triaje; 0 = ninguna), `dir`, `imp`, `tipo`, `cred`, `nov`, `mag`, `fuente` y
+  `medio`; `tramo`, `sentido` (±1 con |dir| > 15, como `local_ai.sentiment_of`), `de_moneda` y `cobertura`.
+- `datos.py`: la caché de la época guarda las noticias del periodo (`<caché>\noticias\`), `Mercado.noticias` da las de
+  `desde ≤ t < hasta` y `recortado` las corta como a las velas. **Con noticias compiladas cambia la firma de la época:**
+  la caché se rehace y se repite el canario. Sin el archivo, nada cambia (ni la firma).
+- `fuente_sintetica(noticias=True)`: noticias al azar para la conformidad de 6.4, que ahora las lleva.
+
+### 21.5 Familias (versión 1; las dos pasan la conformidad y sus pruebas)
+
+| Familia | Momento | Señal | Parámetros |
+|---|---|---|---|
+| `noticia_racimo` | continuo | Una historia en racimo de ≥ n medios con sentido (o sin mirarlo) que el precio confirma: «rango_4h» (H34: la primera barra de 15 min que cierra fuera del rango de las 4 h previas, en las 2 h siguientes; stop = máx(1,5 %, otro extremo + 0,1 %)) o «reflejo» (`entrada_noticias.confirmar`: el primer cierre de 1 min en 60 min a favor ≥ máx(0,5 %, 2σ de 60 min de las 24 h previas)). Por moneda y sentido, otra confirmación a menos de 30 min no sale. | `n` {2, 3, 5}; `sentido` {triaje, ruptura}; `modo` {favor, contra}; `confirmacion` {rango_4h, reflejo}; `generales` {no, todas}; filtros `importancia_min` {0, 5, 7} y `grupo` {todos, fiable}; `regimen_btc` y `volatilidad` |
+| `noticia_apertura` | aperturas | En cada apertura de `LAB_WINDOWS`, el signo de la suma de los sentidos de las historias de las `horas` previas (de esa moneda y, con generales, las que no nombran ninguna); si el movimiento de la apertura al cierre de `medida_min` va a favor ≥ `min_mov_pct`, entra a favor (o a la contra) | `windows`; `horas` {4, 8, 12}; `n` {2, 3, 5}; `medida_min` {15, 30, 60}; `min_mov_pct` {0; 0,2; 0,5}; `modo`; `generales`; filtros `importancia_min` y `grupo`; `regimen_btc` y `volatilidad` |
+
+- **Unidad:** historia×moneda, la de `bot/fiables.py`. Solo cuentan las historias con `t ≤` la decisión.
+- **Grupo «fiable»:** los grupos tipo×sentido de `bot/fiables.py` con sus criterios fijados (n ≥ 30, ≥ 3 días con ≥ 5,
+  acierto ajustado a 4 h ≥ 60 %, Wilson al 90 % ≥ 50 % y ≥ 50 % en cada semana UTC con ≥ 5), con los 30 días UTC
+  completos anteriores (`base.grupos_fiables` y `base.fiables_por_dia`). Un día cuenta cuando han pasado sus 4 h de
+  medida y 2 h de margen, como en vivo. Sin la puerta para operar: es una variante, no un requisito.
+- **Ayudantes en `familias/base.py`** (sección «noticias»): `rango_previo`, `sigma60_pct`, `unidades_noticias`,
+  `fiables_por_dia`, `grupos_fiables` y `ultimo_dia_completo`. Si cambian, hay que subir la versión de las dos familias.
+- **A6 con datos** (`etapas.admision`): una familia con `noticias_3a` no se mide si las noticias cubren menos del 50 %
+  de los días del periodo (`criterios` `cobertura_min`), o si no hay archivo compilado.
+- **Pruebas:** `tests/test_lab_vivo_familia_noticia_racimo.py`, `tests/test_lab_vivo_familia_noticia_apertura.py`,
+  `tests/test_lab_vivo_noticias.py` y `tests/test_noticias_historia.py` (velas y noticias hechas a mano, la señal sabida,
+  un corte en cada señal con `recorte.comprobar`, sin red).
+
+### 21.6 Hipótesis (prerregistradas el 29-10-2026 a las 23:40, antes de medir nada del precio con estas noticias)
+
+En `lab_vivo\cola\esperando_datos\noticias\`, autor «sesion-noticias» (añadido a `hipotesis.AUTORES`), con las reglas del
+usuario y una sola cosa cambiada por variante:
+
+| Id | Familia | Variantes |
+|---|---|---|
+| `h-20261029-2340-noticia_racimo-h34` | `noticia_racimo` | H34 del catálogo: V1 n 3 y rango de 4 h, salida A con stop estructural (≤ 10 %); V2 n 5; V3 horquilla 3R a 24 h; V4 sin mirar el sentido (el control del triaje); V5 a la contra (stop fijo de 2 %); V6 importancia ≥ 7. Todas con las generales para las cuatro monedas. |
+| `h-20261029-2340-noticia_racimo-reflejo` | `noticia_racimo` | H33 y H35: la regla de `entrada_noticias` (reflejo en 60 min y su horquilla de 1,5 %, 3R y 24 h); V2 grupo fiable; V3 salida A con 2 %; V4 a la contra; V5 solo BTC y ETH; V6 importancia ≥ 7 |
+| `h-20261029-2340-noticia_apertura-impulso` | `noticia_apertura` | La operativa del usuario: 8 h de noticias, impulso de 15 min ≥ 0,2 %, salida A con 2 %; V2 30 min; V3 4 h; V4 grupo fiable; V5 a la contra; V6 importancia ≥ 7 |
+
+Pasan la admisión sin datos (A1-A7 y A10). Esperan ahí, y no en `cola\entrada\`, por tres cosas (`LEEME.md` de la
+carpeta): el corredor en marcha usa el código de la rama main, que aún no tiene las familias ni el autor; el archivo de
+noticias se compila cuando acabe el triaje; y `validar` tiene que dejar de decir NO VALE con los datos reales (A6, A8 y
+A9). Entonces se copian a `cola\entrada\` sin tocarlas. Todo lo que mida el corredor contará en el N acumulado.
+
+### 21.7 Informe de calidad (`python -m bot.noticias_informe`)
+
+`noticias_historia/informe.json` e `informe.md`: descarga, cobertura por mes, medio y moneda, retraso de publicación,
+retraso frente al precio (si el sentido coincide con las 12 h previas o con las 4 h siguientes), acierto por año y
+clase, y si repite lo medido: los 91 días (acierto a 4 h ajustado frente al 48,0 % de Claude y el 49,2 % de los
+titulares públicos; cuántos de los 48.272 titulares de aquel estudio están en el histórico) y los 54 bruscos (consenso
+de las 12 h antes frente a 20 de 43, 46,5 %). Lo que necesita el triaje sale «pendiente» hasta que lo haya.
+
+### 21.8 Cómo se sigue (`python -m bot.noticias_historia seguir`, solo)
+
+1. Termina la descarga de GDELT (`gdelt`, que se puede relanzar; el archivo «parar» la para).
+2. Rehace todas las historias en una sola pasada cronológica (`historias`).
+3. Tría en los huecos de la GPU hasta acabar.
+4. Compila el archivo del laboratorio (`lab`) y escribe el informe.
+5. El usuario decide si se sube el código a main; después, las hipótesis pasan a `cola\entrada\` (21.6).
+
+### 21.9 Las noticias para reforzar lo que ya va mejor (30-10-2026)
+
+Lo pidió el usuario el 30-10-2026 («que el agente siga buscando y utilice las noticias para fortalecer las
+estrategias»): no solo familias de noticias sueltas, sino las noticias como filtro de las entradas que ya van mejor.
+
+- **Filtro común `noticias_previas`** (`filtros.py`, 6.3): cualquier familia lo puede declarar. Usa solo las historias
+  que se podían usar antes de la decisión (`filtros.suma_noticias`: `t` en [decisión − horas, decisión)).
+- **Familia `impulso_noticias` v1**: las entradas de `apertura_impulso` tal cual (las hereda) con ese filtro, y la clave
+  `noticias_3a`. Para que un cambio de `apertura_impulso` no cambie en silencio sus resultados, fija su versión y la
+  firma de su archivo (sin retornos de carro): si cambian, no se carga hasta que se suba su versión. Pruebas en
+  `tests/test_lab_vivo_familia_impulso_noticias.py` (la suma de noticias a mano, las entradas idénticas sin filtro y
+  un subconjunto con él, y el recorte en cada señal).
+- **Hipótesis prerregistradas el 30-10-2026 a las 00:10** (en `cola\esperando_datos
+oticias\` con las otras tres y
+  las mismas condiciones para pasar a la cola; 14 variantes que contarán en el N):
+
+| Id | Base | Variantes |
+|---|---|---|
+| `h-20261030-0010-impulso_noticias-seis4r3` | La de la cartera paper desde el 29-10-2026 (`seis4r3`: entradas de «6 diarias» y horquilla de stop 3 %, 4R y 7 días) | V1 no en contra (8 h); V2 solo a favor; V3 4 h; V4 12 h; V5 importancia ≥ 7; V6 sin las generales |
+| `h-20261030-0010-impulso_noticias-ranking1` | La 1.ª del ranking el 30-10-2026 (las mismas entradas con stop 2 %, 4R y 7 días) | V1 no en contra; V2 solo a favor; V3 4 h; V4 importancia ≥ 7 |
+| `h-20261030-0010-impulso_noticias-ranking5` | La 5.ª (laboratorio de 2.000: impulso de 30 min ≥ 0,2 % con volumen relativo 2, entrada a +60 min, stop 2,5 %, 3R y 7 días) | las mismas cuatro |
+
+- No entran: la 2.ª del ranking (objetivo 10R, fuera del catálogo de salidas), la 3.ª (E2, descartada por el usuario) ni
+  la 4.ª (las mismas entradas que la 1.ª con 3R).
+- **Ojo:** estas bases se eligieron por su resultado (la de la cartera y las primeras del ranking). Su fuera de muestra
+  ya está usado y lo que diga sobre la versión con noticias no es independiente: lo que vale es la prueba en avance, y
+  las tres lo dicen en `logica.revision`.
+
+### 21.10 Criba de basura y medios por su acierto (30-10-2026, 02:00)
+
+Lo pidió el usuario a la 01:30 («si hay medios que aciertan menos de un 50 % de las veces, FUERA»), con la prioridad de
+acortar el triaje. Todo fijado por el contenido o por lo ya medido antes de cada fecha, sin mirar ningún precio con ello.
+
+**Criba antes del triaje** (`noticias_historia.basura`, `Mesa` y `seleccion`):
+- **Copias:** una pieza con el mismo titular (sin mayúsculas ni signos) que otra de su historia no suma medio. Son las
+  notas de prensa sindicadas (Travala, Bybit, MEXC…) y la prensa local o las cadenas que repiten el texto (Newsquest,
+  Reach, NBC locales, Big News Network). De agosto a octubre de 2026, **7.916 piezas** dejan de contar como medio.
+- **Notas de prensa** por la URL (PR Newswire, GlobeNewswire, Chainwire, Business Wire, Accesswire, secciones
+  `/press-release/`, `/sponsored`…) o por frases que solo usan ellas («prize pool», «giveaway», «press release»…).
+- **Partes de guerra, terrorismo o sucesos sin lectura de mercado:** macro cuyos temas son solo guerra, geopolítica,
+  política o catástrofe (o solo «geopolítica fuerte») y sin ninguna palabra de mercado en el titular (petróleo, bolsas,
+  tipos, sanciones, aranceles, alto el fuego…). Un dato de empleo o de PIB no entra aquí.
+- **Cuánto acorta:** con las copias fuera, los racimos de 3 o más medios casi no existen (de agosto a octubre de 2026: de
+  cripto, 2,62 al día con ≥ 2 medios y 0,07 con ≥ 3; macro, 5,98 con ≥ 2, 0,58 con ≥ 3 y 0,10 con ≥ 4). La selección
+  pasa a **cripto con ≥ 2 medios y macro con ≥ 3** (`RACIMO_N`, solo por volumen): ≈ 3,2 historias al día, **unas 3.900
+  en 3 años en lugar de ≈ 8.400**. Con la cuota de 0,2, el triaje baja de ≈ 4 días a ≈ 1,5-2. En esos tres meses,
+  además, la criba quita 7 partes de guerra y 3 notas de prensa que seguían siendo racimo.
+- H34 pasa de `n` 3 a 2 (y su V2 de 5 a 3) antes de medir nada, para que sus variantes tengan noticias con esta escala.
+
+**Medios por su acierto** (`familias/base.mascara_medios`; parámetro `medios` de `noticia_racimo` y `noticia_apertura`, y
+`noticias_medios` del filtro común): el acierto del medio de la primera pieza de cada historia, ajustado al mercado a 4 h
+como en `bot/fiables.py`, con sus historias de los días UTC completos anteriores (una historia, un caso).
+- «sin_malos»: fuera si tiene muestra (≥ 20 historias en ≥ 10 días, como en vivo) y la cota **alta** de Wilson al 90 %
+  queda por debajo del 50 %. Sin muestra, cuenta.
+- «solo_buenos»: solo si tiene muestra, acierto ≥ 60 % y cota baja ≥ 50 %. Sin muestra, no cuenta.
+- Seis hipótesis más (`h-20261030-0200-…-medios`): la V1 de cada una de las seis anteriores con «sin_malos» y con
+  «solo_buenos»; las 12 pasan la admisión sin datos (44 variantes).
+- En los 91 días medidos (`controles/fuentes/`) ningún medio de cripto llegó al 60 % ajustado: el informe dirá cuántos
+  medios pasan cada corte en los 3 años y en esos 91 días (`medios_por_acierto`). Si no pasa ninguno, «solo_buenos» no
+  dará señales y la admisión lo rechazará (A9).
+- **Impulso fuerte con mayoría de noticias fiables (30-10-2026, 02:40):** modo «mayoria» de `noticias_previas` (solo si más de la mitad de todas las noticias de la ventana, también las neutrales, van a favor) y la hipótesis `h-20261030-0240-impulso_noticias-seis4r3-mayoria`: «6 diarias» con impulso ≥ 0,5 %, mayoría a favor de medios «solo_buenos», stop 3 %, 4R y 7 días; V2 «no en contra»; V3 impulso ≥ 1 %; V4 medios «sin_malos»; V5 6R; V6 12 h. En espera con las demás: 13 hipótesis y 50 variantes.
