@@ -3100,7 +3100,7 @@ const D = fila("D", {posicion: 4, nombre: "Ruptura V3", pct_dia: 0.05, op_dia: 0
   en_vivo: {fuente: "paper", virtual: false, n: 3, R: 0.4, gana_pct: 66.7, neto_usdc: 1.23, desde: now - 864e5, abiertas: 1}});
 const E = fila("E", {posicion: null, nombre: "Pierde", pct_dia: -0.2, fuera: {n: 1000, R: -0.1, gana_pct: 30}});
 const EM = (f, o = {}) => ({id: f.id, preset: "ruptura3", nombre: f.nombre, desde: now - 864e5, pausada: false, fuente: "motor", posicion: f.posicion,
-  n_ranking: 4, en_ranking: !!f.posicion, texto: f.posicion ? `Puesto ${f.posicion} de 4 en el ranking` : "Fuera del ranking: pierde fuera de muestra (−0,075 R por operación)",
+  n_ranking: 4, en_ranking: !!f.posicion, texto: f.posicion ? `Puesto ${f.posicion} de 4 en el ranking` : "Fuera del ranking: pierde fuera de muestra (−0,038 % de la cuenta por operación, neto de costes)",
   fila: f, ...o});
 const RES = rk([A, B, C, D, E], {en_marcha: EM(D)});
 const rkReply = data => url => url.startsWith("/api/ranking") ? {ok: true, status: 200, json: async () => data} : {ok: false, status: 404};
@@ -3119,8 +3119,8 @@ def test_ranking_pide_la_api_ordena_por_beneficio_y_marca_la_en_marcha():
       H.fetches.length = 0; H.fire("click", {"data-tab": "ranking"}); await loadRanking(); renderAll(true);
       const f1 = H.fetches.slice(), h0 = rkHtml(), rows0 = H.el("#rkRows").innerHTML;
       const pos = h => ["A", "B", "C", "D"].map(i => h.indexOf(`data-rk-sel="${i}"`));
-      H.fire("click", {"data-rk-sort": "R"}); renderAll(true); const rDesc = pos(H.el("#rkRows").innerHTML), hR = H.el("#rkHead").innerHTML;
-      H.fire("click", {"data-rk-sort": "R"}); renderAll(true); const rAsc = pos(H.el("#rkRows").innerHTML);
+      H.fire("click", {"data-rk-sort": "pct_op"}); renderAll(true); const rDesc = pos(H.el("#rkRows").innerHTML), hR = H.el("#rkHead").innerHTML;
+      H.fire("click", {"data-rk-sort": "pct_op"}); renderAll(true); const rAsc = pos(H.el("#rkRows").innerHTML);
       H.fire("click", {"data-rk-sort": "pos"}); renderAll(true);
       H.fire("click", {"data-rk-sel": "A"}); renderAll(true); const det = H.el("#rkRows").innerHTML;
       H.fire("click", {"data-rk-sel": "A"}); renderAll(true); const cerrado = H.el("#rkRows").innerHTML;
@@ -3136,21 +3136,24 @@ def test_ranking_pide_la_api_ordena_por_beneficio_y_marca_la_en_marcha():
     assert p0[2] < rows.index('<tr class="rk-live">') < p0[3] and "en marcha</span>" in rows
     assert "Curso &lt;b&gt;negrita&lt;/b&gt;" in rows and "<b>negrita</b>" not in rows
     assert 'title="gana fuera de muestra pero pierde dentro">frágil</span>' in rows and ">poca muestra</span>" in rows
-    assert ">sin 5 mayores -0,20 R</span>" in rows and ">dentro ✗</span>" in rows and ">corregida q 0,40 ✗</span>" in rows
-    assert ">mitades +0,50 / -0,10</span>" in rows and ">corregida Holm 0,03 ✓</span>" in rows and ">dentro ✓</span>" in rows
-    assert "+0,300 %" in rows and "+0,30 R" in rows and "400 / 300" in rows and '<span class="pill info">nueva</span>' in rows
+    assert ">sin 5 mayores -0,100 %/op.</span>" in rows and ">dentro ✗</span>" in rows and ">corregida q 0,40 ✗</span>" in rows
+    assert ">mitades +0,250 / -0,050 %/op.</span>" in rows and ">corregida Holm 0,03 ✓</span>" in rows and ">dentro ✓</span>" in rows
+    assert "+0,300 %" in rows and "+0,150 %" in rows and "400 / 300" in rows and '<span class="pill info">nueva</span>' in rows
+    assert re.search(r"\d R\b", rows) is None   # en la tabla, % de la cuenta: el R solo en el detalle
     assert 'title="Antes, puesto 1">▼1</span>' in rows and "✗ no</span>" in rows and "Descartada por ti" not in rows
     assert r["rDesc"][3] < r["rDesc"][0] < r["rDesc"][1] < r["rDesc"][2] and r["rAsc"][2] < r["rAsc"][1] < r["rAsc"][0] < r["rAsc"][3]
-    assert 'aria-sort="descending"' in r["hR"] and "R/op. ▼" in r["hR"]
+    assert 'aria-sort="descending"' in r["hR"] and "% por operación (neto) ▼" in r["hR"] and "R/op." not in r["hR"]
     assert "Regla de A" in r["det"] and 'class="rk-det"' in r["det"] and "OKX EU con X-Perps" in r["det"] and "A_resumen.json" in r["det"]
+    assert "+0,150 % (+0,30 R × 0,5 % de riesgo por operación)" in r["det"]   # en el detalle, sí, el R
     assert 'class="rk-det"' not in r["cerrado"]
     assert "Ruptura V3" in r["live"] and "Puesto 4 de 4" in r["live"] and "En paper" in r["live"]
     assert "3 operaciones cerradas en la cartera paper" in r["live"] and "+1,23 USDC ficticios" in r["live"] and "1 abierta" in r["live"]
-    assert "4 de 8 estrategias medidas no pierden fuera de muestra con costes" in r["sub"]
+    assert "+0,200 % de la cuenta por operación, neto" in r["live"] and re.search(r"\d R\b", r["live"]) is None
+    assert "4 de 8 estrategias medidas no pierden fuera de muestra, netas de comisiones, deslizamiento y funding" in r["sub"]
     assert "Estudios: 5 filas · 3 archivos" in r["foot"] and "Cómo se ordena y qué entra" in r["foot"]
     md = r["md"]
     assert md.count('data-tabgo="ranking"') == 5 and "1. Estrategia A" in md and "4. Ruptura V3" in md
-    assert "Ruptura V3 · puesto 4 de 4" in md and ">+0,300 %</b>" in md
+    assert "Ruptura V3 · puesto 4 de 4" in md and ">+0,300 %/día</b>" in md and "+0,150 %/op." in md and re.search(r"\d R\b", md) is None
     assert r["badge"] == [False, "1"] and r["sent"] == []
     _sin_null(r["h0"], r["det"], r["live"], md)
 
@@ -3207,7 +3210,8 @@ def test_ranking_sin_ruta_404_por_el_bus_la_en_marcha_fuera_y_campos_rotos():
     assert "Sin ranking" in r["md0"] and "aún no tiene GET /api/ranking" in r["md0"]
     bus = r["bus"]
     assert 'data-rk-sel="T0"' in bus and 'data-rk-sel="T19"' in bus and "Llegan las 20 primeras por el WebSocket" in bus
-    assert ">Fuera del ranking: pierde</span>" in bus and "Fuera del ranking: pierde fuera de muestra (−0,075 R por operación)." in bus
+    assert ">Fuera del ranking: pierde</span>" in bus and "Fuera del ranking: pierde fuera de muestra (−0,038 % de la cuenta por operación, neto de costes)." in bus
+    assert "-0,038 % por operación (neto) fuera de muestra" in bus and "-0,177 % de la cuenta al día (neto)" in bus
     assert "6 diarias v2" in bus and 'data-rk-sel="seis2"' not in bus and "400 de 830 estrategias" in bus and "Nota del bus" in bus
     assert r["md1"].count('data-tabgo="ranking"') == 6 and "6 diarias v2 · fuera del ranking: pierde" in r["md1"] and "1. Estrategia T0" in r["md1"]
     assert r["sigue"] == 830
@@ -3258,8 +3262,8 @@ def test_ranking_correccion_costes_etag_y_en_marcha_sin_datos():
     assert 'title="sin p ni corrección: una de 378 salidas de una rejilla">sin corregir (1 de 378)</span>' in rows
     assert 'title="Holm entre las 23 configuraciones del estudio (p frente a la base emparejada)">corregida Holm 1,00 ✗</span>' in rows
     assert ">sin corregir (1 de 2000)</span>" in rows and ">corregida q 1,00 ✗</span>" in rows   # de un bot sin «tipo»
-    assert "Holm entre las 23 configuraciones del e…" not in rows and "fam X · Salidas, stops y objetivos · costes del backtest" in rows
-    assert 'title="Costes: ' + "backtest con la gestión del paper" in rows and "costes del laboratorio (sin funding)" in rows
+    assert "Holm entre las 23 configuraciones del e…" not in rows and "fam X · Salidas, stops y objetivos · neto de costes del backtest" in rows
+    assert 'title="Costes con que se midió: ' + "backtest con la gestión del paper" in rows and "neto de costes del laboratorio (sin funding)" in rows
     assert "No hay un perfil de costes común" in r["foot"] and "(3)" in r["foot"]
     assert "todas las que entran en el ranking son frágiles" in r["vacio"]
     md = r["md"]
@@ -3274,6 +3278,68 @@ def test_ranking_correccion_costes_etag_y_en_marcha_sin_datos():
     assert "Ruptura V3: rango de apertura" in s["live"] and "sin datos del ranking" in s["live"] and "GET /api/ranking no existe" in s["live"]
     assert "Ruptura V3: rango de apertura · sin datos del ranking" in s["md"] and "Sin ranking" in s["md"]
     _sin_null(s["live"], s["md"])
+
+
+def test_ranking_en_porcentaje_neto_y_el_r_solo_en_el_detalle():
+    """Lo pidió el usuario: «en el ranking me tienes que hablar en neto, después de costes». La tabla va en «% cuenta al
+    día (neto)» y «% por operación (neto)» (= R × 0,5, con el 0,5 % de riesgo de bot/ranking.RIESGO_PCT), sin el R, que
+    solo sale en el detalle; ordenar por el % por operación es ordenar por el R. Cada fila dice con qué costes se midió
+    (y una sin costes, que no es neta; una sin perfil, que no se sabe). La nota, los títulos, la banda de la que está en
+    marcha y el resumen de Mando dicen que es neto de comisiones, deslizamiento y funding."""
+    from bot import ranking
+    page = HTML.read_text(encoding="utf-8")
+    nota = page.split('id="rkNota">', 1)[1].split("</div>", 1)[0]
+    assert "neto: después de comisiones, deslizamiento y funding" in nota and "el R medio × 0,5" in nota
+    assert "sin funding" in nota and "Cada fila dice con qué costes se midió" in nota
+    assert "<h2>Ranking de estrategias (% neto de costes)</h2>" in page and "<h2>Ranking de estrategias (% neto)</h2>" in page
+    r = run(RK + """
+      const L = fila("L", {posicion: 5, pct_dia: 0.04, origen: "laboratorio_2000", perfil_costes: "laboratorio", perfil_corto: "costes del laboratorio (sin funding)",
+        perfil_texto: "laboratorio de 2.000: 0,10 % por lado, 2 pb y 5-20 pb más en los stops, todo con el modelo del contado (también los cortos) y sin funding",
+        fuera: {n: 200, R: 0.06, gana_pct: 33}});
+      const N = fila("N", {posicion: 6, pct_dia: 0.03, perfil_costes: null, perfil_corto: null, perfil_texto: null, fuera: {n: 90, R: 0.9, gana_pct: 60}});
+      const SC = fila("SC", {posicion: 7, pct_dia: 0.02, perfil_costes: "sin_costes", perfil_corto: "sin costes", perfil_texto: "sin costes (solo para comparar)",
+        fuera: {n: 50, R: 0.04, gana_pct: 50}});
+      H.fetchReply = rkReply(rk([A, B, C, D, L, N, SC, E], {en_marcha: EM(D)})); H.open(); reset(); await loadApi();
+      S.tab = "ranking"; renderAll(true);
+      const out = {head: H.el("#rkHead").innerHTML, rows: H.el("#rkRows").innerHTML, live: H.el("#rkLive").innerHTML, sub: H.el("#rkSub").innerHTML,
+                   riesgo: RK_RIESGO_PCT};
+      const orden = () => ["A", "B", "C", "D", "L", "N", "SC"].map(i => [i, H.el("#rkRows").innerHTML.indexOf(`data-rk-sel="${i}"`)]).sort((x, y) => x[1] - y[1]).map(x => x[0]).join(",");
+      H.fire("click", {"data-rk-sort": "pct_op"}); renderAll(true); out.porOp = orden();
+      H.fire("click", {"data-rk-sort": "pos"}); renderAll(true);
+      H.fire("click", {"data-rk-sel": "L"}); renderAll(true); out.det = H.el("#rkRows").innerHTML;
+      S.tab = "mando"; renderAll(true); out.md = H.el("#mdRk").innerHTML; out.mdSub = H.el("#mdRkSub").textContent;
+      return out;""")
+    assert r["riesgo"] == ranking.RIESGO_PCT == 0.5
+    head = r["head"]
+    assert ">% cuenta al día (neto)</button>" in head and ">% por operación (neto)</button>" in head and "R/op." not in head
+    assert 'class="rk-sb w" data-rk-sort="pct_dia"' in head and "1R = el 0,5 % de riesgo por operación" in head
+    assert "neto de comisiones, deslizamiento y funding" in head
+    rows = r["rows"]
+    assert re.search(r"\d R\b", rows) is None and "R/op" not in rows
+    # % por operación = R × 0,5: A +0,30 R → +0,150 %; L +0,06 R → +0,030 %; N +0,90 R → +0,450 %
+    assert '<td class="r pos">+0,150 %</td>' in rows and '<td class="r pos">+0,030 %</td>' in rows and '<td class="r pos">+0,450 %</td>' in rows
+    assert "fam L · Laboratorio de 2.000 · neto de costes del laboratorio (sin funding)" in rows
+    assert "fam A · Réplicas del motor · neto de costes OKX EU con X-Perps" in rows
+    assert "fam N · Réplicas del motor · costes sin indicar" in rows and 'title="Su estudio no dice con qué costes se midió"' in rows
+    assert "fam SC · Réplicas del motor · sin costes: no es neto" in rows
+    assert 'title="Costes con que se midió: laboratorio de 2.000: 0,10 % por lado' in rows
+    assert r["porOp"] == "N,D,A,B,C,L,SC"   # de más a menos R por operación
+    det = r["det"]
+    fuera_det, dentro_det = det.split('<tr class="rk-det">', 1)
+    assert re.search(r"\d R\b", fuera_det) is None and re.search(r"\d R\b", dentro_det.split("</tr>", 1)[0])   # el R, solo en el detalle
+    for t in ("% de la cuenta al día (neto)", "+0,040 %", "% por operación (neto)", "+0,030 % (+0,06 R × 0,5 % de riesgo por operación)",
+              "+0,030 % de la cuenta por operación, neto (+0,06 R)", "Costes con que se midió", "sin funding"):
+        assert t in det, t
+    live = r["live"]
+    assert re.search(r"\d R\b", live) is None
+    assert "+0,050 % de la cuenta al día (neto)" in live and "+0,250 % por operación (neto) fuera de muestra" in live
+    assert "dentro +0,025 % por operación" in live and "Costes con que se midió: OKX EU con X-Perps" in live
+    assert "netas de comisiones, deslizamiento y funding" in r["sub"]
+    md = r["md"]
+    assert re.search(r"\d R\b", md) is None and ">+0,300 %/día</b>" in md and "+0,150 %/op." in md
+    assert "neto de costes OKX EU con X-Perps" in md and "Ruptura V3 · puesto 4 de 4 · neto de costes OKX EU con X-Perps" in md
+    assert "neto de comisiones, deslizamiento y funding" in r["mdSub"]
+    _sin_null(head, rows, det, live, md)
 
 
 # ---------------------------------------------------------------- Laboratorio vivo (docs/07, 13 y 14; docs/04 2.19)
@@ -3441,7 +3507,8 @@ def test_ranking_y_laboratorio_en_la_demostracion_son_ejemplos_marcados():
     rkd, lvd = json.loads(blob("rankingData")), json.loads(blob("labVivoData"))
     assert rkd["ejemplo"] is True and lvd["ejemplo"] is True and len(blob("rankingData")) + len(blob("labVivoData")) < 40_000
     assert all(re.fullmatch(r"h-\d{8}-\d{4}-[a-z0-9_-]{3,60}", h) for h in lvd["hipotesis"])
-    assert "Ordenado por beneficio fuera de muestra con costes; lo de arriba con poca muestra o frágil suele ser suerte." in page
+    assert ("Todo en % de la cuenta y neto: después de comisiones, deslizamiento y funding. Ordenado por % de la cuenta al "
+            "día fuera de muestra; lo de arriba con poca muestra o frágil suele ser suerte.") in page
     # el texto tal cual de cada bloque, como lo daría el navegador (textContent): se lee por el camino de siempre
     bloques = json.dumps({i: blob(i) for i in ("rankingData", "labVivoData")}, ensure_ascii=False)
     r = run(f"const B = {bloques};\n" + """document.getElementById = id => id in B ? {textContent: B[id]} : null;

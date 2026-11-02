@@ -288,18 +288,21 @@ def test_en_marcha_con_su_puesto_o_fuera_del_ranking(tmp_path):
     assert em["fila"]["estado"] == "en_paper" and em["fila"]["en_marcha"] and em["desde"] == 1_793_276_347_112
     em = r.calcular({"openings": openings("seis2")})["en_marcha"]
     assert em["posicion"] is None and not em["en_ranking"]
-    assert em["texto"] == "Fuera del ranking: pierde fuera de muestra (−0,075 R por operación)"
+    # en % de la cuenta por operación y neto (R × 0,5), como la web: el ranking no habla en R fuera del detalle
+    assert em["texto"] == "Fuera del ranking: pierde fuera de muestra (−0,038 % de la cuenta por operación, neto de costes)"
+    assert " R " not in em["texto"] + " "
     res = r.calcular({"openings": openings("seis", "6 diarias")})   # sin su fila: una de en vivo, sin medida
     assert res["en_marcha"]["texto"] == "Fuera del ranking: sin medida fuera de muestra"
     assert next(f for f in res["filas"] if f["id"] == "seis")["origen"] == "en_vivo"
     # no pierde, pero no se puede poner en su puesto: no se dice «pierde»
     poner(car, "seis.json", {"id": "seis", "fuera": {"n": 40, "R": 0.12}}, time.time() + 5)
     em = r.calcular({"openings": openings("seis", "6 diarias")})["en_marcha"]
-    assert em["texto"] == ("Fuera del ranking: no pierde (+0,120 R por operación), pero le faltan las operaciones por "
-                           "jornada para calcular su % de la cuenta al día") and "pierde fuera" not in em["texto"]
+    assert em["texto"] == ("Fuera del ranking: no pierde (+0,060 % de la cuenta por operación, neto de costes), pero le "
+                           "faltan las operaciones por jornada para calcular su % de la cuenta al día") and "pierde fuera" not in em["texto"]
     poner(car, "seis.json", {"id": "seis", "fuera": {"n": 0, "R": 0.0}, "op_dia": 0.0}, time.time() + 10)
     em = r.calcular({"openings": openings("seis", "6 diarias")})["en_marcha"]
-    assert em["texto"] == "Fuera del ranking: no pierde (+0,000 R por operación), pero no tiene operaciones fuera de muestra"
+    assert em["texto"] == ("Fuera del ranking: no pierde (+0,000 % de la cuenta por operación, neto de costes), pero no "
+                           "tiene operaciones fuera de muestra")
     os.remove(car / "seis.json")
     res = r.calcular({"openings": openings(None, "Cambiada por la evolución")})
     assert res["en_marcha"]["id"] is None and "evolución" in res["en_marcha"]["texto"]

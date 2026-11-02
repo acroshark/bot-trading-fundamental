@@ -669,6 +669,7 @@ details.dec-more p{margin:3px 0 0;font-size:11.5px;color:var(--muted);font-famil
 .rk-sb:hover,th[aria-sort="ascending"] .rk-sb,th[aria-sort="descending"] .rk-sb{color:var(--ink)}
 .rk-sb:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 th.r .rk-sb{text-align:right}
+.rk-sb.w{white-space:normal;min-width:86px;max-width:118px}   /* «% cuenta al día (neto)» y «% por operación (neto)», en dos líneas */
 .rk-nm{all:unset;cursor:pointer;font-size:12.5px;line-height:1.35}
 .rk-nm:hover b{color:var(--accent)} .rk-nm:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .rk-sub{display:block;font-size:11px;color:var(--muted);margin-top:1px;white-space:normal}
@@ -873,7 +874,7 @@ tr[data-lv-sel]{cursor:pointer}
       <div class="panel md-grow md-trace" id="mdTrace"></div>
       <div class="panel"><div class="panel-h"><h2>Tu decisión y cartera paper</h2></div><div class="panel-b" id="mdBook"></div></div>
       <div class="panel"><div class="panel-h"><h2>Noticias fiables</h2><p id="mdFiabSub">Las que aciertan ≥ 60 % de forma constante y las entradas que abren.</p></div><ul class="md-list" id="mdFiab"></ul></div>
-      <div class="panel"><div class="panel-h"><h2>Ranking de estrategias</h2><p id="mdRkSub">Las 5 primeras por % de la cuenta al día fuera de muestra, con costes, y la que está en marcha.</p></div><ul class="md-list" id="mdRk"></ul></div>
+      <div class="panel"><div class="panel-h"><h2>Ranking de estrategias (% neto)</h2><p id="mdRkSub">Las 5 primeras por % de la cuenta al día fuera de muestra, neto de comisiones, deslizamiento y funding, y la que está en marcha.</p></div><ul class="md-list" id="mdRk"></ul></div>
       <div class="panel"><div class="panel-h"><h2>Próximas predicciones</h2></div><ul class="md-list" id="mdPred"></ul></div>
     </div>
   </section>
@@ -913,10 +914,10 @@ tr[data-lv-sel]{cursor:pointer}
   <!-- RANKING: todas las estrategias medidas, de más a menos beneficio fuera de muestra con costes (bot/ranking.py, GET /api/ranking) -->
   <section class="view" id="v-ranking" hidden>
     <div class="callout warn" id="rkDemoNote" hidden></div>
-    <div class="callout info" id="rkNota"><b>Ordenado por beneficio fuera de muestra con costes; lo de arriba con poca muestra o frágil suele ser suerte.</b><span>Entran todas las estrategias que no pierden fuera de muestra (R ≥ 0, neto de costes), lleguen o no al 1 % diario; las que pierden se quedan fuera. Cada fila va con los costes con los que la midió su estudio, que no son los mismos para todas: las réplicas del motor, las selectivas, el curso y las salidas, 0,10 % por lado y 2 pb con el funding de los perpetuos; el laboratorio de 2.000, 5-20 pb más en los stops y sin funding; el laboratorio vivo, OKX EU con X-Perps, más barato. «% de la cuenta al día»: por jornada con aperturas, con 0,5 % de riesgo por operación. Solo paper: nada de esto opera con dinero real ni es una promesa.</span></div>
-    <div class="panel"><div class="panel-h"><h2>Estrategia en marcha</h2><p>La que opera ahora el motor en la cartera paper: se enseña siempre, esté o no en el ranking.</p></div><div class="panel-b" id="rkLive"></div></div>
+    <div class="callout info" id="rkNota"><b>Todo en % de la cuenta y neto: después de comisiones, deslizamiento y funding. Ordenado por % de la cuenta al día fuera de muestra; lo de arriba con poca muestra o frágil suele ser suerte.</b><span>«% cuenta al día (neto)»: por jornada con aperturas, con 0,5 % de riesgo por operación. «% por operación (neto)»: el R medio × 0,5, porque 1R es el 0,5 % de la cuenta que se arriesga en cada operación; el R solo sale en el detalle de cada estrategia. Entran todas las que no pierden fuera de muestra, netas de costes, lleguen o no al 1 % diario; las que pierden se quedan fuera. Cada fila dice con qué costes se midió, porque no son los mismos para todas: las réplicas del motor, las selectivas, el curso y las salidas, 0,10 % de comisión por lado y 2 pb de deslizamiento, con el funding de los perpetuos; el laboratorio de 2.000, 5-20 pb más en los stops y <b>sin funding</b>; el laboratorio vivo, OKX EU con X-Perps, más barato. Solo paper: nada de esto opera con dinero real ni es una promesa.</span></div>
+    <div class="panel"><div class="panel-h"><h2>Estrategia en marcha</h2><p>La que opera ahora el motor en la cartera paper: se enseña siempre, esté o no en el ranking. Cifras en % de la cuenta, netas de comisiones, deslizamiento y funding.</p></div><div class="panel-b" id="rkLive"></div></div>
     <div class="panel">
-      <div class="panel-h"><h2>Ranking de estrategias</h2><p id="rkSub">Pulsa una estrategia para ver su regla y sus cifras; pulsa una columna para ordenar.</p></div>
+      <div class="panel-h"><h2>Ranking de estrategias (% neto de costes)</h2><p id="rkSub">Pulsa una estrategia para ver su regla, su R y sus cifras; pulsa una columna para ordenar.</p></div>
       <div class="filters" id="rkFilters"></div>
       <div class="tbl-wrap"><table class="rk-tbl"><thead id="rkHead"></thead><tbody id="rkRows"></tbody></table></div>
       <div class="panel-b" id="rkFoot"></div>
@@ -5021,6 +5022,11 @@ const rkNombre = f => rkTxt(f.nombre, 160) || rkTxt(f.id, 120) || "Sin nombre";
 const rkOrig = o => typeof o==="string" && o ? rkCache.orig[o] || RK_ORIGEN[o] || o.replace(/_/g, " ") : "";
 const rkGana = v => isNum(v) ? (Math.abs(v) <= 1 ? v*100 : v) : null;   // % de ganadoras (también si llega en fracción)
 const rkPct = v => isNum(v) ? `${v>0?"+":""}${nf(v, Math.abs(v) >= 1 ? 2 : 3)} %` : "–";
+// El ranking habla en % de la cuenta y neto de costes (lo pidió el usuario: «en el ranking me tienes que hablar en neto,
+// después de costes»). Con el 0,5 % de riesgo por operación de las reglas (bot/ranking.RIESGO_PCT), 1R = 0,5 % de la
+// cuenta: el % por operación es el R × 0,5. El R solo sale en el detalle de cada estrategia.
+const RK_RIESGO_PCT = 0.5;
+const rkOp = R => isNum(R) ? R * RK_RIESGO_PCT : null;
 const rkP = v => isNum(v) ? (v > 0 && v < 0.001 ? "< 0,001" : nf(v, v < 0.01 ? 3 : 2)) : "–";
 const rkCls = v => isNum(v) ? (v > 0 ? "pos" : v < 0 ? "neg" : "") : "";
 const rkTs = x => isObj(x) && isNum(x.ts) ? x.ts : 0;
@@ -5076,14 +5082,14 @@ function rkFiltered(rows, sinFragiles = S.rkF.sinFragiles){
 }
 const rkFActivo = () => !!(S.rkF.origen || S.rkF.cumple || S.rkF.minOp || S.rkF.sinFragiles);
 const RK_COLS = [
-  {k:"pos", t:"#", d:1, r:true, v:f => f._pos, tip:"Puesto en el ranking: % de la cuenta al día fuera de muestra, neto de costes"},
-  {k:"nombre", t:"Estrategia", d:1, s:true, v:f => rkNombre(f).toLowerCase(), tip:"Pulsa el nombre para ver su regla"},
-  {k:"pct_dia", t:"% cuenta/día", d:-1, r:true, v:f => rkN(f.pct_dia), tip:"% de la cuenta por jornada con aperturas, con 0,5 % de riesgo por operación, fuera de muestra y neto de los costes de su estudio (comisiones y deslizamiento; el funding de los perpetuos donde el estudio lo mide: no en el laboratorio de 2.000)"},
-  {k:"R", t:"R/op.", d:-1, r:true, v:rkR, tip:"R medio por operación fuera de muestra, neto de costes"},
+  {k:"pos", t:"#", d:1, r:true, v:f => f._pos, tip:"Puesto en el ranking: % de la cuenta al día fuera de muestra, neto de comisiones, deslizamiento y funding"},
+  {k:"nombre", t:"Estrategia", d:1, s:true, v:f => rkNombre(f).toLowerCase(), tip:"Pulsa el nombre para ver su regla, su R y sus cifras; debajo, con qué costes se midió"},
+  {k:"pct_dia", t:"% cuenta al día (neto)", d:-1, r:true, w:true, v:f => rkN(f.pct_dia), tip:"% de la cuenta por jornada con aperturas, con 0,5 % de riesgo por operación, fuera de muestra y neto de comisiones, deslizamiento y funding, con los costes de su estudio (cada fila dice cuáles; el laboratorio de 2.000 no mide el funding)"},
+  {k:"pct_op", t:"% por operación (neto)", d:-1, r:true, w:true, v:f => rkOp(rkR(f)), tip:"% de la cuenta por operación fuera de muestra, neto de comisiones, deslizamiento y funding: el R medio × 0,5 (1R = el 0,5 % de riesgo por operación). El R, en el detalle"},
   {k:"op_dia", t:"Op./día", d:-1, r:true, v:f => rkN(f.op_dia), tip:"Operaciones medias por jornada con aperturas"},
   {k:"n", t:"Operaciones", d:-1, r:true, v:f => rkN(rkO(f.fuera).n), tip:"Operaciones fuera de muestra / dentro de muestra"},
   {k:"gana", t:"Ganadoras", d:-1, r:true, v:f => rkGana(rkO(f.fuera).gana_pct), tip:"% de operaciones ganadoras fuera de muestra"},
-  {k:"caida", t:"Caída máx.", d:1, r:true, v:f => rkN(f.caida_max_pct), tip:"Caída máxima de la cuenta fuera de muestra, en %"},
+  {k:"caida", t:"Caída máx.", d:1, r:true, v:f => rkN(f.caida_max_pct), tip:"Caída máxima de la cuenta fuera de muestra, en %, neta de costes"},
   {k:"rob", t:"Robustez", d:1, v:f => f.fragil===true ? 1 : 0, tip:"Frágil: gana fuera pero pierde dentro, o pierde sin sus 5 mayores operaciones, o no pasa la corrección por número de pruebas, o no la tiene siendo una de varias configuraciones de su estudio"},
   {k:"estado", t:"Estado", d:1, s:true, v:f => (RK_ESTADO[f.estado] ? RK_ESTADO[f.estado][1] : rkTxt(f.estado, 40)).toLowerCase() || null},
   {k:"cumple", t:"Tus reglas", d:1, v:f => f.cumple_reglas===true ? 0 : f.cumple_reglas===false ? 1 : null, tip:"¿Cumple tus reglas (≥ 2:1, stop ≥ 1,5 %, ≥ 3 % neto…)?"},
@@ -5120,7 +5126,7 @@ function rkCorr(c, f){
   return {ok, txt:`corregida${lab ? " " + lab : ""}${isNum(v) ? " " + rkP(v) : ""}${ok===true ? " ✓" : ok===false ? " ✗" : ""}`, tip:met};
 }
 function rkMitades(m){
-  if (Array.isArray(m)){ const v = m.filter(isNum); return v.length ? {ok:v.every(x => x > 0), txt:`mitades ${v.map(x => sgn(x,2)).join(" / ")}`} : null; }
+  if (Array.isArray(m)){ const v = m.filter(isNum); return v.length ? {ok:v.every(x => x > 0), txt:`mitades ${v.map(x => sgn(rkOp(x),3)).join(" / ")} %/op.`} : null; }
   if (typeof m==="boolean") return {ok:m, txt:`mitades ${m ? "✓" : "✗"}`};
   return rkTxt(m, 30) ? {ok:null, txt:`mitades ${rkTxt(m, 30)}`} : null;
 }
@@ -5138,14 +5144,14 @@ function rkRob(f){
   const r = rkO(f.robustez), out = [], s5 = r.sin_5_mayores;
   if (f.fragil===true) out.push(rkChip("bad", "frágil", rkFragilWhy(f)));
   if (f.poca_muestra===true) out.push(rkChip("warn", "poca muestra", "Menos de 30 operaciones fuera de muestra: su cifra puede ser pura suerte"));
-  if (isNum(s5)) out.push(rkChip(s5 >= 0 ? "good" : "bad", `sin 5 mayores ${sgn(s5,2)} R`, "R medio fuera de muestra sin sus 5 mejores operaciones"));
+  if (isNum(s5)) out.push(rkChip(s5 >= 0 ? "good" : "bad", `sin 5 mayores ${rkPct(rkOp(s5))}/op.`, "% de la cuenta por operación fuera de muestra, neto de costes, sin sus 5 mejores operaciones"));
   else if (typeof s5==="boolean") out.push(rkChip(s5 ? "good" : "bad", `sin 5 mayores ${s5 ? "✓" : "✗"}`, "¿Sigue sin perder fuera de muestra sin sus 5 mejores operaciones?"));
   const de = rkN(rkO(f.dentro).R), dp = typeof r.dentro_positivo==="boolean" ? r.dentro_positivo : isNum(de) ? de > 0 : null;
-  if (dp!=null) out.push(rkChip(dp ? "good" : "bad", `dentro ${dp ? "✓" : "✗"}`, `Dentro de muestra (los datos con los que se eligió): ${isNum(de) ? rT(de) + " por operación" : dp ? "gana" : "pierde"}`));
+  if (dp!=null) out.push(rkChip(dp ? "good" : "bad", `dentro ${dp ? "✓" : "✗"}`, `Dentro de muestra (los datos con los que se eligió): ${isNum(de) ? rkPct(rkOp(de)) + " de la cuenta por operación, neto de costes" : dp ? "gana" : "pierde"}`));
   const c = rkCorr(r.corregida, f);
   if (c) out.push(rkChip(c.ok===true ? "good" : c.ok===false ? "bad" : "muted", c.txt, c.tip || "Corrección por el número de estrategias probadas (p, q o Holm)"));
   const mi = rkMitades(r.mitades);
-  if (mi) out.push(rkChip(mi.ok===true ? "good" : mi.ok===false ? "bad" : "muted", mi.txt, "R medio en cada mitad del fuera de muestra"));
+  if (mi) out.push(rkChip(mi.ok===true ? "good" : mi.ok===false ? "bad" : "muted", mi.txt, "% de la cuenta por operación, neto de costes, en cada mitad del fuera de muestra"));
   return out.join("") || '<span class="note">–</span>';
 }
 function rkEst(f){
@@ -5161,24 +5167,26 @@ function rkPerfil(f){   // con qué costes se calculó: el texto del bot o el no
   if (isObj(p)) return rkTxt(p.texto, 200) || (typeof p.perfil==="string" && p.perfil ? short(comNombre(p.perfil), 120) : "");
   return "";
 }
-function rkVivo(ev){   // en_vivo: {fuente, virtual, n, R, gana_pct, neto_usdc, desde, hasta, abiertas, avance}
-  const v = rkO(ev), p = [];
+// en_vivo: {fuente, virtual, n, R, gana_pct, neto_usdc, desde, hasta, abiertas, avance}. En % de la cuenta por operación
+// (el R del paper ya es neto: lleva comisiones y funding); conR: también el R, solo en el detalle.
+function rkVivo(ev, conR = false){
+  const v = rkO(ev), p = [], op = R => `${rkPct(rkOp(R))} de la cuenta por operación, neto${conR ? ` (${rT(R)})` : ""}`;
   if (!Object.keys(v).length) return "";
   const fu = RK_VIVO[v.fuente] || (v.virtual===true ? "virtual" : "");
   if (isNum(v.n)) p.push(`${nf(v.n,0)} ${v.n===1 ? "operación cerrada" : "operaciones cerradas"}${fu ? " " + fu : ""}`); else if (fu) p.push(fu);
-  if (isNum(v.R)) p.push(`R medio ${rT(v.R)}`);
+  if (isNum(v.R)) p.push(op(v.R));
   const g = rkGana(v.gana_pct); if (isNum(g)) p.push(`${pctp(g,0)} ganadoras`);
   if (isNum(v.neto_usdc)) p.push(`${v.neto_usdc>0?"+":""}${nf(v.neto_usdc,2)} USDC ficticios`);
   if (isNum(v.abiertas) && v.abiertas > 0) p.push(`${nf(v.abiertas,0)} ${v.abiertas===1 ? "abierta" : "abiertas"}`);
   const d = rkFecha(v.desde); if (d!=="–") p.push(`desde el ${d}`);
   const av = rkO(v.avance);
-  if (isNum(av.n)) p.push(`en la prueba en avance: ${nf(av.n,0)} op.${isNum(av.R) ? `, R medio ${rT(av.R)}` : ""}`);
+  if (isNum(av.n)) p.push(`en la prueba en avance: ${nf(av.n,0)} op.${isNum(av.R) ? `, ${op(av.R)}` : ""}`);
   return p.join(" · ");
 }
-function rkTramo(x, fuera){
+function rkTramo(x, fuera){   // en el detalle: el % de la cuenta por operación (neto) y, entre paréntesis, su R
   const p = [], g = rkGana(x.gana_pct), ic = ic2(x.ic95, v => sgn(v,2));
-  if (isNum(x.n)) p.push(`${nf(x.n,0)} op.`); if (isNum(x.R)) p.push(`${rT(x.R)} por operación`); if (isNum(g)) p.push(`${pctp(g,0)} ganadoras`);
-  if (fuera){ if (ic) p.push(`IC 95 % ${ic}`); if (isNum(x.R_bruto)) p.push(`${rT(x.R_bruto)} antes de costes`); if (isNum(x.p)) p.push(`p ${rkP(x.p)}`);
+  if (isNum(x.n)) p.push(`${nf(x.n,0)} op.`); if (isNum(x.R)) p.push(`${rkPct(rkOp(x.R))} de la cuenta por operación, neto (${rT(x.R)})`); if (isNum(g)) p.push(`${pctp(g,0)} ganadoras`);
+  if (fuera){ if (ic) p.push(`IC 95 % ${ic} R`); if (isNum(x.R_bruto)) p.push(`${rkPct(rkOp(x.R_bruto))} antes de costes (${rT(x.R_bruto)})`); if (isNum(x.p)) p.push(`p ${rkP(x.p)}`);
     if (isNum(x.q)) p.push(`q ${rkP(x.q)}`); if (isNum(x.p_holm)) p.push(`p de Holm ${rkP(x.p_holm)}`);
     if (isNum(x.jornadas)) p.push(`${nf(x.jornadas,0)} jornadas`); }
   const per = [x.desde, x.hasta].map(rkFecha);
@@ -5190,31 +5198,39 @@ function rkTramo(x, fuera){
 const RK_PERFIL = {backtest:"costes del backtest", laboratorio:"costes del laboratorio (sin funding)", okx_eu_con_xperps:"costes OKX EU con X-Perps",
   okx_eu_sin_xperps:"costes OKX EU sin X-Perps", sin_costes:"sin costes", paper:"costes del paper"};
 const rkPerfilCorto = f => rkTxt(f.perfil_corto, 60) || (typeof f.perfil_costes==="string" && f.perfil_costes ? RK_PERFIL[f.perfil_costes] || `costes: ${short(f.perfil_costes, 40)}` : "");
+// Con qué costes se midió cada fila, en corto: sus cifras son netas de esos costes (y una medida sin costes no es neta)
+function rkNetoTxt(f){
+  const pc = rkPerfilCorto(f);
+  if (f.perfil_costes==="sin_costes" || pc==="sin costes") return "sin costes: no es neto";
+  return !pc ? "costes sin indicar" : /^costes\b/i.test(pc) ? `neto de ${pc}` : `neto (${pc})`;
+}
 function rkRowHtml(f, live, sel){
-  const fu = rkO(f.fuera), de = rkO(f.dentro), id = rkId(f) || `fila-${f._pos}`, g = rkGana(fu.gana_pct), R = rkR(f);
-  const pc = rkPerfilCorto(f), sub = [rkTxt(f.familia, 60), rkOrig(f.origen), pc].filter(Boolean).join(" · "), pa = rkN(f.posicion_antes);
+  const fu = rkO(f.fuera), de = rkO(f.dentro), id = rkId(f) || `fila-${f._pos}`, g = rkGana(fu.gana_pct), R = rkR(f), op = rkOp(R);
+  const pl = rkPerfil(f), sub = [rkTxt(f.familia, 60), rkOrig(f.origen), rkNetoTxt(f)].filter(Boolean).join(" · "), pa = rkN(f.posicion_antes);
   const mov = isNum(pa) && isNum(f._pos) && pa!==f._pos ? `<span class="rk-sub ${pa > f._pos ? "pos" : "neg"}" title="Antes, puesto ${nf(pa,0)}">${pa > f._pos ? "▲" : "▼"}${nf(Math.abs(pa - f._pos),0)}</span>` : "";
   return `<tr class="${live ? "rk-live" : ""}${sel ? " sel" : ""}"><td class="r mono">${isNum(f._pos) ? nf(f._pos,0) : "–"}${mov}</td>
-    <td class="wrapc"><button type="button" class="rk-nm" data-rk-sel="${esc(id)}" aria-expanded="${sel}"><b>${esc(rkNombre(f))}</b></button>${live ? ' <span class="pill good">en marcha</span>' : ""}${sub ? `<span class="rk-sub"${pc ? ` title="${esc("Costes: " + (rkPerfil(f) || pc))}"` : ""}>${esc(sub)}</span>` : ""}</td>
-    <td class="r"><b class="${rkCls(f.pct_dia)}">${rkPct(f.pct_dia)}</b></td><td class="r ${rkCls(R)}">${rT(R)}</td>
+    <td class="wrapc"><button type="button" class="rk-nm" data-rk-sel="${esc(id)}" aria-expanded="${sel}"><b>${esc(rkNombre(f))}</b></button>${live ? ' <span class="pill good">en marcha</span>' : ""}<span class="rk-sub" title="${esc(pl ? "Costes con que se midió: " + pl : "Su estudio no dice con qué costes se midió")}">${esc(sub)}</span></td>
+    <td class="r"><b class="${rkCls(f.pct_dia)}">${rkPct(f.pct_dia)}</b></td><td class="r ${rkCls(op)}">${rkPct(op)}</td>
     <td class="r">${isNum(f.op_dia) ? nf(f.op_dia,2) : "–"}</td><td class="r">${isNum(fu.n) ? nf(fu.n,0) : "–"} / ${isNum(de.n) ? nf(de.n,0) : "–"}</td>
     <td class="r">${isNum(g) ? pctp(g,0) : "–"}</td><td class="r">${isNum(f.caida_max_pct) ? pctp(f.caida_max_pct,1) : "–"}</td>
     <td class="rk-rob">${rkRob(f)}</td><td>${rkEst(f)}</td><td>${rkCumple(f)}</td><td class="mono">${esc(rkFecha(f.fecha))}</td>
     <td>${f.nueva===true ? '<span class="pill info">nueva</span>' : ""}</td></tr>`;
 }
-function rkDetHtml(f){
-  const fu = rkO(f.fuera), de = rkO(f.dentro), r = rkO(f.robustez), regla = rkTxt(f.regla, 1500), pf = rkPerfil(f), vivo = rkVivo(f.en_vivo);
+function rkDetHtml(f){   // el detalle: aquí, y solo aquí, va también el R
+  const fu = rkO(f.fuera), de = rkO(f.dentro), r = rkO(f.robustez), regla = rkTxt(f.regla, 1500), pf = rkPerfil(f), vivo = rkVivo(f.en_vivo, true), R = rkR(f);
   const nat = [isNum(f.op_dia_natural) ? `${nf(f.op_dia_natural,2)} op.` : "", isNum(f.pct_dia_natural) ? rkPct(f.pct_dia_natural) : ""].filter(Boolean).join(" · ");
-  const rob = [isNum(r.base_p) ? `frente a su base al azar p ${rkP(r.base_p)}` : "", isNum(r.sin_mejor_mes) ? `sin su mejor mes ${rT(r.sin_mejor_mes)}` : "",
-    isNum(r.sin_mejor_semana) ? `sin su mejor semana ${rT(r.sin_mejor_semana)}` : "", isNum(r.desliz_x2) ? `con el deslizamiento ×2 ${rT(r.desliz_x2)}` : "",
+  const pR = v => `${rkPct(rkOp(v))} por operación (${rT(v)})`;
+  const rob = [isNum(r.base_p) ? `frente a su base al azar p ${rkP(r.base_p)}` : "", isNum(r.sin_mejor_mes) ? `sin su mejor mes ${pR(r.sin_mejor_mes)}` : "",
+    isNum(r.sin_mejor_semana) ? `sin su mejor semana ${pR(r.sin_mejor_semana)}` : "", isNum(r.desliz_x2) ? `con el deslizamiento ×2 ${pR(r.desliz_x2)}` : "",
     isObj(r.corregida) && rkTxt(r.corregida.metodo, 200) ? (rkTipo(r.corregida)==="sin_p" ? rkTxt(r.corregida.metodo, 200)   // ya dice que no la tiene
       : `corrección: ${rkTxt(r.corregida.metodo, 200)}${isNum(r.corregida.valor) ? ` (${rkP(r.corregida.valor)})` : ""}`) : ""].filter(Boolean).join(" · ");
-  const perf = Object.entries(rkO(f.perfiles)).filter(([, v]) => isObj(v)).slice(0, 4).map(([k, v]) => `${comNombre(k)}: ${[isNum(v.R) ? rT(v.R) : "", isNum(v.pct_dia) ? `${rkPct(v.pct_dia)} al día` : ""].filter(Boolean).join(", ") || "–"}`).join(" · ");
+  const perf = Object.entries(rkO(f.perfiles)).filter(([, v]) => isObj(v)).slice(0, 4).map(([k, v]) => `${comNombre(k)}: ${[isNum(v.R) ? pR(v.R) : "", isNum(v.pct_dia) ? `${rkPct(v.pct_dia)} al día` : ""].filter(Boolean).join(", ") || "–"}`).join(" · ");
   const est = [rkTxt(f.estudio, 60), isNum(f.probadas) ? `una de ${nf(f.probadas,0)} configuraciones probadas en su estudio` : "", rkTxt(f.igual_que, 120) ? `igual que ${rkTxt(f.igual_que, 120)}` : ""].filter(Boolean).join(" · ");
   return `<tr class="rk-det"><td colspan="${RK_COLS.length}"><div class="rk-det-b">
     ${regla ? `<p><b>Regla:</b> ${esc(regla)}</p>` : `<p class="note">Sin la regla en texto llano.</p>`}
-    ${kv([["Fuera de muestra", rkTramo(fu, true)], ["Dentro de muestra", rkTramo(de, false)], ["R al día", rT(f.R_dia)], ["% de la cuenta al día", esc(rkPct(f.pct_dia))],
-      ["Por día natural", esc(nat || "–")], ["Caída máxima", isNum(f.caida_max_pct) ? pctp(f.caida_max_pct,1) : "–"], ["Costes", esc(pf || "–")],
+    ${kv([["% de la cuenta al día (neto)", esc(rkPct(f.pct_dia))], ["% por operación (neto)", esc(isNum(R) ? `${rkPct(rkOp(R))} (${rT(R)} × 0,5 % de riesgo por operación)` : "–")],
+      ["Fuera de muestra", rkTramo(fu, true)], ["Dentro de muestra", rkTramo(de, false)], ["R al día", rT(f.R_dia)],
+      ["Por día natural", esc(nat || "–")], ["Caída máxima", isNum(f.caida_max_pct) ? pctp(f.caida_max_pct,1) : "–"], ["Costes con que se midió", esc(pf || rkNetoTxt(f))],
       ["Origen", esc(rkOrig(f.origen) || "–")], ["Estudio", esc(est || "–")], ["Archivo", esc(rkTxt(f.archivo, 160) || "–")], ["Fecha", esc(rkFecha(f.fecha))],
       ["En el ranking desde", esc(okT(f.entra_desde) ? vigTime(f.entra_desde) : "–")], ["En vivo", esc(vivo || "no ha operado")]])}
     ${rob ? `<p class="note"><b>Robustez:</b> ${esc(rob)}.</p>` : ""}${perf ? `<p class="note"><b>Con otros costes:</b> ${esc(perf)}.</p>` : ""}
@@ -5224,7 +5240,7 @@ function rkDetHtml(f){
 }
 function rkHeadHtml(){
   return `<tr>${RK_COLS.map(c => { const on = S.rkSort.k===c.k, up = S.rkSort.dir===1;
-    return `<th class="${c.r ? "r" : ""}" aria-sort="${on ? (up ? "ascending" : "descending") : "none"}"${c.tip ? ` title="${esc(c.tip)}"` : ""}><button type="button" class="rk-sb" data-rk-sort="${c.k}">${esc(c.t)}${on ? (up ? " ▲" : " ▼") : ""}</button></th>`; }).join("")}</tr>`;
+    return `<th class="${c.r ? "r" : ""}" aria-sort="${on ? (up ? "ascending" : "descending") : "none"}"${c.tip ? ` title="${esc(c.tip)}"` : ""}><button type="button" class="rk-sb${c.w ? " w" : ""}" data-rk-sort="${c.k}">${esc(c.t)}${on ? (up ? " ▲" : " ▼") : ""}</button></th>`; }).join("")}</tr>`;
 }
 function rkFiltersHtml(ranked){
   const F = S.rkF, orgs = {};
@@ -5271,16 +5287,17 @@ function rkFootHtml(src, view, shown){
 function rkLiveHtml(L){
   if (!L){ const {preset, nombre} = motorPreset(), nm = nombre || PRESET_NM[preset] || "";
     return `<p class="note">${esc(S.live ? `El ranking aún no dice cuál es la estrategia en marcha${nm ? ` (el motor de aperturas opera «${nm}»: pestaña Mercado y aperturas)` : ""}.` : "Sin estrategia en marcha en el ejemplo.")}</p>`; }
-  const E = L.E, fu = rkO(E.fuera), de = rkO(E.dentro), vivo = rkVivo(E.en_vivo), R = rkR(E);
+  const E = L.E, fu = rkO(E.fuera), de = rkO(E.dentro), vivo = rkVivo(E.en_vivo), R = rkR(E), pl = rkPerfil(E);
   const head = `<span class="pill ${L.dentro ? "good" : "bad"}">${esc(L.dentro ? `Puesto ${nf(L.pos,0)} de ${nf(L.de,0)}` : `Fuera del ranking: ${L.why}`)}</span>`
     + (E.pausada===true ? ' <span class="pill warn">motor en pausa</span>' : "");
   const txt = L.texto && !/^puesto \d/i.test(L.texto) ? L.texto : "", desde = okT(E.desde) ? vigTime(E.desde) : "";
-  const cif = [isNum(E.pct_dia) ? `${rkPct(E.pct_dia)} de la cuenta al día` : "", isNum(R) ? `${rT(R)} por operación fuera de muestra` : "",
+  const cif = [isNum(E.pct_dia) ? `${rkPct(E.pct_dia)} de la cuenta al día (neto)` : "", isNum(R) ? `${rkPct(rkOp(R))} por operación (neto) fuera de muestra` : "",
     isNum(E.op_dia) ? `${nf(E.op_dia,2)} operaciones al día` : "", isNum(fu.n) || isNum(de.n) ? `${isNum(fu.n) ? nf(fu.n,0) : "–"} operaciones fuera y ${isNum(de.n) ? nf(de.n,0) : "–"} dentro de muestra` : "",
-    isNum(de.R) ? `dentro ${rT(de.R)}` : ""].filter(Boolean).join(" · ");
-  const pierde = !L.dentro && isNum(R) && R < 0 ? `Pierde fuera de muestra con costes${isNum(E.pct_dia) ? ` (${rkPct(E.pct_dia)} de la cuenta al día)` : ""}: por eso no entra en el ranking, pero se enseña porque es la que opera. Se mide en paper tal cual.` : "";
+    isNum(de.R) ? `dentro ${rkPct(rkOp(de.R))} por operación` : ""].filter(Boolean).join(" · ");
+  const cos = pl ? `Costes con que se midió: ${pl}` : cap(rkNetoTxt(E));
+  const pierde = !L.dentro && isNum(R) && R < 0 ? `Pierde fuera de muestra, neto de costes${isNum(E.pct_dia) ? ` (${rkPct(E.pct_dia)} de la cuenta al día)` : ""}: por eso no entra en el ranking, pero se enseña porque es la que opera. Se mide en paper tal cual.` : "";
   return `<div class="rk-band${L.dentro ? "" : " out"}"><p><b>${esc(rkNombre(E))}</b>${head}${rkEst(E)}${E.fragil===true ? ' <span class="pill warn">frágil</span>' : ""}</p>
-    ${txt ? `<p class="note">${esc(txt.replace(/[.\s]+$/, ""))}.</p>` : ""}${cif ? `<p class="note">${esc(cif)}</p>` : ""}${pierde ? `<p class="note neg">${esc(pierde)}</p>` : ""}
+    ${txt ? `<p class="note">${esc(txt.replace(/[.\s]+$/, ""))}.</p>` : ""}${cif ? `<p class="note">${esc(cif)}</p>` : ""}${cif ? `<p class="note">${esc(cos.replace(/[.\s]+$/, ""))}.</p>` : ""}${pierde ? `<p class="note neg">${esc(pierde)}</p>` : ""}
     ${E.fragil===true ? `<p class="note">Frágil: ${esc(rkFragilWhy(E))}.</p>` : ""}
     <p class="note">En vivo: ${esc(vivo || "aún sin operaciones cerradas que cuenten")}${desde ? ` · la opera el motor desde el ${esc(desde)}` : ""}.</p></div>`;
 }
@@ -5306,11 +5323,11 @@ function renderRanking(force){
   putH(dn, demo ? `<b>EJEMPLO: así se verá el ranking con el bot en marcha.</b><span>Las filas de Ruptura V3, E2 con su salida de 7 días, «6 diarias», «6 diarias v2» y las dos prometedoras del laboratorio de 2.000 (E1 y E2 con su salida del laboratorio) son las que enseña el bot con sus backtests al 29-10-2026: netas de costes, cada una con los costes de su estudio, y con su corrección y su fragilidad (scripts/ranking_importar.py --demo). Las que empiezan por «Ejemplo» son inventadas para enseñar cómo funciona, y la que está en marcha es la del motor simulado de esta demostración. Todo es paper.</span>` : "");
   if (!src){ putH($("#rkLive"), rkLiveSinDatos()); putH($("#rkFilters"), ""); putH($("#rkHead"), rkHeadHtml());
     putH($("#rkRows"), `<tr><td colspan="${RK_COLS.length}" class="empty">${esc(rkEmptyTxt())}</td></tr>`); putH($("#rkFoot"), "");
-    putH($("#rkSub"), "Pulsa una estrategia para ver su regla y sus cifras; pulsa una columna para ordenar."); return; }
+    putH($("#rkSub"), "Pulsa una estrategia para ver su regla, su R y sus cifras; pulsa una columna para ordenar."); return; }
   const ranked = rkRanked(src), L = rkLiveInfo(src, ranked), view = rkSort(rkFiltered(ranked)), shown = view.slice(0, Math.max(RK_PAG, S.rkMas));
   const nT = isNum(src.n_total) ? src.n_total : objs(src.filas).length, nR = isNum(src.n_ranking) ? src.n_ranking : ranked.length;
   putH($("#rkLive"), rkLiveHtml(L));
-  putH($("#rkSub"), esc(`${nf(nR,0)} de ${nf(nT,0)} estrategias medidas no pierden fuera de muestra con costes y entran en el ranking${rkFActivo() ? `; con tus filtros se ven ${nf(view.length,0)}` : ""}. Pulsa una para ver su regla; pulsa una columna para ordenar.`));
+  putH($("#rkSub"), esc(`${nf(nR,0)} de ${nf(nT,0)} estrategias medidas no pierden fuera de muestra, netas de comisiones, deslizamiento y funding, y entran en el ranking${rkFActivo() ? `; con tus filtros se ven ${nf(view.length,0)}` : ""}. Todo en % de la cuenta con 0,5 % de riesgo por operación. Pulsa una para ver su regla y su R; pulsa una columna para ordenar.`));
   putH($("#rkFilters"), rkFiltersHtml(ranked));
   putH($("#rkHead"), rkHeadHtml());
   const todasFragiles = S.rkF.sinFragiles && !view.length && rkFiltered(ranked, false).length > 0;   // «Ocultar frágiles» las quita todas
@@ -5324,15 +5341,16 @@ function renderRanking(force){
 // Mando: las 5 primeras y la que está en marcha (con su puesto o «fuera del ranking: pierde»)
 function renderMdRk(){
   const src = rkSrc(), el = $("#mdRk"), li = (led, nm, tx, b="", cls="") => `<li data-tabgo="ranking" title="${esc(nm + (tx ? " · " + tx : ""))}"><span class="led ${led}"></span><span class="nm">${esc(nm)}</span><span class="tx">${esc(tx)}</span><b class="${cls}">${esc(b)}</b></li>`;
-  $("#mdRkSub").textContent = `Las 5 primeras por % de la cuenta al día fuera de muestra, con costes, y la que está en marcha${S.live ? "" : " (ejemplo)"}.`;
+  $("#mdRkSub").textContent = `Las 5 primeras por % de la cuenta al día fuera de muestra, neto de comisiones, deslizamiento y funding, y la que está en marcha${S.live ? "" : " (ejemplo)"}.`;
   if (!src){ const nm = S.live ? rkMotorNombre() : "";
     putH(el, li("off", "Sin ranking", S.live ? (S.rkApi==="sin_ruta" ? "el bot en marcha aún no tiene GET /api/ranking (llega al reiniciarlo)" : S.rkApi==="fallo" ? "no se pudo leer GET /api/ranking" : "aún no ha llegado") : "–")
       + (S.live ? li("off", "En marcha", nm ? `${nm} · sin datos del ranking` : "el motor de aperturas aún no ha dicho cuál opera") : "")); return; }
   const ranked = rkRanked(src), L = rkLiveInfo(src, ranked);
+  const dia = v => isNum(v) ? `${rkPct(v)}/día` : "–";   // a la derecha, el % de la cuenta al día (neto)
   const top = ranked.slice(0, 5).map(f => { const live = (!!L && !!L.id && rkId(f)===L.id) || f.en_marcha===true;
-    return li(f.fragil===true ? "wait" : "busy", `${nf(f._pos,0)}. ${rkNombre(f)}`, [`${rT(rkR(f))}/op.`, isNum(f.op_dia) ? `${nf(f.op_dia,2)} op./día` : "",
-      f.fragil===true ? "frágil" : "", f.estado==="descartada_por_el_usuario" ? "descartada por ti" : "", live ? "en marcha" : ""].filter(Boolean).join(" · "), rkPct(f.pct_dia), rkCls(f.pct_dia)); }).join("");
-  const em = L ? li(L.dentro ? "busy" : "stop", "En marcha", `${rkNombre(L.E)} · ${L.dentro ? `puesto ${nf(L.pos,0)} de ${nf(L.de,0)}` : `fuera del ranking: ${L.why}`}`, rkPct(L.E.pct_dia), rkCls(L.E.pct_dia))
+    return li(f.fragil===true ? "wait" : "busy", `${nf(f._pos,0)}. ${rkNombre(f)}`, [`${rkPct(rkOp(rkR(f)))}/op.`, isNum(f.op_dia) ? `${nf(f.op_dia,2)} op./día` : "",
+      f.fragil===true ? "frágil" : "", f.estado==="descartada_por_el_usuario" ? "descartada por ti" : "", live ? "en marcha" : "", rkNetoTxt(f)].filter(Boolean).join(" · "), dia(f.pct_dia), rkCls(f.pct_dia)); }).join("");
+  const em = L ? li(L.dentro ? "busy" : "stop", "En marcha", `${rkNombre(L.E)} · ${L.dentro ? `puesto ${nf(L.pos,0)} de ${nf(L.de,0)}` : `fuera del ranking: ${L.why}`} · ${rkNetoTxt(L.E)}`, dia(L.E.pct_dia), rkCls(L.E.pct_dia))
     : li("off", "En marcha", "el ranking aún no dice cuál es");
   putH(el, (top || li("off", "Ranking vacío", "ninguna estrategia deja de perder fuera de muestra")) + em);
 }

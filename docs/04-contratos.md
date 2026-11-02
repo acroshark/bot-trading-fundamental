@@ -949,12 +949,20 @@ importan; las que vaya sacando el agente entran solas en su puesto, lleguen o no
   `{"type": "ranking", "ts", "n_total", "n_ranking", "filas": [las 20 primeras, sin perfiles ni archivo_ranking],
   "en_marcha", "nota", "fuentes": {estandar|lab_vivo|paper|vigilancia: {ts, filas, estado}}}`.
 - `en_marcha`: `{id, preset, nombre, desde, pausada, fuente ("motor"|"estrategia_activa.json"), posicion, n_ranking,
-  en_ranking, texto, fila}`; `texto`: «Puesto 24 de 863 en el ranking», «Fuera del ranking: pierde fuera de muestra
-  (−0,075 R por operación)» (solo con R < 0), «Fuera del ranking: no pierde (+0,120 R por operación), pero le faltan las
-  operaciones por jornada para calcular su % de la cuenta al día» (o «…pero no tiene operaciones fuera de muestra»),
-  «Fuera del ranking: sin medida fuera de muestra» o por qué no está.
+  en_ranking, texto, fila}`; `texto` (en % de la cuenta por operación y neto de costes desde el 02-11-2026: R × 0,5,
+  redondeado como la web, `ranking._pct_op`): «Puesto 24 de 863 en el ranking», «Fuera del ranking: pierde fuera de
+  muestra (−0,038 % de la cuenta por operación, neto de costes)» (solo con R < 0; R = −0,075), «Fuera del ranking: no
+  pierde (+0,060 % de la cuenta por operación, neto de costes), pero le faltan las operaciones por jornada para calcular
+  su % de la cuenta al día» (o «…pero no tiene operaciones fuera de muestra»), «Fuera del ranking: sin medida fuera de
+  muestra» o por qué no está.
 - **Web:** pestaña «Ranking» (`#ranking`) y su resumen en «Mando» (las 5 primeras, con «frágil» o «descartada por ti»,
-  y la que está en marcha; sin respuesta del ranking, la nombra por `openings` con «sin datos del ranking»). La
+  y la que está en marcha; sin respuesta del ranking, la nombra por `openings` con «sin datos del ranking»). Habla en %
+  de la cuenta y neto de comisiones, deslizamiento y funding (02-11-2026, lo pidió el usuario: «en el ranking me tienes
+  que hablar en neto, después de costes»): columnas «% cuenta al día (neto)» (`pct_dia`) y «% por operación (neto)»
+  (R × 0,5: 1R = el 0,5 % de riesgo, `RK_RIESGO_PCT` = `ranking.RIESGO_PCT`), chips de robustez en % por operación, la
+  banda de la que está en marcha y Mando igual; el R solo en el detalle de cada estrategia. Cada fila dice con qué
+  costes se midió (`perfil_corto`: «neto de costes del backtest», «neto de costes del laboratorio (sin funding)»…;
+  `sin_costes`, «sin costes: no es neto»; sin perfil, «costes sin indicar»). La
   demostración lleva el ejemplo incrustado en `<script type="application/json" id="rankingData">`: las filas reales
   (Ruptura V3, E2 con 7 días, «6 diarias», «6 diarias v2» y E1 y E2 del laboratorio) son filas normalizadas como las
   enseña el bot y las rehace `scripts/ranking_importar.py --demo`; las que empiezan por «Ejemplo» son inventadas. En
