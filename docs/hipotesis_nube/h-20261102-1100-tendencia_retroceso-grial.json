@@ -1,0 +1,190 @@
+{
+ "formato": 1,
+ "id": "h-20261102-1100-tendencia_retroceso-grial",
+ "creada": "2026-11-02T11:00:00+01:00",
+ "autor": "coordinador",
+ "titulo": "Primer retroceso a la EMA20 con ADX ≥ 30 en 4 h y su reanudación (Holy Grail), a favor y dejando correr",
+ "familia": "tendencia_retroceso",
+ "familia_version": 1,
+ "logica": {
+  "mecanismo": "En una tendencia fuerte, el primer retroceso a la media lo compran los que llegaron tarde y los que quieren aumentar, y al otro lado están los que recogen beneficios y los que apuestan por el giro; cuando el precio vuelve a cerrar por encima del máximo de la barra anterior, esos vendedores se cubren y la tendencia sigue. Se repite porque la cripto tiene momento de días a semanas (Liu y Tsyvinski, 2021) y entrar en el retroceso pone el stop detrás de su mínimo, más cerca que en una ruptura: el mismo tramo de tendencia da más R.",
+  "por_que_ahora": "Es la familia «tendencia_retroceso» que docs/07 (6.6) dejó prevista para la fase 2 antes de medir nada; ninguna de las 31 familias entra en la reanudación tras un retroceso a la media.",
+  "por_que_vale_con_costes": "Busca la continuación de una tendencia de 4 h, que dura días: el cerrojo se activa a 3R (al menos 4,5 % con el stop mínimo de 1,5 %) y desde ahí sigue a 2R, así que las que salen bien recorren varios puntos y el coste de ida y vuelta (≈ 0,24 %) pesa poco. El stop va detrás del mínimo del retroceso: si pasa del 5 %, la operación no entra.",
+  "fuentes": [
+   {
+    "tipo": "libro",
+    "cita": "Connors, L. A. y Raschke, L. B. (1995). Street Smarts: High Probability Short-Term Trading Strategies. M. Gordon Publishing Group (capítulo «The Holy Grail»).",
+    "nota": "ADX(14) por encima de 30, retroceso a la EMA de 20 y compra por encima del máximo de la barra previa, con el stop en el mínimo del retroceso. Aquí, en barras de 4 h (y de 1 h en V2), con el cierre como confirmación."
+   },
+   {
+    "tipo": "libro",
+    "cita": "Wilder, J. W. (1978). New Concepts in Technical Trading Systems. Trend Research.",
+    "nota": "El ADX y los indicadores direccionales +DI y −DI."
+   },
+   {
+    "tipo": "articulo",
+    "cita": "Liu, Y. y Tsyvinski, A. (2021). Risks and Returns of Cryptocurrency. The Review of Financial Studies, 34(6).",
+    "nota": "El momento de series temporales en cripto."
+   }
+  ],
+  "prediccion": "Entre 0,3 y 0,8 señales al día con las 4 monedas en 4 h (unas cuatro veces más en 1 h, V2), a cualquier hora. Ganadoras del 35 al 45 %, con pocas de muchos R gracias al cerrojo; mejor con ADX ≥ 30 que con ≥ 25 (V3) y con la tendencia diaria de BTC a favor (V4). Correlación diaria baja con el impulso de las aperturas.",
+  "falsacion": "Se descarta si fuera de muestra no bate a su base emparejada, si depende de sus 5 mayores operaciones o de su mejor semana, o si no aguanta los estreses de costes. Contradice el mecanismo, aunque gane, que con ADX ≥ 25 vaya igual o mejor que con ≥ 30 (la fuerza de la tendencia no importaría) o que la horquilla de 3R (V6) gane más que el cerrojo (no habría tendencia que dejar correr).",
+  "parecidas_ya_probadas": [
+   "rsi2_tendencia (H32): el retroceso fuerte con RSI(2) en la tendencia diaria, sin esperar la reanudación",
+   "keltner (H06): la ruptura del canal de Keltner de 1 h a favor de la tendencia de 4 h",
+   "ruptura_canal, donchian_conjunto y momento_serie: entradas en la ruptura o en el momento, sin retroceso"
+  ],
+  "que_aporta": "Entra en la reanudación tras el primer retroceso a la media, no en el extremo del retroceso (RSI(2)) ni en la ruptura (Keltner, canal): la fuerza de la tendencia la mide el ADX en la misma escala y el stop va detrás del mínimo del retroceso, no a k × ATR.",
+  "revision": {
+   "plausibilidad": "media-alta: regla publicada (Holy Grail) sobre el momento de días, documentado en cripto",
+   "sobreajuste": "bajo: ADX(14), EMA(20) y la barra previa son los de la regla; 3 parámetros y un filtro común solo en V4",
+   "muestra": "≈ 0,3-0,8 señales al día en 4 h: estimación sin datos reales (la cuenta la hace A9)",
+   "regimen": "solo opera con tendencia fuerte: en rango casi no entra; es simétrica (largos y cortos)",
+   "salida": "cerrojo a 3R y seguimiento a 2R (72 h sin activar, 168 h activado); V5 con la A y V6 con la horquilla de 3R",
+   "ejecucion": "a mercado al cierre de la barra de 4 h que reanuda; el stop detrás del retroceso",
+   "falsacion": "base emparejada (B1) y las variantes V3 y V6, que el mecanismo predice peores"
+  }
+ },
+ "datos": [
+  "velas_1m"
+ ],
+ "universo": {
+  "monedas": [
+   "BTC",
+   "ETH",
+   "SOL",
+   "XRP"
+  ],
+  "momento": "continuo"
+ },
+ "variantes": [
+  {
+   "id": "V1",
+   "texto": "La base: 4 h, ADX ≥ 30, reanudación en ≤ 3 barras, cerrojo a 3R y seguimiento a 2R",
+   "params": {
+    "tf_min": 240,
+    "adx_min": 30.0,
+    "espera": 3
+   },
+   "salida": {
+    "tipo": "C",
+    "sl": "estructural",
+    "sl_max": 5.0,
+    "lock_r": 3.0,
+    "trail_r": 2.0,
+    "suelo": "F",
+    "max_hold_h": 72,
+    "max_hold_active_h": 168
+   }
+  },
+  {
+   "id": "V2",
+   "texto": "Barras de 1 h (más señales, tramos más cortos)",
+   "params": {
+    "tf_min": 60,
+    "adx_min": 30.0,
+    "espera": 3
+   },
+   "salida": {
+    "tipo": "C",
+    "sl": "estructural",
+    "sl_max": 5.0,
+    "lock_r": 3.0,
+    "trail_r": 2.0,
+    "suelo": "F",
+    "max_hold_h": 72,
+    "max_hold_active_h": 168
+   }
+  },
+  {
+   "id": "V3",
+   "texto": "ADX ≥ 25 (tendencias menos fuertes)",
+   "params": {
+    "tf_min": 240,
+    "adx_min": 25.0,
+    "espera": 3
+   },
+   "salida": {
+    "tipo": "C",
+    "sl": "estructural",
+    "sl_max": 5.0,
+    "lock_r": 3.0,
+    "trail_r": 2.0,
+    "suelo": "F",
+    "max_hold_h": 72,
+    "max_hold_active_h": 168
+   }
+  },
+  {
+   "id": "V4",
+   "texto": "Con la tendencia diaria de BTC a favor",
+   "params": {
+    "tf_min": 240,
+    "adx_min": 30.0,
+    "espera": 3,
+    "regimen_btc": "a_favor"
+   },
+   "salida": {
+    "tipo": "C",
+    "sl": "estructural",
+    "sl_max": 5.0,
+    "lock_r": 3.0,
+    "trail_r": 2.0,
+    "suelo": "F",
+    "max_hold_h": 72,
+    "max_hold_active_h": 168
+   }
+  },
+  {
+   "id": "V5",
+   "texto": "Salida A: la mitad en 3R y la otra mitad con el cerrojo",
+   "params": {
+    "tf_min": 240,
+    "adx_min": 30.0,
+    "espera": 3
+   },
+   "salida": {
+    "tipo": "A",
+    "sl": "estructural",
+    "sl_max": 5.0,
+    "trail_r": 2.0,
+    "suelo": "F",
+    "max_hold_h": 72,
+    "max_hold_active_h": 168
+   }
+  },
+  {
+   "id": "V6",
+   "texto": "Horquilla de 3R a 72 h (sin dejar correr)",
+   "params": {
+    "tf_min": 240,
+    "adx_min": 30.0,
+    "espera": 3
+   },
+   "salida": {
+    "tipo": "H",
+    "sl": "estructural",
+    "sl_max": 5.0,
+    "target_r": 3.0,
+    "max_hold_h": 72
+   }
+  }
+ ],
+ "reglas": {
+  "riesgo_pct": 0.5,
+  "max_entradas_dia": 6,
+  "max_riesgo_dia_pct": 3.0,
+  "largos": "spot",
+  "cortos": "perp",
+  "una_por_moneda": true
+ },
+ "prioridad": 3,
+ "frecuencia_esperada": {
+  "op_dia": 0.4,
+  "como": "estimación del coordinador sin datos reales (no se ha contado ninguna señal): la cuenta la hace A9"
+ },
+ "cumple_reglas": true,
+ "fuera_de_reglas": false,
+ "exploratoria": false,
+ "nota": "Hipótesis del coordinador desde la nube (02-11-2026), sin datos: no se ha medido ni contado nada. Pasa la admisión sin datos (A1-A7 y A10); A8 y A9 los hará el corredor. Familia nueva tendencia_retroceso v1 con sus pruebas (tests/test_lab_vivo_familia_tendencia_retroceso.py)."
+}

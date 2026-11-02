@@ -1,0 +1,210 @@
+{
+ "formato": 1,
+ "id": "h-20261102-1100-momento_continuo-rana",
+ "creada": "2026-11-02T11:00:00+01:00",
+ "autor": "coordinador",
+ "titulo": "Tendencia de 28 días hecha de días pequeños y seguidos (Frog in the Pan), a favor y dejando correr",
+ "familia": "momento_continuo",
+ "familia_version": 1,
+ "logica": {
+  "mecanismo": "Los inversores atienden a los saltos y pasan por alto la información que llega en dosis pequeñas y seguidas, así que una tendencia hecha de muchos días pequeños a favor aún no está del todo en el precio y sigue, mientras que la hecha a saltos ya lo está (Da, Gurun y Warachka, 2014). Al otro lado están los que no han mirado (cada día parece ruido) y los que venden lo que «ya ha subido»; se repite porque la atención limitada no cambia, y en cripto el momento de 1 a 4 semanas está documentado (Liu y Tsyvinski, 2021).",
+  "por_que_ahora": "El momento de series temporales ya se probó tal cual (tendencia_diaria, momento_serie); esta hipótesis no repite la idea con otro número: añade una medida distinta (la discreción de la información) con su propia predicción.",
+  "por_que_vale_con_costes": "Busca tendencias de semanas y decide una vez al día: el stop es 0,75 × el ATR diario (con el tope del 5 %) y el cerrojo se activa a 3R (al menos 4,5 %), así que las que salen bien recorren muchos puntos y el coste de ida y vuelta (≈ 0,24 %) no pesa. Nada de efectos de pocos pb.",
+  "fuentes": [
+   {
+    "tipo": "articulo",
+    "cita": "Da, Z., Gurun, U. G. y Warachka, M. (2014). Frog in the Pan: Continuous Information and Momentum. The Review of Financial Studies, 27(11).",
+    "nota": "La medida ID = signo(PRET) × (% de días en contra − % de días a favor): el momento con ID bajo (información continua) es más fuerte y más duradero."
+   },
+   {
+    "tipo": "articulo",
+    "cita": "Moskowitz, T. J., Ooi, Y. H. y Pedersen, L. H. (2012). Time series momentum. Journal of Financial Economics, 104(2).",
+    "nota": "El momento de series temporales."
+   },
+   {
+    "tipo": "articulo",
+    "cita": "Liu, Y. y Tsyvinski, A. (2021). Risks and Returns of Cryptocurrency. The Review of Financial Studies, 34(6).",
+    "nota": "El momento de 1 a 4 semanas en cripto."
+   }
+  ],
+  "prediccion": "Unas 0,5 a 1 señales al día con las 4 monedas (una por día y moneda mientras se cumpla; el libro solo entra con la moneda libre), de 0,2 a 0,4 operaciones al día. Ganadoras por debajo del 40 % y pocas de muchos R con el cerrojo; el R medio debe subir con la continuidad exigida (V4 con ID ≤ −0,1, V1 con −0,2 y V3 con −0,3) y la ventana de 14 días (V2) debe ir algo peor. Poca correlación con el impulso de las aperturas (decide a las 00:00 UTC).",
+  "falsacion": "Se descarta si fuera de muestra no bate a su base emparejada, si depende de sus 5 mayores operaciones o de su mejor semana, o si no aguanta los estreses de costes. Contradice el mecanismo, aunque gane, que el R medio no suba de V4 a V1 y a V3 (más continuidad) o que solo mejore con más fuerza (V5, z ≥ 1): entonces lo que cuenta es cuánto ha subido y no cómo, el momento de siempre, ya probado en tendencia_diaria y momento_serie.",
+  "parecidas_ya_probadas": [
+   "tendencia_diaria (siembra): el rendimiento de 7 a 28 días frente a la EMA50",
+   "momento_serie (H01, H02 y H29b): el z del rendimiento de L barras",
+   "donchian_conjunto (H04): el conjunto de canales de Donchian diarios"
+  ],
+  "que_aporta": "No mira solo cuánto ha subido, sino cómo: exige que la mayoría de los días vaya a favor (información continua, ID ≤ −0,2) y descarta las tendencias hechas a saltos aunque rindan lo mismo. Es otro mecanismo (la atención limitada) con su predicción propia: cuanta más continuidad, mejor.",
+  "revision": {
+   "plausibilidad": "media: el efecto está muy documentado en acciones; en cripto no se cita aquí ningún estudio propio",
+   "sobreajuste": "bajo: la medida es la del artículo; z ≥ 0,5 y 28 días por el momento de 1 a 4 semanas, fijados antes de medir; sin filtros comunes. En barras de 4 h la fracción de barras a favor se acerca al 50 % y el mismo ID casi no se cumple: por eso todas las variantes son diarias",
+   "muestra": "≈ 0,2-0,4 operaciones al día: estimación sin datos reales (la cuenta de señales la hace A9)",
+   "regimen": "en los dos sentidos (largos al contado y cortos en perpetuo): no depende de que el mercado suba",
+   "salida": "cerrojo a 3R y seguimiento a 2R, 168 h sin activar y 336 h activado; V6 con la A",
+   "ejecucion": "a mercado a las 00:00 UTC; el stop a 0,75 × ATR diario",
+   "falsacion": "base emparejada (B1) y la escala V4 < V1 < V3 que predice el mecanismo; V5 separa la fuerza de la continuidad"
+  }
+ },
+ "datos": [
+  "velas_1m"
+ ],
+ "universo": {
+  "monedas": [
+   "BTC",
+   "ETH",
+   "SOL",
+   "XRP"
+  ],
+  "momento": "continuo"
+ },
+ "variantes": [
+  {
+   "id": "V1",
+   "texto": "La base: diario, 28 días, z ≥ 0,5, ID ≤ −0,2, cada día mientras dure, cerrojo a 3R",
+   "params": {
+    "tf_min": 1440,
+    "ventana_d": 28,
+    "z_min": 0.5,
+    "id_min": 0.2,
+    "modo": "estado",
+    "k_atr": 0.75
+   },
+   "salida": {
+    "tipo": "C",
+    "sl": "estructural",
+    "sl_max": 5.0,
+    "lock_r": 3.0,
+    "trail_r": 2.0,
+    "suelo": "F",
+    "max_hold_h": 168,
+    "max_hold_active_h": 336
+   }
+  },
+  {
+   "id": "V2",
+   "texto": "Ventana de 14 días",
+   "params": {
+    "tf_min": 1440,
+    "ventana_d": 14,
+    "z_min": 0.5,
+    "id_min": 0.2,
+    "modo": "estado",
+    "k_atr": 0.75
+   },
+   "salida": {
+    "tipo": "C",
+    "sl": "estructural",
+    "sl_max": 5.0,
+    "lock_r": 3.0,
+    "trail_r": 2.0,
+    "suelo": "F",
+    "max_hold_h": 168,
+    "max_hold_active_h": 336
+   }
+  },
+  {
+   "id": "V3",
+   "texto": "Más continuidad: ID ≤ −0,3",
+   "params": {
+    "tf_min": 1440,
+    "ventana_d": 28,
+    "z_min": 0.5,
+    "id_min": 0.3,
+    "modo": "estado",
+    "k_atr": 0.75
+   },
+   "salida": {
+    "tipo": "C",
+    "sl": "estructural",
+    "sl_max": 5.0,
+    "lock_r": 3.0,
+    "trail_r": 2.0,
+    "suelo": "F",
+    "max_hold_h": 168,
+    "max_hold_active_h": 336
+   }
+  },
+  {
+   "id": "V4",
+   "texto": "Menos continuidad: ID ≤ −0,1 (con V1 y V3, la escala 0,1 · 0,2 · 0,3)",
+   "params": {
+    "tf_min": 1440,
+    "ventana_d": 28,
+    "z_min": 0.5,
+    "id_min": 0.1,
+    "modo": "estado",
+    "k_atr": 0.75
+   },
+   "salida": {
+    "tipo": "C",
+    "sl": "estructural",
+    "sl_max": 5.0,
+    "lock_r": 3.0,
+    "trail_r": 2.0,
+    "suelo": "F",
+    "max_hold_h": 168,
+    "max_hold_active_h": 336
+   }
+  },
+  {
+   "id": "V5",
+   "texto": "Más fuerza: z ≥ 1 (la misma continuidad)",
+   "params": {
+    "tf_min": 1440,
+    "ventana_d": 28,
+    "z_min": 1.0,
+    "id_min": 0.2,
+    "modo": "estado",
+    "k_atr": 0.75
+   },
+   "salida": {
+    "tipo": "C",
+    "sl": "estructural",
+    "sl_max": 5.0,
+    "lock_r": 3.0,
+    "trail_r": 2.0,
+    "suelo": "F",
+    "max_hold_h": 168,
+    "max_hold_active_h": 336
+   }
+  },
+  {
+   "id": "V6",
+   "texto": "Salida A: la mitad en 3R y la otra mitad con el cerrojo",
+   "params": {
+    "tf_min": 1440,
+    "ventana_d": 28,
+    "z_min": 0.5,
+    "id_min": 0.2,
+    "modo": "estado",
+    "k_atr": 0.75
+   },
+   "salida": {
+    "tipo": "A",
+    "sl": "estructural",
+    "sl_max": 5.0,
+    "trail_r": 2.0,
+    "suelo": "F",
+    "max_hold_h": 168,
+    "max_hold_active_h": 336
+   }
+  }
+ ],
+ "reglas": {
+  "riesgo_pct": 0.5,
+  "max_entradas_dia": 6,
+  "max_riesgo_dia_pct": 3.0,
+  "largos": "spot",
+  "cortos": "perp",
+  "una_por_moneda": true
+ },
+ "prioridad": 3,
+ "frecuencia_esperada": {
+  "op_dia": 0.3,
+  "como": "estimación del coordinador sin datos reales (no se ha contado ninguna señal): la cuenta la hace A9"
+ },
+ "cumple_reglas": true,
+ "fuera_de_reglas": false,
+ "exploratoria": false,
+ "nota": "Hipótesis del coordinador desde la nube (02-11-2026), sin datos: no se ha medido ni contado nada. Pasa la admisión sin datos (A1-A7 y A10); A8 y A9 los hará el corredor. Familia nueva momento_continuo v1 con sus pruebas (tests/test_lab_vivo_familia_momento_continuo.py)."
+}

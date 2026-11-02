@@ -1,0 +1,194 @@
+{
+ "formato": 1,
+ "id": "h-20261102-1100-extremo_noticias-sin",
+ "creada": "2026-11-02T11:00:00+01:00",
+ "autor": "coordinador",
+ "titulo": "Movimiento extremo de 1 h sin noticias de la moneda en 6 h: a la contra (Chan, 2003)",
+ "familia": "extremo_noticias",
+ "familia_version": 1,
+ "logica": {
+  "mecanismo": "Un movimiento extremo sin ninguna noticia detrás suele ser de liquidez (liquidaciones en cadena, una orden grande, stops): al otro lado de la vuelta están los que venden obligados o por pánico, y el precio vuelve cuando se acaba esa presión, porque no ha cambiado nada de lo que vale. Se repite porque los perpetuos muy apalancados provocan a menudo cascadas sin noticia, y en acciones está medido que las grandes variaciones sin titulares se dan la vuelta y las que traen información siguen (Chan, 2003; Savor, 2012).",
+  "por_que_ahora": "El usuario quiere usar las noticias para reforzar las estrategias. Desde el 29-10-2026 el laboratorio tiene la clave noticias_3a (3 años de historias con su hora; el archivo se compila cuando acaba el triaje), y lo medido dice que el sentido de los titulares no anticipa (docs/05, sección 22): aquí no se usa el sentido, sino si había noticias o no.",
+  "por_que_vale_con_costes": "Busca la vuelta de una cascada, no unos pb: el stop va detrás del extremo del movimiento (como mínimo 1,5 %) y la horquilla pide 3R (al menos 4,5 % bruto), lo que se mueve una alt en una cascada y su vuelta. El coste de ida y vuelta (≈ 0,24 %) es menos del 6 % de ese objetivo. Con el objetivo en deshacer el movimiento (V5), el libro solo deja entrar si eso da ≥ 2R y ≥ 3 % neto: solo los movimientos de más de ≈ 3,3 %.",
+  "fuentes": [
+   {
+    "tipo": "articulo",
+    "cita": "Chan, W. S. (2003). Stock price reaction to news and no-news: drift and reversal after headlines. Journal of Financial Economics, 70(2).",
+    "nota": "Tras grandes variaciones sin titulares el precio se da la vuelta; con titulares, sigue (deriva)."
+   },
+   {
+    "tipo": "articulo",
+    "cita": "Savor, P. G. (2012). Stock returns after major price shocks: The impact of information. Journal of Financial Economics, 106(3).",
+    "nota": "Los grandes saltos con información (informes de analistas) siguen; los que no la traen, revierten."
+   },
+   {
+    "tipo": "articulo",
+    "cita": "Caporale, G. M. y Plastun, A. (2019). Price overreactions in the cryptocurrency market.",
+    "nota": "Sobrerreacciones de un día en cripto; ya citado por sesion_extrema."
+   }
+  ],
+  "prediccion": "Unas 0,5 a 1 señal al día con las 4 monedas (lo dirá A9), más en SOL y XRP. La vuelta sin noticias debe ganar más que la de los mismos extremos sin mirarlas (V6, el control); más con extremos más fuertes (V2) y con 12 h sin noticias (V4). V5 (deshacer el movimiento) opera muchas menos, solo las cascadas grandes, y debe ganar más por operación.",
+  "falsacion": "Se descarta si fuera de muestra no bate a su base emparejada, si depende de sus 5 mayores operaciones o de su mejor semana, o si no aguanta el estrés de stops (en una cascada el stop se llena peor). Contradice el mecanismo, aunque gane, que el control sin mirar las noticias (V6) gane lo mismo o más: entonces las noticias no separan nada y es la vuelta de siempre, ya probada en extremo_1h y sesion_extrema.",
+  "parecidas_ya_probadas": [
+   "extremo_1h (H15 y H16): la vuelta tras una hora extrema con volumen, sin mirar las noticias",
+   "sesion_extrema (H17) y dia_anormal (H18): la vuelta o la continuación de 8 h y de un día extremos, sin mirar las noticias",
+   "noticia_racimo (H34): un racimo de noticias confirmado por el precio, a favor"
+  ],
+  "que_aporta": "Separa los extremos por las noticias: solo va a la contra cuando no hay ninguna historia de esa moneda (ni general) en las 6 h previas. No usa el sentido de los titulares, solo si los hay, y lleva su control dentro (V6: los mismos extremos sin mirar las noticias), que es lo que dirá si las noticias refuerzan o no.",
+  "revision": {
+   "plausibilidad": "media: el efecto está medido en acciones; en cripto el histórico solo tiene los racimos triados (≈ 3 historias al día), así que «sin noticias» quiere decir «sin racimo»",
+   "sobreajuste": "bajo: k = 3 como extremo_1h, 6 h de ventana y n = 2 (el mínimo del triaje); cada variante cambia una sola cosa y no hay filtros comunes",
+   "muestra": "≈ 0,5-1 señal al día con las 4 monedas, sin contar con datos reales. Con OBJ (V5), muchas menos operaciones: puede no llegar a las 100 fuera de muestra (K1), por eso no es la base",
+   "regimen": "las cascadas van en los dos sentidos; es simétrica (largos y cortos)",
+   "salida": "horquilla de 3R a 72 h; V5 pone el objetivo en deshacer el movimiento (OBJ), que además deja fuera los movimientos pequeños (el plan exige ≥ 3 % neto): cambia la salida y, con ella, qué operaciones entran",
+   "ejecucion": "a mercado al cierre de la vela de 1 h; en una cascada el deslizamiento es mayor (estrés B4)",
+   "datos": "necesita el archivo de noticias compilado (A6), como las otras hipótesis de noticias: sin él no da señales",
+   "falsacion": "el control V6 y la base emparejada (B1)"
+  }
+ },
+ "datos": [
+  "velas_1m",
+  "noticias_3a"
+ ],
+ "universo": {
+  "monedas": [
+   "BTC",
+   "ETH",
+   "SOL",
+   "XRP"
+  ],
+  "momento": "continuo"
+ },
+ "variantes": [
+  {
+   "id": "V1",
+   "texto": "La base: 1 h, |z| ≥ 3, sin noticias en 6 h, a la contra con la horquilla de 3R a 72 h",
+   "params": {
+    "noticias": "sin",
+    "modo": "contra",
+    "horas_mov": 1,
+    "k": 3.0,
+    "ventana_h": 6,
+    "n": 2
+   },
+   "salida": {
+    "tipo": "H",
+    "sl": "estructural",
+    "sl_max": 5.0,
+    "target_r": 3.0,
+    "max_hold_h": 72
+   }
+  },
+  {
+   "id": "V2",
+   "texto": "Extremos más fuertes: |z| ≥ 4",
+   "params": {
+    "noticias": "sin",
+    "modo": "contra",
+    "horas_mov": 1,
+    "k": 4.0,
+    "ventana_h": 6,
+    "n": 2
+   },
+   "salida": {
+    "tipo": "H",
+    "sl": "estructural",
+    "sl_max": 5.0,
+    "target_r": 3.0,
+    "max_hold_h": 72
+   }
+  },
+  {
+   "id": "V3",
+   "texto": "Movimientos de 4 h",
+   "params": {
+    "noticias": "sin",
+    "modo": "contra",
+    "horas_mov": 4,
+    "k": 3.0,
+    "ventana_h": 6,
+    "n": 2
+   },
+   "salida": {
+    "tipo": "H",
+    "sl": "estructural",
+    "sl_max": 5.0,
+    "target_r": 3.0,
+    "max_hold_h": 72
+   }
+  },
+  {
+   "id": "V4",
+   "texto": "Sin noticias en 12 h (más exigente)",
+   "params": {
+    "noticias": "sin",
+    "modo": "contra",
+    "horas_mov": 1,
+    "k": 3.0,
+    "ventana_h": 12,
+    "n": 2
+   },
+   "salida": {
+    "tipo": "H",
+    "sl": "estructural",
+    "sl_max": 5.0,
+    "target_r": 3.0,
+    "max_hold_h": 72
+   }
+  },
+  {
+   "id": "V5",
+   "texto": "Objetivo en deshacer el movimiento (OBJ): solo entran los de más de ≈ 3,3 %",
+   "params": {
+    "noticias": "sin",
+    "modo": "contra",
+    "horas_mov": 1,
+    "k": 3.0,
+    "ventana_h": 6,
+    "n": 2
+   },
+   "salida": {
+    "tipo": "OBJ",
+    "sl": "estructural",
+    "sl_max": 5.0,
+    "max_hold_h": 72
+   }
+  },
+  {
+   "id": "V6",
+   "texto": "El control: los mismos extremos sin mirar las noticias",
+   "params": {
+    "noticias": "da_igual",
+    "modo": "contra",
+    "horas_mov": 1,
+    "k": 3.0,
+    "ventana_h": 6,
+    "n": 2
+   },
+   "salida": {
+    "tipo": "H",
+    "sl": "estructural",
+    "sl_max": 5.0,
+    "target_r": 3.0,
+    "max_hold_h": 72
+   }
+  }
+ ],
+ "reglas": {
+  "riesgo_pct": 0.5,
+  "max_entradas_dia": 6,
+  "max_riesgo_dia_pct": 3.0,
+  "largos": "spot",
+  "cortos": "perp",
+  "una_por_moneda": true
+ },
+ "prioridad": 2,
+ "frecuencia_esperada": {
+  "op_dia": 0.3,
+  "como": "estimación del coordinador sin datos reales (no se ha contado ninguna señal): la cuenta la hace A9"
+ },
+ "cumple_reglas": true,
+ "fuera_de_reglas": false,
+ "exploratoria": false,
+ "nota": "Hipótesis del coordinador desde la nube (02-11-2026), sin datos: no se ha medido ni contado nada. Pasa la admisión sin datos (A1-A7 y A10). Necesita el archivo de noticias compilado (A6 con datos): va a cola\\esperando_datos\\noticias\\ con las demás de noticias y pasa a cola\\entrada cuando validar deje de decir NO VALE. Familia nueva extremo_noticias v1 con sus pruebas (tests/test_lab_vivo_familia_extremo_noticias.py)."
+}

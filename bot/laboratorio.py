@@ -264,7 +264,10 @@ def hac_t(x, lags: int = HAC_LAGS) -> float:
 
 def effective_trials(series: np.ndarray) -> float:
     """Número efectivo de pruebas independientes (Li y Ji, 2005) a partir de las series diarias de las estrategias
-    (filas): suma de f(λ) = [λ ≥ 1] + (λ − ⌊λ⌋) sobre los autovalores de su matriz de correlación."""
+    (filas): suma de f(λ) = [λ ≥ 1] + (λ − ⌊λ⌋) sobre los autovalores de su matriz de correlación.
+    f salta en cada entero ≥ 2 (f(3) = 1, pero f(3 − ε) ≈ 2): con series repetidas el autovalor es un entero y el
+    redondeo de la máquina lo deja a un lado o al otro según la CPU. Por eso los autovalores se redondean a 9 decimales
+    antes de aplicar f; con series reales (autovalores no enteros) no cambia nada más allá de 1e-9."""
     X = np.asarray(series, float)
     if X.ndim != 2 or X.shape[0] < 2 or X.shape[1] < 3:
         return float(max(1, X.shape[0] if X.ndim == 2 else 1))
@@ -274,7 +277,7 @@ def effective_trials(series: np.ndarray) -> float:
         return 1.0
     Z = (X - X.mean(1, keepdims=True)) / X.std(1, keepdims=True)
     G = (Z.T @ Z) / Z.shape[1]          # mismos autovalores no nulos que la correlación entre estrategias
-    lam = np.clip(np.linalg.eigvalsh(G), 0, None)
+    lam = np.round(np.clip(np.linalg.eigvalsh(G), 0, None), 9)
     return float(max(1.0, ((lam >= 1) + (lam - np.floor(lam))).sum()))
 
 
