@@ -19,7 +19,7 @@ pytestmark = pytest.mark.skipif(not NODE, reason="hace falta Node para probar la
 # Arnés: extrae el <script> de la página, lo ejecuta en un contexto vm con un DOM falso y luego el escenario (stdin).
 HARNESS = r"""
 const fs = require("fs"), vm = require("vm");
-const [htmlPath, mode] = process.argv.slice(1);
+const [htmlPath, mode, ahoraArg] = process.argv.slice(1);
 const html = fs.readFileSync(htmlPath, "utf8");
 const js = [...html.matchAll(/<script(?![^>]*\bsrc=)([^>]*)>([\s\S]*?)<\/script>/g)]
   .filter(m => !/json|text\/plain/.test(m[1])).map(m => m[2]).join("\n;\n");
@@ -72,6 +72,9 @@ const ctx = {
 ctx.window = ctx;
 if (mode === "live") ctx.RADAR_LIVE = {ws: "/events"};
 vm.createContext(ctx);
+// Reloj fijo (run(..., ahora=ms)): Date.now de la página arranca en esa hora y avanza con el real. Para las pruebas que no
+// pueden depender de la hora a la que se pasan (p. ej., una entrada de hace 40 min que, de 00:00 a 00:40, es de ayer).
+if (ahoraArg) vm.runInContext(`(() => { const real = Date.now.bind(Date), d0 = real(), a = ${Number(ahoraArg)}; Date.now = () => a + (real() - d0); })();`, ctx);
 let result = null;
 (async () => {
   try {
@@ -105,9 +108,10 @@ const reset = () => H.recv({type: "reset", phase: 2, started: now - 3600e3});
 """
 
 
-def run(code: str, live: bool = True):
-    p = subprocess.run([NODE, "-e", HARNESS, str(HTML), "live" if live else "sim"],
-                       input=(LIVE if live else "") + code, capture_output=True, text=True, encoding="utf-8", timeout=180)
+def run(code: str, live: bool = True, ahora: int | None = None):
+    """Ejecuta la página y el escenario. ahora: hora fija en ms para Date.now (si no, la real)."""
+    args = [NODE, "-e", HARNESS, str(HTML), "live" if live else "sim"] + ([str(int(ahora))] if ahora is not None else [])
+    p = subprocess.run(args, input=(LIVE if live else "") + code, capture_output=True, text=True, encoding="utf-8", timeout=180)
     assert p.returncode == 0, p.stderr
     out = json.loads(p.stdout.strip().splitlines()[-1])
     assert out["errors"] == [], out["errors"]
@@ -2619,12 +2623,9 @@ const nVelas = () => H.fetches.filter(u => String(u).startsWith("/api/velas")).l
 """
 
 
-def test_grafica_de_cada_posicion_con_las_velas_del_bot_y_en_vivo():
-    """En «En posición», justo debajo de cada operación abierta, su gráfica: velas de OKX EU del par que se operaría
-    (GET /api/velas?fuente=okx, una petición por minuto) desde un poco antes de la entrada, el punto de la entrada, las líneas del stop, de la parcial en 3R y de la
-    entrada, el precio de ahora y las cifras (ganancia de ahora en % y R, distancia al stop y a la parcial y lo que daría
-    cada una). Se mueve con el precio en vivo; en el expediente sale más grande, con el suelo del cerrojo y el plazo."""
-    r = run(FIAB + SEIS2 + GRAF + """H.open(); reset();
+# El escenario de la gráfica de una posición abierta (GRAF): la cartera con posA, sus velas, el precio que se mueve y su
+# expediente
+GRAF_POS = """H.open(); reset();
       H.fetchReply = url => url.startsWith("/api/velas") ? velasOk({coin: "BTC", tf: "1m", velas: [...BARS, [now, null, 1, 1, 1], "x"], hasta_datos: now - 2*M,
         fuente: "okx", mercado: "OKX EU", instId: "BTC-USDC"}) : {ok: false};
       H.recv({type: "market", prices: {BTC: 100.4}}, pf({positions: [posA]}));
@@ -2638,8 +2639,29 @@ def test_grafica_de_cada_posicion_con_las_velas_del_bot_y_en_vivo():
              ev("riskok", "a-tok-btc-1", {risk: {checks: [], ok: true}}), ev("humanok", "a-tok-btc-1", {human: {mode: "auto", by: "Automático (paper)", at: now}}),
              ev("filled", "a-tok-btc-1", {exec: {px: 100, slip: 1, ms: 200, notional: 25, sl: 98, tp1: 106, tp2: null, tp1Frac: 0.5}}));
       S.sel = "a-tok-btc-1"; renderTrace(); const tr = H.el("#trace").innerHTML;
-      return {antes, kb, kb2, tr, url, n1, desde: DESDE, he: madHM(T0), rects: [...kb.matchAll(/<rect /g)].length};""")
+      return {antes, kb, kb2, tr, url, n1, desde: DESDE, he: madHM(T0), dm: madDM(T0), dia: madDay(T0), dia_ahora: madDay(now),
+              rects: [...kb.matchAll(/<rect /g)].length};"""
+
+
+def _hoy_madrid_ms(h: int, m: int) -> int:
+    """Hoy (día de Madrid) a las h:m de Madrid, en ms: la hora fija de una prueba que no puede depender de la real."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    mad = ZoneInfo("Europe/Madrid")
+    hoy = datetime.now(mad).date()
+    return int(datetime(hoy.year, hoy.month, hoy.day, h, m, tzinfo=mad).timestamp() * 1000)
+
+
+def test_grafica_de_cada_posicion_con_las_velas_del_bot_y_en_vivo():
+    """En «En posición», justo debajo de cada operación abierta, su gráfica: velas de OKX EU del par que se operaría
+    (GET /api/velas?fuente=okx, una petición por minuto) desde un poco antes de la entrada, el punto de la entrada, las líneas del stop, de la parcial en 3R y de la
+    entrada, el precio de ahora y las cifras (ganancia de ahora en % y R, distancia al stop y a la parcial y lo que daría
+    cada una). Se mueve con el precio en vivo; en el expediente sale más grande, con el suelo del cerrojo y el plazo.
+    Con el reloj fijo a mediodía, para no depender de la hora: la entrada, de 40 min antes, es del mismo día. A las 00:20
+    es de ayer y el expediente la rotula con su fecha (antes, de 00:00 a 00:40 esta prueba fallaba)."""
+    r = run(FIAB + SEIS2 + GRAF + GRAF_POS, ahora=_hoy_madrid_ms(12, 0))
     kb, kb2, tr = r["kb"], r["kb2"], r["tr"]
+    assert r["dia"] == r["dia_ahora"] and r["he"] == "11:20"   # mediodía: la entrada es de hoy
     assert r["url"] == f"/api/velas?coin=BTC&desde={r['desde']}&tf=1m&fuente=okx" and r["n1"] == 1   # una sola petición por minuto
     assert "Cargando las velas de OKX EU, BTC-USDC…" in r["antes"] and '<span class="n">1</span>' in kb
     assert '<div class="pwrap"><button type="button" class="ticket" data-story="a-tok-btc-1">' in kb
@@ -2659,6 +2681,12 @@ def test_grafica_de_cada_posicion_con_las_velas_del_bot_y_en_vivo():
         assert t in tr, t
     assert 'data-close="a-tok-btc-1"' in tr
     _sin_null(r["antes"], kb, kb2, tr)
+    # a las 00:20, la entrada de las 23:40 es de ayer: la gráfica pequeña da la hora y el expediente, la fecha y la hora
+    n = run(FIAB + SEIS2 + GRAF + GRAF_POS, ahora=_hoy_madrid_ms(0, 20))
+    assert n["he"] == "23:40" and n["dia"] != n["dia_ahora"]
+    assert ">23:40</text>" in n["kb"] and f"Entrada {n['dm']} 23:40 · 100,00" in n["tr"] and "Entrada 23:40 ·" not in n["tr"]
+    assert "Parcial 3R 106,00" in n["tr"] and '<small>Ahora</small><b class="pos">+0,40 %</b>' in n["kb"]
+    _sin_null(n["kb"], n["tr"])
 
 
 def test_grafica_sin_velas_del_bot_404_fallo_cerrojo_y_campos_rotos():
