@@ -275,6 +275,11 @@ def effective_trials(series: np.ndarray) -> float:
     Z = (X - X.mean(1, keepdims=True)) / X.std(1, keepdims=True)
     G = (Z.T @ Z) / Z.shape[1]          # mismos autovalores no nulos que la correlación entre estrategias
     lam = np.clip(np.linalg.eigvalsh(G), 0, None)
+    # f(λ) salta en los enteros (f(3 − ε) ≈ 2, f(3) = 1): con series repetidas el autovalor es un entero y el ruido de
+    # coma flotante (2,9999999999999996 o 3,0000000000000004, según la máquina) cambiaba la cuenta en 1. A menos de 1e-9
+    # de un entero, el entero (solo cambia en ese caso)
+    near = np.round(lam)
+    lam = np.where(np.abs(lam - near) < 1e-9, near, lam)
     return float(max(1.0, ((lam >= 1) + (lam - np.floor(lam))).sum()))
 
 

@@ -24,6 +24,7 @@ from .regions import MARKETS, REGIONS
 from .topics import TOPIC_NAMES, TOPICS
 
 log = logging.getLogger("local_ai")
+NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)   # sin ventana en Windows; 0 en Linux (pruebas en la nube)
 MAD = ZoneInfo("Europe/Madrid")
 # Ventanas de apertura (las mismas que la web): nombre, zona, hora local, días.
 WINDOWS = [("Apertura Tokio", "Asia/Tokyo", 9, 0, "wk"), ("Apertura Londres", "Europe/London", 8, 0, "wk"),
@@ -466,7 +467,7 @@ class LocalAI:
             return GPU_NOTE
         try:
             out = subprocess.run(["nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
-                                 capture_output=True, text=True, timeout=10, creationflags=subprocess.CREATE_NO_WINDOW)
+                                 capture_output=True, text=True, timeout=10, creationflags=NO_WINDOW)
             free = int(out.stdout.strip().splitlines()[0])
             if free < config.LOCAL_AI_MIN_FREE_MB:
                 return f"Solo hay {free} MB de VRAM libres (hacen falta {config.LOCAL_AI_MIN_FREE_MB}); se reintenta con la próxima noticia."
@@ -550,7 +551,7 @@ class LocalAI:
                 # Popen duplica el descriptor del log para el proceso hijo; el nuestro se cierra al salir del with.
                 with open(config.LOG_DIR / "llama-server.log", "ab") as log_file:
                     proc = self.proc = subprocess.Popen(args, cwd=str(config.LLAMA_SERVER.parent), stdout=log_file,
-                                                        stderr=log_file, creationflags=subprocess.CREATE_NO_WINDOW)
+                                                        stderr=log_file, creationflags=NO_WINDOW)
             except OSError as e:   # exe bloqueado, sin permiso o log inaccesible
                 log.warning("No se pudo arrancar llama-server: %s", e)
                 self.proc = None
@@ -696,14 +697,14 @@ class LocalAI:
         en español sale en cp850: se leen bytes y se decodifica con tolerancia (con -X utf8, text=True tumbaba el bot)."""
         try:
             raw = subprocess.run(["netstat", "-ano", "-p", "TCP"], capture_output=True, timeout=10,
-                                 creationflags=subprocess.CREATE_NO_WINDOW).stdout or b""
+                                 creationflags=NO_WINDOW).stdout or b""
             for line in raw.decode("ascii", errors="replace").splitlines():
                 parts = line.split()
                 if (len(parts) >= 5 and parts[1] == f"127.0.0.1:{config.LOCAL_AI_PORT}" and parts[3] == "LISTENING"
                         and parts[4] == str(pid)):
                     log.info("IA local: cierro el llama-server que dejó una ejecución anterior (PID %d)", pid)
                     subprocess.run(["taskkill", "/PID", parts[4], "/T", "/F"], capture_output=True, timeout=10,
-                                   creationflags=subprocess.CREATE_NO_WINDOW)
+                                   creationflags=NO_WINDOW)
                     return True
         except Exception as e:
             log.warning("No se pudo cerrar el llama-server heredado: %s", e)

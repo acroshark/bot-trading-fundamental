@@ -23,7 +23,17 @@ posición guarda las tasas con que se abrió («comision») y las usa hasta cerr
 («costes»: entrada, salidas, funding y total, en USDC y en R) y la cartera, el perfil en uso («comisiones»). Sin cuenta
 X-Perps (perfil okx_eu_sin_xperps, o la cuenta real sin X-Perps) no hay cortos ni perpetuos: se vetan («sin_cortos»).
 Mandos de la web (server.on_ws_message): decide, close, set_mode, halt / resume (parada manual, persistente), cancel y
-set_comisiones (perfil de comisiones, persistente)."""
+set_comisiones (perfil de comisiones, persistente).
+REVISIÓN AL ARRANCAR (02-11-2026; el PC del usuario se apaga a veces y entonces nadie vigila las abiertas): cada posición
+guarda la última vez que el bot la gestionó con precio («seen»). Al arrancar, las que no se ven desde hace más de
+REVISION_MIN_MS no se gestionan hasta revisarlas con las velas de 1 min de OKX EU (get_bars: velas_okx, el par que se
+operaría, en su misma escala) desde entonces: vela a vela, con el camino pesimista apertura → extremo en contra → extremo
+a favor → cierre, por la misma gestión que en vivo (_manage); el stop sale a su precio (o a la apertura si la vela ya
+abre más allá) y, si una vela toca el stop y el objetivo, el stop primero; el tope de tiempo cumplido antes de una vela
+sale a su apertura; el funding de las liquidaciones de por medio, con el precio de entonces. La operación lo dice
+(«revision_arranque» y el motivo del cierre, con su hora) y el cierre lleva su hora de verdad; el evento sale ahora. Sin
+velas, o desde un hueco de más de REVISION_HOLE_MS en ellas, no se aplica nada: se avisa, queda apuntado y la posición
+sigue en vivo desde ahora."""
 import asyncio
 import hashlib
 import json
@@ -62,6 +72,11 @@ CLOSED_IN_PORTFOLIO = 50
 COST_SLIP_BPS = 2.0            # deslizamiento supuesto por lado en el coste de ida y vuelta (como el backtest); es
                                # también el máximo del simulado, que se suma al medio diferencial
 BE_MARGIN_BPS = 2.0            # margen del break-even sobre el coste de ida y vuelta
+VELA_MS = 60_000               # velas de 1 min de la revisión al arrancar
+REVISION_MIN_MS = 60_000       # al arrancar se revisa la posición que el bot no ve desde hace más que esto
+REVISION_HOLE_MS = 5 * 60_000  # un salto mayor entre velas (o al principio o al final) deja el tramo sin completar
+REVISION_TRAMO_MS = 1_000 * VELA_MS   # velas por petición: cada una cabe en el tope de páginas de velas_okx
+REVISION_ESPERAS_S = (5, 10, 20, 40)  # si OKX no responde al arrancar, se reintenta tras estas esperas
 STOP_NAMES = {"inicial": "Stop de pérdida", "be": "Stop en break-even", "dinamico": "Stop dinámico",
               "cerrojo": "Stop del cerrojo", "seguimiento": "Stop de seguimiento"}
 MODE_TEXT = {"auto": "Aprobación automática (solo paper)", "veto": "Ventana de veto de {s} s",
@@ -326,16 +341,64 @@ def stop_update(d: int, entry: float, stop_pct: float, trail: float | None, best
     return stop, be, kind
 
 
+def velas_validas(bars, a: int, b: int) -> list[list]:
+    """Velas de 1 min [t, o, h, l, c] utilizables que abren en [a, b): números finitos y positivos, en orden y sin
+    repetir (de un mismo minuto, la última que llega). El máximo y el mínimo cubren la apertura y el cierre."""
+    out: dict[int, list] = {}
+    for r in bars or []:
+        try:
+            t, o, h, lo, c = int(r[0]), float(r[1]), float(r[2]), float(r[3]), float(r[4])
+        except (TypeError, ValueError, IndexError, OverflowError):
+            continue
+        if a <= t < b and all(math.isfinite(v) and v > 0 for v in (o, h, lo, c)):
+            out[t] = [t, o, max(h, o, c), min(lo, o, c), c]
+    return [out[t] for t in sorted(out)]
+
+
+def tramo_seguido(rows: list[list], a: int, b: int) -> tuple[list[list], int]:
+    """El tramo sin huecos desde a: las velas hasta el primer salto de más de REVISION_HOLE_MS (también al principio) y
+    hasta dónde llegan (el fin de la última, como mucho b). Sin velas al principio, ([], a): lo de después de un hueco no
+    se puede usar, porque en el hueco pudo tocar el stop o el objetivo."""
+    if not rows or rows[0][0] - a > REVISION_HOLE_MS:
+        return [], a
+    out = [rows[0]]
+    for r in rows[1:]:
+        if r[0] - out[-1][0] > REVISION_HOLE_MS:
+            break
+        out.append(r)
+    return out, min(b, out[-1][0] + VELA_MS)
+
+
+def codigo_salida(why: str | None) -> str:
+    """objetivo | stop | cerrojo | tiempo | otro, del motivo de un cierre (como decisiones.codigo_cierre)."""
+    t = str(why or "")
+    if t.startswith("Objetivo"):
+        return "objetivo"
+    if t.startswith((STOP_NAMES["cerrojo"], STOP_NAMES["seguimiento"])):
+        return "cerrojo"
+    if t.startswith(tuple(STOP_NAMES.values())):
+        return "stop"
+    if t.startswith("Cierre por tiempo"):
+        return "tiempo"
+    return "otro"
+
+
 # ---------------------------------------------------------------- broker
 
 class PaperBroker:
-    def __init__(self, bus: Bus, store: Store, get_market, get_orderflow=None, clock=now_ms, slip_bps=None):
+    def __init__(self, bus: Bus, store: Store, get_market, get_orderflow=None, clock=now_ms, slip_bps=None,
+                 get_bars=None, dormir=asyncio.sleep):
         self.bus = bus
         self.store = store
         self.get_market = get_market                          # () -> último "market" (precios y diferencial OKX EU)
         self.get_orderflow = get_orderflow or (lambda: None)  # () -> último "orderflow" (diferencial del libro)
         self.clock = clock                                    # () -> ms; inyectable en las pruebas
         self.slip_bps = slip_bps or (lambda: random.uniform(0.5, 2.0))
+        # async (moneda, desde_ms, hasta_ms) -> velas de 1 min [t, o, h, l, c] de OKX EU (velas_okx) para revisar al
+        # arrancar lo que tocaron las abiertas con el bot apagado; None: no se revisan (como antes del 02-11-2026)
+        self.get_bars = get_bars
+        self._dormir = dormir                                 # espera entre intentos de la revisión (inyectable)
+        self._revision: dict[str, dict] = {}                  # abiertas por revisar al arrancar {story: {desde, error?}}
         self.mode = config.APPROVAL_MODE if config.APPROVAL_MODE in MODES else "veto"
         if self.mode != config.APPROVAL_MODE:
             log.warning("Modo de aprobación desconocido «%s»: se usa veto", config.APPROVAL_MODE)
@@ -400,9 +463,13 @@ class PaperBroker:
         base = self._get_state("day_start")
         self.day_base = base if isinstance(base, dict) and _f(base.get("equity")) is not None else {}
         self._load_settings()
+        if self.get_bars is not None and self.positions:
+            self._marcar_revision(now)
         if self.positions or self.pending or self.scheduled:
-            log.info("Paper: recuperadas %d posiciones, %d pendientes y %d programadas",
-                     len(self.positions), len(self.pending), len(self.scheduled))
+            log.info("Paper: recuperadas %d posiciones, %d pendientes y %d programadas%s",
+                     len(self.positions), len(self.pending), len(self.scheduled),
+                     f" ({len(self._revision)} por revisar con las velas del rato con el bot apagado)" if self._revision
+                     else "")
 
     @staticmethod
     def _queue_ok(it, keys: tuple) -> bool:
@@ -1162,7 +1229,8 @@ class PaperBroker:
         sl = px - d * r
         pos = {"id": "t" + hashlib.sha1(f"{story}|{now}".encode()).hexdigest()[:12], "story": story, "coin": coin, "side": side,
                "qty": qty, "entry": px, "sl": sl, "sl_initial": sl, "sl_kind": "inicial", "sl_pub": sl, "stop_pct": stop,
-               "trail_pct": trail, "high_water": px, "last": px, "opened": now, "riskUsd": notional * stop / 100,
+               "trail_pct": trail, "high_water": px, "last": px, "opened": now, "seen": now,
+               "riskUsd": notional * stop / 100,
                "notional": notional, "fee_open": notional * com["tomador"] / 100, "comision": com,
                "tp1": px + d * r * tp1R if tp1R else None, "tp2": px + d * r * tp2R if tp2R else None, "tp2R": tp2R,
                "be": False, "hold_until": hold_until, "hold_label": hold_label, "headline": item["headline"],
@@ -1230,8 +1298,12 @@ class PaperBroker:
 
     # ---- gestión de la posición
 
-    def _manage(self, p: dict, px: float, now: int) -> None:
+    def _manage(self, p: dict, px: float, now: int, ev_ts: int | None = None, suf: str = "") -> None:
+        """Gestiona la posición con el precio px a la hora now. ev_ts: la hora de los eventos si no es now (la revisión
+        al arrancar pasa las velas del rato con el bot apagado: now es la de la vela y los eventos salen ahora); suf: lo
+        que se añade al motivo de una salida y al texto de sus avisos (con el bot apagado, a qué hora)."""
         d, coin = self._dir(p["side"]), p["coin"]
+        ev = now if ev_ts is None else ev_ts
         p["last"] = px
         if d * (px - p["high_water"]) > 0:
             p["high_water"] = px
@@ -1288,13 +1360,13 @@ class PaperBroker:
                 title = f"{coin}: stop dinámico a {_px(p['sl'])}"
                 text = (f"{_n(dist)} % desde el {'máximo' if d > 0 else 'mínimo'} de {_px(p['high_water'])} · "
                         f"asegura {_sg(lock)} R")
-            self._event("manage", "exec", p["story"], coin, title, text, {"exec": dict(p["exec"]), **extra}, now)
+            self._event("manage", "exec", p["story"], coin, title, text + suf, {"exec": dict(p["exec"]), **extra}, ev)
             self._save_trade(p)
         elif lock_moved:   # el seguimiento sube el stop menos de 0,25 R: se guarda ya, para que un reinicio no lo baje
             self._save_trade(p)
 
         if p.get("tp1_frac") and not p.get("tp1_done") and p.get("tp1") and d * (px - p["tp1"]) >= 0:
-            if self._partial(p, now):   # parcial del 100 %: ya está cerrada
+            if self._partial(p, now, ev_ts, suf):   # parcial del 100 %: ya está cerrada
                 return
         why = exit_px = None
         limite = False
@@ -1305,7 +1377,7 @@ class PaperBroker:
         elif now >= p["hold_until"]:
             why, exit_px = f"Cierre por tiempo ({p['hold_label']})", self._exit_px(p, px)
         if why:
-            self._close(p, exit_px, why, now, limite)
+            self._close(p, exit_px, why + suf, now, limite, ev_ts=ev_ts)
 
     def _funding(self, p: dict, px: float, now: int) -> None:
         """Perpetuo: en cada liquidación pasada desde la última, cobra o paga el funding sobre el nominal a precio de
@@ -1315,35 +1387,39 @@ class PaperBroker:
             p["funding_rate"] = rate
         nxt = p.get("funding_next") or next_funding_ms(p["opened"])
         while now >= nxt:
-            at, nxt = nxt, nxt + FUNDING_EVERY_MS
-            p["funding_next"] = nxt
-            r, notional = p.get("funding_rate"), p["qty"] * px
-            if r is None:
-                log.warning("Paper: %s sin tasa de funding a las %s: esa liquidación no se cuenta", p["story"], _hm(at))
-                continue
-            amt = funding_pay(p["side"], notional, r)
-            p["funding"] = p.get("funding", 0.0) + amt
-            p["funding_n"] = p.get("funding_n", 0) + 1
-            p["exec"] = {**p["exec"], "funding": round(p["funding"], 4), "funding_n": p["funding_n"]}
-            self._event("manage", "exec", p["story"], p["coin"],
-                        f"{p['coin']}: funding {'cobrado' if amt >= 0 else 'pagado'} {_sg(amt)} {config.QUOTE} (paper)",
-                        f"Liquidación de las {_hm(at)} (Madrid) · tasa {_n(r, 4)} % por 8 h sobre {_n(notional, 0)} "
-                        f"{config.QUOTE} de nominal · acumulado {_sg(p['funding'])} {config.QUOTE}",
-                        {"exec": dict(p["exec"])}, now)
-            self._save_trade(p)
+            self._pay_funding(p, nxt, px, now)
+            nxt = p["funding_next"]
+
+    def _pay_funding(self, p: dict, at: int, px: float, ev_ts: int, suf: str = "") -> None:
+        """La liquidación de las at sobre el nominal a precio px con la última tasa conocida (sin ella no se cuenta)."""
+        p["funding_next"] = at + FUNDING_EVERY_MS
+        r, notional = p.get("funding_rate"), p["qty"] * px
+        if r is None:
+            log.warning("Paper: %s sin tasa de funding a las %s: esa liquidación no se cuenta", p["story"], _hm(at))
+            return
+        amt = funding_pay(p["side"], notional, r)
+        p["funding"] = p.get("funding", 0.0) + amt
+        p["funding_n"] = p.get("funding_n", 0) + 1
+        p["exec"] = {**p["exec"], "funding": round(p["funding"], 4), "funding_n": p["funding_n"]}
+        self._event("manage", "exec", p["story"], p["coin"],
+                    f"{p['coin']}: funding {'cobrado' if amt >= 0 else 'pagado'} {_sg(amt)} {config.QUOTE} (paper)",
+                    f"Liquidación de las {_hm(at)} (Madrid) · tasa {_n(r, 4)} % por 8 h sobre {_n(notional, 0)} "
+                    f"{config.QUOTE} de nominal · acumulado {_sg(p['funding'])} {config.QUOTE}" + suf,
+                    {"exec": dict(p["exec"])}, ev_ts)
+        self._save_trade(p)
 
     def _exit_px(self, p: dict, px: float) -> float:
         sp = self._spread(p["coin"])
         slip = (SPREAD_FALLBACK_BPS if sp is None else sp) / 2 + self.slip_bps()
         return px * (1 - self._dir(p["side"]) * slip / 10000)
 
-    def _partial(self, p: dict, now: int) -> bool:
+    def _partial(self, p: dict, now: int, ev_ts: int | None = None, suf: str = "") -> bool:
         """Salida parcial de tp1Frac de la posición inicial en tp1 (orden límite: al precio de tp1).
-        Devuelve True si la parte era toda la posición (entonces se cierra como objetivo)."""
+        Devuelve True si la parte era toda la posición (entonces se cierra como objetivo). ev_ts y suf, como en _manage."""
         d, coin, px = self._dir(p["side"]), p["coin"], p["tp1"]
         q = min(p["qty"], p["qty0"] * p["tp1_frac"])
         if q >= p["qty"] * (1 - 1e-9):
-            self._close(p, px, f"Objetivo ({_n(p.get('tp1R') or 0.0, 1)} R)", now, limite=True)
+            self._close(p, px, f"Objetivo ({_n(p.get('tp1R') or 0.0, 1)} R)" + suf, now, limite=True, ev_ts=ev_ts)
             return True
         fee = q * px * self._tasas(p)["creador"] / 100   # orden límite: creador
         net = d * (px - p["entry"]) * q - fee
@@ -1351,7 +1427,7 @@ class PaperBroker:
         p["realized"] = p.get("realized", 0.0) + net
         p["fees_exit"] = p.get("fees_exit", 0.0) + fee
         part = {"qty": q, "px": px, "at": now, "pnl": round(net, 4), "fee": round(fee, 4), "tipo": "creador",
-                "why": f"Objetivo parcial ({_n(p.get('tp1R') or 0.0, 1)} R)"}
+                "why": f"Objetivo parcial ({_n(p.get('tp1R') or 0.0, 1)} R)" + suf}
         part["R"] = round(net / p["riskUsd"], 4) if p.get("riskUsd") else None   # en R de la posición entera
         part["tp1R"] = p.get("tp1R")
         p["partials"] = [*p.get("partials", []), part]
@@ -1367,10 +1443,11 @@ class PaperBroker:
         self._event("manage", "exec", p["story"], coin, f"{coin}: salida parcial en {_px(px)}",
                     f"{'Vendidos' if d > 0 else 'Comprados'} {_qty(coin, q)} {coin} ({_n(p['tp1_frac'] * 100, 0)} % de la "
                     f"posición) a {_px(px)}: {_sg(net)} {config.QUOTE} con comisión · quedan {_qty(coin, p['qty'])} {coin}"
-                    + rest,
+                    + rest + suf,
                     {"exec": dict(p["exec"]),
                      "partial": {**part, "frac": p["tp1_frac"], "qty_left": p["qty"], "locked": bool(p.get("locked")),
-                                 "sl": p["sl"], "floor": p.get("floor"), "hold_until": p["hold_until"]}}, now)
+                                 "sl": p["sl"], "floor": p.get("floor"), "hold_until": p["hold_until"]}},
+                    now if ev_ts is None else ev_ts)
         self._save_trade(p)
         return False
 
@@ -1428,10 +1505,12 @@ class PaperBroker:
         c = self._costes_trade(t)
         return {**t, "costes": c, "bruto": round((_f(t.get("pnl"), 0.0) or 0.0) + c["total"], 4)}
 
-    def _close(self, p: dict, exit_px: float, why: str, now: int, limite: bool = False) -> dict:
+    def _close(self, p: dict, exit_px: float, why: str, now: int, limite: bool = False, ev_ts: int | None = None) -> dict:
         """Cierra lo que queda (limite: con una orden límite, el objetivo, que paga como creador; si no, a mercado, como
         tomador). pnl, comisiones y R incluyen las salidas parciales; qty es la inicial y exit, el precio medio de todas
-        las salidas (así pnl = ±(exit − entry) × qty − comisiones también con parciales)."""
+        las salidas (así pnl = ±(exit − entry) × qty − comisiones también con parciales). now es la hora de la salida (en
+        la revisión al arrancar, la de la vela en que salió); ev_ts, la del evento si no es now."""
+        ev = now if ev_ts is None else ev_ts
         d, qty = self._dir(p["side"]), p["qty"]
         parts = p.get("partials") or []
         tas = self._tasas(p)
@@ -1463,13 +1542,18 @@ class PaperBroker:
                          locked=bool(p.get("locked")), locked_at=p.get("locked_at"))
         if p.get("tags"):
             trade["tags"] = p["tags"]
+        if p.get("revision_arranque"):   # revisada al arrancar con las velas del rato con el bot apagado
+            trade["revision_arranque"] = p["revision_arranque"]
         trade.update(instrument=p.get("instrument") or "spot", funding=round(fund, 4), commissions=round(comm, 4))
         trade["costes"] = self._costes(p["fee_open"], p.get("fees_exit", 0.0) + fee_last, fund, p["riskUsd"],
                                        tas.get("perfil"))
         trade["costes"]["salida_tipo"] = "creador" if limite else "tomador"
         trade["bruto"] = round(pnl + fees, 4)   # antes de comisiones y funding (con el deslizamiento en los precios)
         del self.positions[p["story"]]
+        self._revision.pop(p["story"], None)
         self.closed.append(trade)
+        if len(self.closed) > 1 and self.closed[-2]["closed"] > now:   # una salida de antes (revisión al arrancar)
+            self.closed.sort(key=lambda t: t["closed"])
         self._save_trade(trade, now)
         result = {"coin": trade["coin"], "side": trade["side"], "qty": trade["qty"], "entry": trade["entry"],
                   "exit": trade["exit"], "why": why, "pnl": trade["pnl"], "pnl_pct": trade["pnl_pct"], "R": trade["R"],
@@ -1482,7 +1566,7 @@ class PaperBroker:
                   if p.get("instrument") == "perp" else "")
         self._event("closed", "exec", p["story"], p["coin"], f"{p['coin']} cerrada: {_sg(pnl)} {config.QUOTE}",
                     f"{why} · {_sg(R)} R · comisiones {_n(fees)} {config.QUOTE}{fund_t} · bruto {_sg(pnl + fees)} "
-                    f"{config.QUOTE}", {"result": result, "trade_id": trade["id"]}, now,
+                    f"{config.QUOTE}", {"result": result, "trade_id": trade["id"]}, ev,
                     tone="good" if pnl >= 0 else "bad")
         log.info("Paper: cerrada %s %s (%s): %.2f %s", p["coin"], p["story"], why, pnl, config.QUOTE)
         self._exec_status()
@@ -1493,6 +1577,11 @@ class PaperBroker:
         (no se inventa la salida con un precio viejo)."""
         p = self.positions.get(story)
         if not p:
+            return False
+        if story in self._revision:   # primero, lo que pasó con el bot apagado: si tocó el stop, ya está cerrada
+            self._status("exec", f"{p['coin']}: aún reviso con las velas de 1 min de OKX EU lo que hizo con el bot "
+                                 "apagado; ciérrala en unos segundos")
+            log.warning("Paper: cierre de %s aplazado: se está revisando el rato con el bot apagado", story)
             return False
         now = self.clock()
         prices = self._prices(now)
@@ -1539,10 +1628,13 @@ class PaperBroker:
             self._resolve(story, False, "Caducada sin respuesta", now)
 
     def _step_position(self, p: dict, now: int, prices: dict) -> None:
+        if p["story"] in self._revision:   # por revisar con las velas del rato con el bot apagado: aún no se gestiona
+            return
         px = prices.get(p["coin"])
         if p.get("instrument") == "perp":   # el funding se liquida aunque falte el precio (con el último)
             self._funding(p, px or p.get("last") or p["entry"], now)
         if px:   # sin precio actualizado no se mueven los stops ni se cierra por tiempo
+            p["seen"] = now   # la última vez que el bot la gestionó con precio (de aquí parte la revisión al arrancar)
             self._manage(p, px, now)
 
     def _note_stale(self, prices: dict) -> None:
@@ -1575,8 +1667,219 @@ class PaperBroker:
         for story, p in list(self.positions.items()):
             self._guard(story, self._save_trade, p)
 
+    # ---- revisión al arrancar (02-11-2026): lo que tocaron las abiertas con el bot apagado
+
+    def _marcar_revision(self, now: int) -> None:
+        """Las abiertas que el bot no ve desde hace más de REVISION_MIN_MS quedan sin gestionar hasta revisarlas con las
+        velas de 1 min (revisar_arranque). Desde la última vez que el bot la gestionó con precio («seen»); de una guardada
+        antes de que existiera «seen», desde lo último que hizo el bot (el último evento guardado) o, sin él, su entrada."""
+        ultimo = None
+        lim = min(now, int(_f(getattr(self.bus, "started", None), now)))   # antes de este arranque: lo de antes de parar
+        for story, p in self.positions.items():
+            desde = _f(p.get("seen"))
+            if desde is None:
+                if ultimo is None:
+                    try:
+                        row = self.store.db.execute("SELECT MAX(ts) FROM events WHERE ts <= ?", (lim,)).fetchone()
+                        ultimo = _f(row[0] if row else None, 0.0)
+                    except Exception:
+                        ultimo = 0.0
+                desde = max(_f(p.get("opened"), 0.0), ultimo)
+            if now - desde > REVISION_MIN_MS:
+                self._revision[story] = {"desde": int(desde)}
+
+    async def _velas_hueco(self, coin: str, a: int, b: int) -> list:
+        """Las velas de 1 min de [a, b), pedidas por tramos de REVISION_TRAMO_MS (cada petición a velas_okx cabe en su
+        tope de páginas), en orden."""
+        out: list = []
+        t = a
+        while t < b:
+            u = min(b, t + REVISION_TRAMO_MS)
+            out.extend(await self.get_bars(coin, t, u) or [])
+            t = u
+        return out
+
+    async def revisar_arranque(self) -> int:
+        """Revisa las abiertas del arranque con las velas de 1 min del rato con el bot apagado (ver el principio del
+        módulo). Si OKX no responde, reintenta tras REVISION_ESPERAS_S; al final, sin velas, avisa y la posición sigue en
+        vivo sin inventar nada. No lanza (salvo al cancelarla): ante un fallo, las posiciones vuelven a la gestión en vivo
+        para no quedarse sin vigilar. Devuelve cuántas cerró."""
+        try:
+            return await self._revisar_arranque()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            self._log_err("revision", "Paper: fallo en la revisión al arrancar: las posiciones siguen en vivo sin revisar")
+            self._revision.clear()
+            return 0
+
+    async def _revisar_arranque(self) -> int:
+        if self.get_bars is None or not self._revision:
+            self._revision.clear()
+            return 0
+        n = len(self._revision)
+        self._status("exec", f"Reviso {n} {'posición abierta' if n == 1 else 'posiciones abiertas'} con las velas de "
+                             "1 min de OKX EU del rato con el bot apagado: hasta acabar, no se gestionan")
+        log.info("Paper: reviso %d posiciones abiertas con las velas de 1 min del rato con el bot apagado", n)
+        hechas, esperas = [], (0, *REVISION_ESPERAS_S)
+        for i, espera in enumerate(esperas):
+            if not self._revision:
+                break
+            if espera:
+                await self._dormir(espera)
+            ultima = i == len(esperas) - 1
+            for story in list(self._revision):
+                p, info = self.positions.get(story), self._revision.get(story)
+                if p is None or info is None:
+                    self._revision.pop(story, None)
+                    continue
+                fin = self.clock() // VELA_MS * VELA_MS   # hasta el último minuto cerrado; lo de después, en vivo
+                try:
+                    bars, error = await self._velas_hueco(p["coin"], info["desde"] // VELA_MS * VELA_MS, fin), None
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    bars, error = None, f"{type(e).__name__}: {e}"[:200]
+                    if not ultima:
+                        info["error"] = error
+                        log.warning("Paper: sin velas de 1 min de %s para revisar %s (%s): reintento en %d s",
+                                    p["coin"], story, error, esperas[i + 1])
+                        continue
+                if self.positions.get(story) is not p or story not in self._revision:
+                    continue
+                try:
+                    hechas.append(self._aplicar_revision(p, info["desde"], fin, bars, error))
+                except Exception:
+                    self._log_err("revision:" + story, f"Paper: fallo al revisar {story} al arrancar; sigue en vivo")
+                finally:
+                    self._revision.pop(story, None)
+        cerradas = sum(r["salida"] is not None for r in hechas)
+        if hechas:   # el resumen, en la línea del agente (los avisos de cada una quedan en sus eventos)
+            abiertas = len(hechas) - cerradas
+            faltan = sum(r["salida"] is None and r["estado"] != "completa" for r in hechas)
+            partes = [f"{cerradas} {'cerrada' if cerradas == 1 else 'cerradas'} con el bot apagado" if cerradas else "",
+                      f"{abiertas} {'sigue abierta' if abiertas == 1 else 'siguen abiertas'}" if abiertas else "",
+                      f"{faltan} sin todas las velas de ese rato (no se inventa nada: en vivo desde ahora)" if faltan else ""]
+            self._status("exec", "Revisión al arrancar con las velas de 1 min de OKX EU: "
+                                 + ", ".join(x for x in partes if x))
+        return cerradas
+
+    @staticmethod
+    def _suf_apagado(t: int) -> str:
+        return (f" (con el bot apagado, el {datetime.fromtimestamp(t / 1000, MAD):%d-%m a las %H:%M}: visto al arrancar "
+                "en las velas de 1 min de OKX EU)")
+
+    def _aplicar_revision(self, p: dict, desde: int, fin: int, bars, error: str | None) -> dict:
+        """Pasa por la gestión de siempre (_manage) las velas del rato con el bot apagado, de una en una y con el camino
+        pesimista: la apertura (si ya salta el stop, sale a ella), el extremo en contra (más allá del stop, el stop: sale a
+        su precio), el extremo a favor (la parcial, el cerrojo y el objetivo) y el cierre (más allá del stop que haya
+        subido, ese stop). Antes de cada vela, las liquidaciones del funding de por medio (a su apertura) y, si ya pasó el
+        tope de tiempo, la salida a su apertura. Solo el tramo seguido desde el principio (tramo_seguido): lo de después
+        de un hueco no se aplica. Lo apunta en «revision_arranque» y devuelve esa revisión (con «salida» si la cerró)."""
+        now = self.clock()
+        story, coin, d = p["story"], p["coin"], self._dir(p["side"])
+        a = int(desde) // VELA_MS * VELA_MS
+        usadas, hasta = tramo_seguido(velas_validas(bars, a, fin), a, fin)
+        estado = "sin_velas" if not usadas else "completa" if fin - hasta <= REVISION_HOLE_MS else "incompleta"
+        rev = {"desde": int(desde), "hasta": int(hasta), "fin": int(fin), "revisado": now, "velas": len(usadas),
+               "fuente": f"velas de 1 min de OKX EU, {coin}-{config.QUOTE}", "estado": estado, "salida": None,
+               "salida_at": None, "salida_px": None, "parcial": False, "cerrojo": False, "funding_n": 0}
+        if error and not usadas:
+            rev["error"] = error
+        p["revision_arranque"] = [*(p.get("revision_arranque") or []), rev]   # queda dicho en la operación
+        upnl0, cut = self._upnl(p), day_start_ms(now)
+        antes = (bool(p.get("tp1_done")), bool(p.get("locked")), p.get("funding_n", 0))
+        if p.get("instrument") == "perp":
+            rate = self._funding_rate(coin)
+            if rate is not None:
+                p["funding_rate"] = rate
+        for t, o, h, lo, c in usadas:
+            suf = self._suf_apagado(t)
+            if p.get("instrument") == "perp":   # las liquidaciones de por medio, con el precio de entonces
+                nxt = p.get("funding_next") or next_funding_ms(p["opened"])
+                while nxt <= t and nxt < p["hold_until"]:
+                    self._pay_funding(p, nxt, o, now, suf)
+                    nxt = p["funding_next"]
+            if t >= p["hold_until"]:   # el tope de tiempo llegó antes de esta vela: sale a su apertura
+                self._close(p, self._exit_px(p, o), f"Cierre por tiempo ({p['hold_label']})" + suf, t, ev_ts=now)
+                break
+            for k, px in enumerate((o, *((lo, h) if d > 0 else (h, lo)), c)):
+                if k and d * (px - p["sl"]) <= 0:
+                    px = p["sl"]   # tocó el stop: sale a su precio (con el deslizamiento de siempre), no al extremo
+                self._manage(p, px, t, ev_ts=now, suf=suf)
+                if story not in self.positions:
+                    break
+            if story not in self.positions:
+                break
+        rev.update(parcial=bool(p.get("tp1_done")) and not antes[0], cerrojo=bool(p.get("locked")) and not antes[1],
+                   funding_n=p.get("funding_n", 0) - antes[2])
+        if story not in self.positions:   # salió con el bot apagado: la operación lleva su hora, su precio y por qué
+            tr = next((x for x in reversed(self.closed) if x["id"] == p["id"]), None)
+            if tr is not None:
+                rev.update(salida=codigo_salida(tr["reason"]), salida_at=tr["closed"],
+                           salida_px=tr.get("exit_last", tr["exit"]))
+                self._save_trade(tr, tr["closed"])
+                self._foto_de_ayer(tr, upnl0, cut, now)
+                log.warning("Paper: %s %s cerrada con el bot apagado: %s (%s R)", coin, story, tr["reason"], tr["R"])
+            return rev
+        if usadas:
+            p["seen"] = max(int(_f(p.get("seen"), 0.0)), int(hasta))
+        self._save_trade(p)
+        title, text = self._texto_revision(p, rev)
+        self._event("manage", "exec", story, coin, title, text, {"exec": dict(p["exec"]), "revision_arranque": dict(rev)},
+                    now)
+        if estado == "completa":
+            log.info("Paper: %s · %s", title, text)
+        else:   # sin velas o solo en parte: se avisa en la web
+            self._status("exec", f"{title}: {text}")
+            log.warning("Paper: %s · %s", title, text)
+        return rev
+
+    def _texto_revision(self, p: dict, rev: dict) -> tuple[str, str]:
+        """Título y texto del aviso de una posición revisada al arrancar que sigue abierta."""
+        coin, dm = p["coin"], (lambda ms: datetime.fromtimestamp(ms / 1000, MAD).strftime("%d-%m"))
+        de = f"desde las {_hm(rev['desde'])} del {dm(rev['desde'])}"
+        if rev["estado"] == "sin_velas":
+            return (f"{coin}: sin velas del rato con el bot apagado",
+                    f"No hay velas de 1 min de OKX EU de {coin}-{config.QUOTE} {de} hasta las {_hm(rev['fin'])}"
+                    + (f" ({rev['error']})" if rev.get("error") else "") + ": no se sabe si tocó el stop, el objetivo o "
+                    "el tope de tiempo con el bot apagado. No se inventa nada: sigue abierta y en vivo desde ahora")
+        nivel = [f"el stop ({_px(p['sl'])})"]
+        if p.get("tp1_frac") and not p.get("tp1_done") and p.get("tp1"):
+            nivel.append(f"la parcial ({_px(p['tp1'])})")
+        if p.get("tp2"):
+            nivel.append(f"el objetivo ({_px(p['tp2'])})")
+        toco = "no tocó " + (", ".join(nivel[:-1]) + " ni " + nivel[-1] if len(nivel) > 1 else nivel[0])
+        hizo = ([f"hizo la salida parcial en {_px(p['tp1'])}"] if rev["parcial"] else []) + (
+            [f"activó el cerrojo: stop en {_px(p['sl'])}"] if rev["cerrojo"] else []) + (
+            [f"{rev['funding_n']} {'liquidación' if rev['funding_n'] == 1 else 'liquidaciones'} de funding"]
+            if rev["funding_n"] else [])
+        hizo_t = f" ({'; '.join(hizo)})" if hizo else ""
+        tramo = f"{rev['velas']} velas de 1 min de OKX EU {de} hasta las {_hm(rev['hasta'])}"
+        if rev["estado"] == "incompleta":
+            return (f"{coin}: revisada solo en parte al arrancar",
+                    f"Con el bot apagado: {tramo}{hizo_t}; ahí {toco}. De las {_hm(rev['hasta'])} a las "
+                    f"{_hm(rev['fin'])} faltan velas: lo de ese rato no se sabe y no se inventa. Sigue abierta y en vivo "
+                    "desde ahora")
+        return (f"{coin}: revisada al arrancar",
+                f"Con el bot apagado: {tramo}{hizo_t}; {toco}: sigue abierta (tope de tiempo: {p['hold_label']}, el "
+                f"{dm(p['hold_until'])} a las {_hm(p['hold_until'])})")
+
+    def _foto_de_ayer(self, tr: dict, upnl0: float, cut: int, now: int) -> None:
+        """Una posición que pasó la noche y que la revisión cierra ANTES de la medianoche de Madrid: la foto del día
+        (day_base, _roll_day) la contó abierta a su último precio guardado; su resultado es de ayer, así que la foto pasa
+        a llevarlo cerrado y no cuenta en la pérdida de hoy. (Cerrada después de la medianoche, cuenta hoy lo que se movió
+        desde su último precio guardado, como las que siguen abiertas.)"""
+        b = self.day_base
+        if (tr["opened"] < cut and tr["closed"] < cut and b.get("date") == _day(now).isoformat()
+                and b.get("origen") == "ultimo_precio_guardado"):
+            self.day_base = {**b, "equity": round(float(b["equity"]) + tr["pnl"] - upnl0, 4)}
+            self._set_state("day_start", self.day_base)
+
     async def run(self) -> None:
         self.announce()
+        # La revisión al arrancar va aparte: la ronda sigue (pendientes, programadas, cartera) y no toca las que se revisan
+        revision = asyncio.create_task(self.revisar_arranque()) if self._revision else None
         last_pf = 0.0
         try:
             while True:
@@ -1592,6 +1895,8 @@ class PaperBroker:
                         self._log_err("portfolio", "Paper trading: fallo al publicar la cartera")
                 await asyncio.sleep(STEP_EVERY_S)
         finally:   # al parar el bot: lo último de cada posición (lo que va entre los guardados de cada 30 s) no se pierde
+            if revision is not None and not revision.done():
+                revision.cancel()
             self.save_positions()
 
     # ---- vistas
@@ -1626,6 +1931,8 @@ class PaperBroker:
                 "lock_r": p.get("lock_r"), "floor_r": p.get("floor_r"), "lock_trail_r": p.get("lock_trail_r"),
                 "locked": bool(p.get("locked")), "floor": p.get("floor"), "hold_active": p.get("hold_active"),
                 "sl_kind": p.get("sl_kind"),
+                # Revisión al arrancar: si aún se está revisando el rato con el bot apagado y las revisiones hechas.
+                "revisando": p["story"] in self._revision, "revision_arranque": p.get("revision_arranque"),
                 # Costes (comisiones por perfil): entrada, salidas, funding, total y lo que costaría salir ahora.
                 "costes": self._costes_pos(p, px)})
         return {"type": "portfolio", "ts": now, "equity": round(eq, 2), "start_equity": self.start_equity,

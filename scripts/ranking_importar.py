@@ -30,7 +30,9 @@ Cada corrección lleva su tipo corto (holm, bh o sin_p) para la web y el método
 - controles/costes/bruto_neto.json: los perfiles de «6 diarias v2» y de la Ruptura V3 (sin costes, backtest, los de hoy
   del paper y sin X-Perps), en «perfiles».
 - controles/anchos/medir_anchos.json, si ya existe (el de _pruebas no): perfil «backtest» y los demás en «perfiles»; lo
-  que ya estaba (las referencias y los objetivos fijos de salidas_motor) no se repite.
+  que ya estaba (las referencias y los objetivos fijos de salidas_motor) no se repite. Cada fila lleva en «nota» que su
+  caída máxima va por orden de cierre (a precio de mercado es mayor) y las de la Ruptura V3, que su tramo «fuera» no está
+  limpio: V3 se eligió como la mejor fuera de muestra de 23 configuraciones (docs/05, sección 24).
 Jornada = día de lunes a viernes con aperturas (salvo el 1 de enero): 306 en el fuera de muestra de los estudios.
 """
 import argparse
@@ -602,6 +604,28 @@ def filas_salidas_1a1(d: dict) -> list[dict]:
 
 # ---------------------------------------------------------------- stops y objetivos anchos
 
+# Notas honestas de las filas de medir_anchos.json (02-11-2026): lo que sus cifras no dicen por sí solas.
+NOTA_ANCHOS = "Rejilla de stops y objetivos fijada de antemano, en el libro verificado del paper."
+NOTA_CAIDA_CIERRE = ("La caída máxima va por orden de cierre de las operaciones: a precio de mercado, con las abiertas "
+                     "valoradas en cada momento, es mayor.")
+NOTA_RUPTURA3_FUERA = ("Su tramo «fuera» no está limpio: la Ruptura V3 se eligió como la mejor fuera de muestra de las 23 "
+                       "configuraciones medidas el 29-10-2026 (docs/05, sección 24), así que su cifra de fuera de muestra "
+                       "es optimista y no cuenta como prueba aparte.")
+
+
+def es_ruptura3(c: dict) -> bool:
+    """¿Es una combinación sobre las entradas de la Ruptura V3? (entrada «ruptura» o «ruptura3», o con su nombre)"""
+    e = str(c.get("entrada") or "").strip().lower()
+    txt = " ".join(str(c.get(k) or "") for k in ("entrada_nombre", "id")).lower()
+    return e in ("ruptura", "ruptura3") or "ruptura v3" in txt
+
+
+def nota_anchos(c: dict) -> str:
+    """La nota de una fila de medir_anchos.json: en las de la Ruptura V3, primero que su fuera de muestra no está limpio;
+    en todas, que la caída máxima va por orden de cierre (cabe en los 600 caracteres de ranking.normalizar)."""
+    return " ".join(([NOTA_RUPTURA3_FUERA] if es_ruptura3(c) else []) + [NOTA_ANCHOS, NOTA_CAIDA_CIERRE])
+
+
 def _tope_salidas_motor(fid: str) -> tuple | None:
     m = re.match(r"^salidas_motor:F0 stop ([\d,]+) % · objetivo ([\d,]+)R · tope 7d$", fid)
     return (float(m.group(1).replace(",", ".")), float(m.group(2).replace(",", "."))) if m else None
@@ -663,7 +687,7 @@ def filas_anchos(d: dict, ya: dict | None = None) -> list[dict]:
                          "corregida": ({"tipo": "holm", "metodo": f"Holm entre las {m} combinaciones del estudio",
                                         "valor": p_h, "pasa": p_h < ranking.P_MAX} if p_h is not None else None)},
             "estado": "backtest", "probadas": len(combos), "perfiles": perfiles or None,
-            "nota": "Rejilla de stops y objetivos fijada de antemano, en el libro verificado del paper"})
+            "nota": nota_anchos(c)})
     return out
 
 

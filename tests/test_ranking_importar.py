@@ -221,6 +221,19 @@ def test_anchos_solo_el_final_sin_las_referencias_ni_lo_de_salidas_motor():
     assert r["fuera"]["R"] == 0.2 and r["robustez"]["sin_5_mayores"] == 0.0 and r["fecha"] == "2026-10-29"
     assert r["robustez"]["corregida"]["valor"] == 0.2 and r["perfiles"]["okx_eu_con_xperps"]["R"] == 0.22   # Holm 4 × 0,05
     assert r["regla"].startswith("Entradas de Ruptura V3; stop 3,0 %") and r["perfil_costes"] == "backtest"
+    # notas honestas: en las de la Ruptura V3, que su fuera de muestra no está limpio (V3 se eligió como la mejor fuera de
+    # 23 configuraciones, docs/05 §24); en todas, que la caída máxima va por orden de cierre y a precio de mercado es mayor
+    s = filas["anchos:6 diarias · stop 3 % · objetivo 4R"]
+    for f in (r, s):
+        assert "La caída máxima va por orden de cierre de las operaciones: a precio de mercado" in f["nota"] and "es mayor" in f["nota"]
+        assert "Rejilla de stops y objetivos fijada de antemano" in f["nota"]
+        n = ranking.normalizar(f)
+        assert n["nota"] == f["nota"] and len(f["nota"]) <= 600   # cabe entera en la fila del ranking (y en el detalle de la web)
+    assert r["nota"].startswith("Su tramo «fuera» no está limpio: la Ruptura V3 se eligió como la mejor fuera de muestra de "
+                                "las 23 configuraciones") and "docs/05, sección 24" in r["nota"]
+    assert "no está limpio" not in s["nota"] and "23 configuraciones" not in s["nota"]
+    assert ri.es_ruptura3({"entrada": "ruptura3"}) and ri.es_ruptura3({"entrada": "x", "entrada_nombre": "Ruptura V3"})
+    assert not ri.es_ruptura3({"entrada": "seis", "entrada_nombre": "6 diarias", "id": "6 diarias · stop 3 % · objetivo 4R"})
 
 
 def test_escribir_es_idempotente_y_quita_lo_suyo_que_ya_no_sale(tmp_path):

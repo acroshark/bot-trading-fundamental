@@ -19,7 +19,7 @@ pytestmark = pytest.mark.skipif(not NODE, reason="hace falta Node para probar la
 # Arnés: extrae el <script> de la página, lo ejecuta en un contexto vm con un DOM falso y luego el escenario (stdin).
 HARNESS = r"""
 const fs = require("fs"), vm = require("vm");
-const [htmlPath, mode] = process.argv.slice(1);
+const [htmlPath, mode, ahoraArg] = process.argv.slice(1);
 const html = fs.readFileSync(htmlPath, "utf8");
 const js = [...html.matchAll(/<script(?![^>]*\bsrc=)([^>]*)>([\s\S]*?)<\/script>/g)]
   .filter(m => !/json|text\/plain/.test(m[1])).map(m => m[2]).join("\n;\n");
@@ -72,6 +72,9 @@ const ctx = {
 ctx.window = ctx;
 if (mode === "live") ctx.RADAR_LIVE = {ws: "/events"};
 vm.createContext(ctx);
+// Reloj fijo (run(..., ahora=ms)): Date.now de la página arranca en esa hora y avanza con el real. Para las pruebas que no
+// pueden depender de la hora a la que se pasan (p. ej., una entrada de hace 40 min que, de 00:00 a 00:40, es de ayer).
+if (ahoraArg) vm.runInContext(`(() => { const real = Date.now.bind(Date), d0 = real(), a = ${Number(ahoraArg)}; Date.now = () => a + (real() - d0); })();`, ctx);
 let result = null;
 (async () => {
   try {
@@ -105,9 +108,10 @@ const reset = () => H.recv({type: "reset", phase: 2, started: now - 3600e3});
 """
 
 
-def run(code: str, live: bool = True):
-    p = subprocess.run([NODE, "-e", HARNESS, str(HTML), "live" if live else "sim"],
-                       input=(LIVE if live else "") + code, capture_output=True, text=True, encoding="utf-8", timeout=180)
+def run(code: str, live: bool = True, ahora: int | None = None):
+    """Ejecuta la página y el escenario. ahora: hora fija en ms para Date.now (si no, la real)."""
+    args = [NODE, "-e", HARNESS, str(HTML), "live" if live else "sim"] + ([str(int(ahora))] if ahora is not None else [])
+    p = subprocess.run(args, input=(LIVE if live else "") + code, capture_output=True, text=True, encoding="utf-8", timeout=180)
     assert p.returncode == 0, p.stderr
     out = json.loads(p.stdout.strip().splitlines()[-1])
     assert out["errors"] == [], out["errors"]
@@ -2619,12 +2623,9 @@ const nVelas = () => H.fetches.filter(u => String(u).startsWith("/api/velas")).l
 """
 
 
-def test_grafica_de_cada_posicion_con_las_velas_del_bot_y_en_vivo():
-    """En «En posición», justo debajo de cada operación abierta, su gráfica: velas de OKX EU del par que se operaría
-    (GET /api/velas?fuente=okx, una petición por minuto) desde un poco antes de la entrada, el punto de la entrada, las líneas del stop, de la parcial en 3R y de la
-    entrada, el precio de ahora y las cifras (ganancia de ahora en % y R, distancia al stop y a la parcial y lo que daría
-    cada una). Se mueve con el precio en vivo; en el expediente sale más grande, con el suelo del cerrojo y el plazo."""
-    r = run(FIAB + SEIS2 + GRAF + """H.open(); reset();
+# El escenario de la gráfica de una posición abierta (GRAF): la cartera con posA, sus velas, el precio que se mueve y su
+# expediente
+GRAF_POS = """H.open(); reset();
       H.fetchReply = url => url.startsWith("/api/velas") ? velasOk({coin: "BTC", tf: "1m", velas: [...BARS, [now, null, 1, 1, 1], "x"], hasta_datos: now - 2*M,
         fuente: "okx", mercado: "OKX EU", instId: "BTC-USDC"}) : {ok: false};
       H.recv({type: "market", prices: {BTC: 100.4}}, pf({positions: [posA]}));
@@ -2638,8 +2639,29 @@ def test_grafica_de_cada_posicion_con_las_velas_del_bot_y_en_vivo():
              ev("riskok", "a-tok-btc-1", {risk: {checks: [], ok: true}}), ev("humanok", "a-tok-btc-1", {human: {mode: "auto", by: "Automático (paper)", at: now}}),
              ev("filled", "a-tok-btc-1", {exec: {px: 100, slip: 1, ms: 200, notional: 25, sl: 98, tp1: 106, tp2: null, tp1Frac: 0.5}}));
       S.sel = "a-tok-btc-1"; renderTrace(); const tr = H.el("#trace").innerHTML;
-      return {antes, kb, kb2, tr, url, n1, desde: DESDE, he: madHM(T0), rects: [...kb.matchAll(/<rect /g)].length};""")
+      return {antes, kb, kb2, tr, url, n1, desde: DESDE, he: madHM(T0), dm: madDM(T0), dia: madDay(T0), dia_ahora: madDay(now),
+              rects: [...kb.matchAll(/<rect /g)].length};"""
+
+
+def _hoy_madrid_ms(h: int, m: int) -> int:
+    """Hoy (día de Madrid) a las h:m de Madrid, en ms: la hora fija de una prueba que no puede depender de la real."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    mad = ZoneInfo("Europe/Madrid")
+    hoy = datetime.now(mad).date()
+    return int(datetime(hoy.year, hoy.month, hoy.day, h, m, tzinfo=mad).timestamp() * 1000)
+
+
+def test_grafica_de_cada_posicion_con_las_velas_del_bot_y_en_vivo():
+    """En «En posición», justo debajo de cada operación abierta, su gráfica: velas de OKX EU del par que se operaría
+    (GET /api/velas?fuente=okx, una petición por minuto) desde un poco antes de la entrada, el punto de la entrada, las líneas del stop, de la parcial en 3R y de la
+    entrada, el precio de ahora y las cifras (ganancia de ahora en % y R, distancia al stop y a la parcial y lo que daría
+    cada una). Se mueve con el precio en vivo; en el expediente sale más grande, con el suelo del cerrojo y el plazo.
+    Con el reloj fijo a mediodía, para no depender de la hora: la entrada, de 40 min antes, es del mismo día. A las 00:20
+    es de ayer y el expediente la rotula con su fecha (antes, de 00:00 a 00:40 esta prueba fallaba)."""
+    r = run(FIAB + SEIS2 + GRAF + GRAF_POS, ahora=_hoy_madrid_ms(12, 0))
     kb, kb2, tr = r["kb"], r["kb2"], r["tr"]
+    assert r["dia"] == r["dia_ahora"] and r["he"] == "11:20"   # mediodía: la entrada es de hoy
     assert r["url"] == f"/api/velas?coin=BTC&desde={r['desde']}&tf=1m&fuente=okx" and r["n1"] == 1   # una sola petición por minuto
     assert "Cargando las velas de OKX EU, BTC-USDC…" in r["antes"] and '<span class="n">1</span>' in kb
     assert '<div class="pwrap"><button type="button" class="ticket" data-story="a-tok-btc-1">' in kb
@@ -2659,6 +2681,12 @@ def test_grafica_de_cada_posicion_con_las_velas_del_bot_y_en_vivo():
         assert t in tr, t
     assert 'data-close="a-tok-btc-1"' in tr
     _sin_null(r["antes"], kb, kb2, tr)
+    # a las 00:20, la entrada de las 23:40 es de ayer: la gráfica pequeña da la hora y el expediente, la fecha y la hora
+    n = run(FIAB + SEIS2 + GRAF + GRAF_POS, ahora=_hoy_madrid_ms(0, 20))
+    assert n["he"] == "23:40" and n["dia"] != n["dia_ahora"]
+    assert ">23:40</text>" in n["kb"] and f"Entrada {n['dm']} 23:40 · 100,00" in n["tr"] and "Entrada 23:40 ·" not in n["tr"]
+    assert "Parcial 3R 106,00" in n["tr"] and '<small>Ahora</small><b class="pos">+0,40 %</b>' in n["kb"]
+    _sin_null(n["kb"], n["tr"])
 
 
 def test_grafica_sin_velas_del_bot_404_fallo_cerrojo_y_campos_rotos():
@@ -3100,7 +3128,7 @@ const D = fila("D", {posicion: 4, nombre: "Ruptura V3", pct_dia: 0.05, op_dia: 0
   en_vivo: {fuente: "paper", virtual: false, n: 3, R: 0.4, gana_pct: 66.7, neto_usdc: 1.23, desde: now - 864e5, abiertas: 1}});
 const E = fila("E", {posicion: null, nombre: "Pierde", pct_dia: -0.2, fuera: {n: 1000, R: -0.1, gana_pct: 30}});
 const EM = (f, o = {}) => ({id: f.id, preset: "ruptura3", nombre: f.nombre, desde: now - 864e5, pausada: false, fuente: "motor", posicion: f.posicion,
-  n_ranking: 4, en_ranking: !!f.posicion, texto: f.posicion ? `Puesto ${f.posicion} de 4 en el ranking` : "Fuera del ranking: pierde fuera de muestra (−0,075 R por operación)",
+  n_ranking: 4, en_ranking: !!f.posicion, texto: f.posicion ? `Puesto ${f.posicion} de 4 en el ranking` : "Fuera del ranking: pierde fuera de muestra (−0,038 % de la cuenta por operación, neto de costes)",
   fila: f, ...o});
 const RES = rk([A, B, C, D, E], {en_marcha: EM(D)});
 const rkReply = data => url => url.startsWith("/api/ranking") ? {ok: true, status: 200, json: async () => data} : {ok: false, status: 404};
@@ -3119,8 +3147,8 @@ def test_ranking_pide_la_api_ordena_por_beneficio_y_marca_la_en_marcha():
       H.fetches.length = 0; H.fire("click", {"data-tab": "ranking"}); await loadRanking(); renderAll(true);
       const f1 = H.fetches.slice(), h0 = rkHtml(), rows0 = H.el("#rkRows").innerHTML;
       const pos = h => ["A", "B", "C", "D"].map(i => h.indexOf(`data-rk-sel="${i}"`));
-      H.fire("click", {"data-rk-sort": "R"}); renderAll(true); const rDesc = pos(H.el("#rkRows").innerHTML), hR = H.el("#rkHead").innerHTML;
-      H.fire("click", {"data-rk-sort": "R"}); renderAll(true); const rAsc = pos(H.el("#rkRows").innerHTML);
+      H.fire("click", {"data-rk-sort": "pct_op"}); renderAll(true); const rDesc = pos(H.el("#rkRows").innerHTML), hR = H.el("#rkHead").innerHTML;
+      H.fire("click", {"data-rk-sort": "pct_op"}); renderAll(true); const rAsc = pos(H.el("#rkRows").innerHTML);
       H.fire("click", {"data-rk-sort": "pos"}); renderAll(true);
       H.fire("click", {"data-rk-sel": "A"}); renderAll(true); const det = H.el("#rkRows").innerHTML;
       H.fire("click", {"data-rk-sel": "A"}); renderAll(true); const cerrado = H.el("#rkRows").innerHTML;
@@ -3136,21 +3164,24 @@ def test_ranking_pide_la_api_ordena_por_beneficio_y_marca_la_en_marcha():
     assert p0[2] < rows.index('<tr class="rk-live">') < p0[3] and "en marcha</span>" in rows
     assert "Curso &lt;b&gt;negrita&lt;/b&gt;" in rows and "<b>negrita</b>" not in rows
     assert 'title="gana fuera de muestra pero pierde dentro">frágil</span>' in rows and ">poca muestra</span>" in rows
-    assert ">sin 5 mayores -0,20 R</span>" in rows and ">dentro ✗</span>" in rows and ">corregida q 0,40 ✗</span>" in rows
-    assert ">mitades +0,50 / -0,10</span>" in rows and ">corregida Holm 0,03 ✓</span>" in rows and ">dentro ✓</span>" in rows
-    assert "+0,300 %" in rows and "+0,30 R" in rows and "400 / 300" in rows and '<span class="pill info">nueva</span>' in rows
+    assert ">sin 5 mayores -0,100 %/op.</span>" in rows and ">dentro ✗</span>" in rows and ">corregida q 0,40 ✗</span>" in rows
+    assert ">mitades +0,250 / -0,050 %/op.</span>" in rows and ">corregida Holm 0,03 ✓</span>" in rows and ">dentro ✓</span>" in rows
+    assert "+0,300 %" in rows and "+0,150 %" in rows and "400 / 300" in rows and '<span class="pill info">nueva</span>' in rows
+    assert re.search(r"\d R\b", rows) is None   # en la tabla, % de la cuenta: el R solo en el detalle
     assert 'title="Antes, puesto 1">▼1</span>' in rows and "✗ no</span>" in rows and "Descartada por ti" not in rows
     assert r["rDesc"][3] < r["rDesc"][0] < r["rDesc"][1] < r["rDesc"][2] and r["rAsc"][2] < r["rAsc"][1] < r["rAsc"][0] < r["rAsc"][3]
-    assert 'aria-sort="descending"' in r["hR"] and "R/op. ▼" in r["hR"]
+    assert 'aria-sort="descending"' in r["hR"] and "% por operación (neto) ▼" in r["hR"] and "R/op." not in r["hR"]
     assert "Regla de A" in r["det"] and 'class="rk-det"' in r["det"] and "OKX EU con X-Perps" in r["det"] and "A_resumen.json" in r["det"]
+    assert "+0,150 % (+0,30 R × 0,5 % de riesgo por operación)" in r["det"]   # en el detalle, sí, el R
     assert 'class="rk-det"' not in r["cerrado"]
     assert "Ruptura V3" in r["live"] and "Puesto 4 de 4" in r["live"] and "En paper" in r["live"]
     assert "3 operaciones cerradas en la cartera paper" in r["live"] and "+1,23 USDC ficticios" in r["live"] and "1 abierta" in r["live"]
-    assert "4 de 8 estrategias medidas no pierden fuera de muestra con costes" in r["sub"]
+    assert "+0,200 % de la cuenta por operación, neto" in r["live"] and re.search(r"\d R\b", r["live"]) is None
+    assert "4 de 8 estrategias medidas no pierden fuera de muestra, netas de comisiones, deslizamiento y funding" in r["sub"]
     assert "Estudios: 5 filas · 3 archivos" in r["foot"] and "Cómo se ordena y qué entra" in r["foot"]
     md = r["md"]
     assert md.count('data-tabgo="ranking"') == 5 and "1. Estrategia A" in md and "4. Ruptura V3" in md
-    assert "Ruptura V3 · puesto 4 de 4" in md and ">+0,300 %</b>" in md
+    assert "Ruptura V3 · puesto 4 de 4" in md and ">+0,300 %/día</b>" in md and "+0,150 %/op." in md and re.search(r"\d R\b", md) is None
     assert r["badge"] == [False, "1"] and r["sent"] == []
     _sin_null(r["h0"], r["det"], r["live"], md)
 
@@ -3207,7 +3238,8 @@ def test_ranking_sin_ruta_404_por_el_bus_la_en_marcha_fuera_y_campos_rotos():
     assert "Sin ranking" in r["md0"] and "aún no tiene GET /api/ranking" in r["md0"]
     bus = r["bus"]
     assert 'data-rk-sel="T0"' in bus and 'data-rk-sel="T19"' in bus and "Llegan las 20 primeras por el WebSocket" in bus
-    assert ">Fuera del ranking: pierde</span>" in bus and "Fuera del ranking: pierde fuera de muestra (−0,075 R por operación)." in bus
+    assert ">Fuera del ranking: pierde</span>" in bus and "Fuera del ranking: pierde fuera de muestra (−0,038 % de la cuenta por operación, neto de costes)." in bus
+    assert "-0,038 % por operación (neto) fuera de muestra" in bus and "-0,177 % de la cuenta al día (neto)" in bus
     assert "6 diarias v2" in bus and 'data-rk-sel="seis2"' not in bus and "400 de 830 estrategias" in bus and "Nota del bus" in bus
     assert r["md1"].count('data-tabgo="ranking"') == 6 and "6 diarias v2 · fuera del ranking: pierde" in r["md1"] and "1. Estrategia T0" in r["md1"]
     assert r["sigue"] == 830
@@ -3258,8 +3290,8 @@ def test_ranking_correccion_costes_etag_y_en_marcha_sin_datos():
     assert 'title="sin p ni corrección: una de 378 salidas de una rejilla">sin corregir (1 de 378)</span>' in rows
     assert 'title="Holm entre las 23 configuraciones del estudio (p frente a la base emparejada)">corregida Holm 1,00 ✗</span>' in rows
     assert ">sin corregir (1 de 2000)</span>" in rows and ">corregida q 1,00 ✗</span>" in rows   # de un bot sin «tipo»
-    assert "Holm entre las 23 configuraciones del e…" not in rows and "fam X · Salidas, stops y objetivos · costes del backtest" in rows
-    assert 'title="Costes: ' + "backtest con la gestión del paper" in rows and "costes del laboratorio (sin funding)" in rows
+    assert "Holm entre las 23 configuraciones del e…" not in rows and "fam X · Salidas, stops y objetivos · neto de costes del backtest" in rows
+    assert 'title="Costes con que se midió: ' + "backtest con la gestión del paper" in rows and "neto de costes del laboratorio (sin funding)" in rows
     assert "No hay un perfil de costes común" in r["foot"] and "(3)" in r["foot"]
     assert "todas las que entran en el ranking son frágiles" in r["vacio"]
     md = r["md"]
@@ -3274,6 +3306,68 @@ def test_ranking_correccion_costes_etag_y_en_marcha_sin_datos():
     assert "Ruptura V3: rango de apertura" in s["live"] and "sin datos del ranking" in s["live"] and "GET /api/ranking no existe" in s["live"]
     assert "Ruptura V3: rango de apertura · sin datos del ranking" in s["md"] and "Sin ranking" in s["md"]
     _sin_null(s["live"], s["md"])
+
+
+def test_ranking_en_porcentaje_neto_y_el_r_solo_en_el_detalle():
+    """Lo pidió el usuario: «en el ranking me tienes que hablar en neto, después de costes». La tabla va en «% cuenta al
+    día (neto)» y «% por operación (neto)» (= R × 0,5, con el 0,5 % de riesgo de bot/ranking.RIESGO_PCT), sin el R, que
+    solo sale en el detalle; ordenar por el % por operación es ordenar por el R. Cada fila dice con qué costes se midió
+    (y una sin costes, que no es neta; una sin perfil, que no se sabe). La nota, los títulos, la banda de la que está en
+    marcha y el resumen de Mando dicen que es neto de comisiones, deslizamiento y funding."""
+    from bot import ranking
+    page = HTML.read_text(encoding="utf-8")
+    nota = page.split('id="rkNota">', 1)[1].split("</div>", 1)[0]
+    assert "neto: después de comisiones, deslizamiento y funding" in nota and "el R medio × 0,5" in nota
+    assert "sin funding" in nota and "Cada fila dice con qué costes se midió" in nota
+    assert "<h2>Ranking de estrategias (% neto de costes)</h2>" in page and "<h2>Ranking de estrategias (% neto)</h2>" in page
+    r = run(RK + """
+      const L = fila("L", {posicion: 5, pct_dia: 0.04, origen: "laboratorio_2000", perfil_costes: "laboratorio", perfil_corto: "costes del laboratorio (sin funding)",
+        perfil_texto: "laboratorio de 2.000: 0,10 % por lado, 2 pb y 5-20 pb más en los stops, todo con el modelo del contado (también los cortos) y sin funding",
+        fuera: {n: 200, R: 0.06, gana_pct: 33}});
+      const N = fila("N", {posicion: 6, pct_dia: 0.03, perfil_costes: null, perfil_corto: null, perfil_texto: null, fuera: {n: 90, R: 0.9, gana_pct: 60}});
+      const SC = fila("SC", {posicion: 7, pct_dia: 0.02, perfil_costes: "sin_costes", perfil_corto: "sin costes", perfil_texto: "sin costes (solo para comparar)",
+        fuera: {n: 50, R: 0.04, gana_pct: 50}});
+      H.fetchReply = rkReply(rk([A, B, C, D, L, N, SC, E], {en_marcha: EM(D)})); H.open(); reset(); await loadApi();
+      S.tab = "ranking"; renderAll(true);
+      const out = {head: H.el("#rkHead").innerHTML, rows: H.el("#rkRows").innerHTML, live: H.el("#rkLive").innerHTML, sub: H.el("#rkSub").innerHTML,
+                   riesgo: RK_RIESGO_PCT};
+      const orden = () => ["A", "B", "C", "D", "L", "N", "SC"].map(i => [i, H.el("#rkRows").innerHTML.indexOf(`data-rk-sel="${i}"`)]).sort((x, y) => x[1] - y[1]).map(x => x[0]).join(",");
+      H.fire("click", {"data-rk-sort": "pct_op"}); renderAll(true); out.porOp = orden();
+      H.fire("click", {"data-rk-sort": "pos"}); renderAll(true);
+      H.fire("click", {"data-rk-sel": "L"}); renderAll(true); out.det = H.el("#rkRows").innerHTML;
+      S.tab = "mando"; renderAll(true); out.md = H.el("#mdRk").innerHTML; out.mdSub = H.el("#mdRkSub").textContent;
+      return out;""")
+    assert r["riesgo"] == ranking.RIESGO_PCT == 0.5
+    head = r["head"]
+    assert ">% cuenta al día (neto)</button>" in head and ">% por operación (neto)</button>" in head and "R/op." not in head
+    assert 'class="rk-sb w" data-rk-sort="pct_dia"' in head and "1R = el 0,5 % de riesgo por operación" in head
+    assert "neto de comisiones, deslizamiento y funding" in head
+    rows = r["rows"]
+    assert re.search(r"\d R\b", rows) is None and "R/op" not in rows
+    # % por operación = R × 0,5: A +0,30 R → +0,150 %; L +0,06 R → +0,030 %; N +0,90 R → +0,450 %
+    assert '<td class="r pos">+0,150 %</td>' in rows and '<td class="r pos">+0,030 %</td>' in rows and '<td class="r pos">+0,450 %</td>' in rows
+    assert "fam L · Laboratorio de 2.000 · neto de costes del laboratorio (sin funding)" in rows
+    assert "fam A · Réplicas del motor · neto de costes OKX EU con X-Perps" in rows
+    assert "fam N · Réplicas del motor · costes sin indicar" in rows and 'title="Su estudio no dice con qué costes se midió"' in rows
+    assert "fam SC · Réplicas del motor · sin costes: no es neto" in rows
+    assert 'title="Costes con que se midió: laboratorio de 2.000: 0,10 % por lado' in rows
+    assert r["porOp"] == "N,D,A,B,C,L,SC"   # de más a menos R por operación
+    det = r["det"]
+    fuera_det, dentro_det = det.split('<tr class="rk-det">', 1)
+    assert re.search(r"\d R\b", fuera_det) is None and re.search(r"\d R\b", dentro_det.split("</tr>", 1)[0])   # el R, solo en el detalle
+    for t in ("% de la cuenta al día (neto)", "+0,040 %", "% por operación (neto)", "+0,030 % (+0,06 R × 0,5 % de riesgo por operación)",
+              "+0,030 % de la cuenta por operación, neto (+0,06 R)", "Costes con que se midió", "sin funding"):
+        assert t in det, t
+    live = r["live"]
+    assert re.search(r"\d R\b", live) is None
+    assert "+0,050 % de la cuenta al día (neto)" in live and "+0,250 % por operación (neto) fuera de muestra" in live
+    assert "dentro +0,025 % por operación" in live and "Costes con que se midió: OKX EU con X-Perps" in live
+    assert "netas de comisiones, deslizamiento y funding" in r["sub"]
+    md = r["md"]
+    assert re.search(r"\d R\b", md) is None and ">+0,300 %/día</b>" in md and "+0,150 %/op." in md
+    assert "neto de costes OKX EU con X-Perps" in md and "Ruptura V3 · puesto 4 de 4 · neto de costes OKX EU con X-Perps" in md
+    assert "neto de comisiones, deslizamiento y funding" in r["mdSub"]
+    _sin_null(head, rows, det, live, md)
 
 
 # ---------------------------------------------------------------- Laboratorio vivo (docs/07, 13 y 14; docs/04 2.19)
@@ -3441,7 +3535,8 @@ def test_ranking_y_laboratorio_en_la_demostracion_son_ejemplos_marcados():
     rkd, lvd = json.loads(blob("rankingData")), json.loads(blob("labVivoData"))
     assert rkd["ejemplo"] is True and lvd["ejemplo"] is True and len(blob("rankingData")) + len(blob("labVivoData")) < 40_000
     assert all(re.fullmatch(r"h-\d{8}-\d{4}-[a-z0-9_-]{3,60}", h) for h in lvd["hipotesis"])
-    assert "Ordenado por beneficio fuera de muestra con costes; lo de arriba con poca muestra o frágil suele ser suerte." in page
+    assert ("Todo en % de la cuenta y neto: después de comisiones, deslizamiento y funding. Ordenado por % de la cuenta al "
+            "día fuera de muestra; lo de arriba con poca muestra o frágil suele ser suerte.") in page
     # el texto tal cual de cada bloque, como lo daría el navegador (textContent): se lee por el camino de siempre
     bloques = json.dumps({i: blob(i) for i in ("rankingData", "labVivoData")}, ensure_ascii=False)
     r = run(f"const B = {bloques};\n" + """document.getElementById = id => id in B ? {textContent: B[id]} : null;
@@ -3563,6 +3658,102 @@ def test_seis4r_nombre_descripcion_y_backtest():
           return H.el("#btS4rTop").innerHTML + H.el("#btS4rKpis").innerHTML;""", live=False)
         for t in ("Fuera de muestra gana", "Pero dentro de muestra pierde", "Frágil: es la mejor de 378 salidas",
                   "Lo que se llevan los costes", "por tu decisión", "sin cuenta X-Perps", "Fuera de muestra gana por los cortos"):
+            assert t in r2, t
+        _sin_null(r2)
+
+
+S4R3 = r"""
+const S4R3_P = {...S4R_P, sl_pct: 3, avg_hold_h: 59, preset: "seis4r3", nombre: "6 diarias 4R · stop 3 %: stop 3 %, objetivo 4R, hasta 7 días"};
+"""
+# Con la forma del resumen de scripts/replica_seis4r.py --preset seis4r3 y las cifras de docs/05, sección 26
+S4R3_BT = {"generated": 1793310000000, "split": 1755295200000, "sl_pct": 3.0, "nota": "Réplica del motor con SEIS4R3 <b>",
+           "nombre": "6 diarias 4R · stop 3 %: stop 3 %, objetivo 4R, hasta 7 días",
+           "params": {**S4R_BT["params"], "sl_pct": 3.0, "avg_hold_h": 59.0, "preset": "seis4r3"},
+           "fuera": {"n": 505, "mean_R": 0.0902, "win_rate": 0.33, "max_R": 3.93, "paper_R_funding": 0.0915, "op_jornada": 1.65,
+                     "salidas": {"stop": 343, "objetivo": 81, "tiempo": 81}, "horas_media": 72.0,
+                     "largos": {"n": 262, "mean_R": -0.05}, "cortos": {"n": 243, "mean_R": 0.28},
+                     "desde": 1755476100000, "hasta": 1792653300000, "curva_R": [[1755480600000, -1.0], [1792653300000, 45.55]],
+                     "max_dd_R": 30.4, "total_R": 45.55, "ganadoras_n": 167, "ganadoras_bajo_2R": 30, "ganadoras_bajo_1R": 12,
+                     "antes_de_costes": {"n": 505, "R_bruto": 0.179, "deslizamiento_R": -0.019, "comisiones_R": -0.0667,
+                                         "funding_R": -0.0013, "R_neto": 0.0915, "costes_R": -0.0875, "gana_bruto_pct": 34.1,
+                                         "op_jornada": 1.65, "cuenta_jornada_neto_pct": 0.0755},
+                     "perfiles": {"sin_costes": {"n": 505, "R": 0.179}, "backtest": {"n": 505, "R": 0.0902},
+                                  "okx_eu_con_xperps": {"n": 505, "R": 0.107}, "okx_eu_sin_xperps": {"n": 262, "R": -0.382}}},
+           "dentro": {"n": 1019, "mean_R": 0.0881, "win_rate": 0.29, "paper_R_funding": 0.0875, "desde": 1698624900000,
+                      "hasta": 1755487200000, "curva_R": [[1698646140000, 1.0], [1755487200000, 89.2]], "max_dd_R": 61.0,
+                      "largos": {"n": 560, "mean_R": 0.12}, "cortos": {"n": 459, "mean_R": 0.05},
+                      "antes_de_costes": {"n": 1019, "R_bruto": 0.159, "deslizamiento_R": -0.017, "comisiones_R": -0.0545,
+                                          "funding_R": 0.0005, "R_neto": 0.0875, "costes_R": -0.0715, "op_jornada": 2.18,
+                                          "cuenta_jornada_neto_pct": 0.0954},
+                      "perfiles": {"okx_eu_con_xperps": {"n": 1019, "R": 0.106}, "okx_eu_sin_xperps": {"n": 560, "R": -0.007}}}}
+
+
+def test_seis4r3_nombre_descripcion_y_backtest():
+    """Con el preset «seis4r3» («6 diarias 4R · stop 3 %», la de la cartera paper desde el 29-10-2026) la web la nombra
+    como apertura.PRESETS, la explica en Mercado y aperturas y abre arriba su backtest (leído de /api/backtest/impulso)
+    con lo que es verdad de ella: gana en los dos tramos, pero se eligió mirándolos entre 50 combinaciones (no las 378
+    salidas de la de stop 2 %). La de stop 2 % pasa a medida y la Ruptura V3, a anterior. Con «seis4r» en marcha, la de
+    stop 3 % sale abajo como medida. Sin su resumen no se inventa nada: ni su resultado ni cuántas hace al día."""
+    from bot import apertura
+    page = HTML.read_text(encoding="utf-8")
+    r = run("const now = Date.now();" + FIAB + SEIS2 + RUP3 + S4R + S4R3 + f"""S.btImp = {{impulso: {json.dumps(IMP_BT)}, lab: null, seis: {json.dumps(SEIS_BT)}, seis2: {json.dumps(SEIS2_BT)}, ruptura3: {json.dumps(RUP3_BT)}, seis4r: {json.dumps(S4R_BT)}, seis4r3: {json.dumps(S4R3_BT)}}};
+      const out = {{nm: PRESET_NM, tuyo: PRESET_TUYO}};
+      for (const [k, m] of [["s4r3", opn(S4R3_P, {{params_source: "usuario"}})], ["s4r", opn(S4R_P, {{params_source: "usuario"}})]]){{
+        S.openings = m; S.tab = "bt"; S.btSig = null; renderAll(true);
+        out[k] = {{top3: !H.el("#btS4r3TopP").hidden, alt3: !H.el("#btS4r3AltP").hidden, top2: !H.el("#btS4rTopP").hidden, alt2: !H.el("#btS4rAltP").hidden,
+          h3: H.el("#btS4r3Top").innerHTML + H.el("#btS4r3Alt").innerHTML + H.el("#btS4r3Kpis").innerHTML,
+          h2: H.el("#btS4rTop").innerHTML + H.el("#btS4rAlt").innerHTML, r3title: H.el("#btRup3Title").textContent, r3: H.el("#btRup3").innerHTML,
+          e2: H.el("#btLiveTitle").textContent, e2sub: H.el("#btLiveSub").textContent}};
+        S.tab = "market"; renderAll(true); out[k].sub = H.el("#openSub").textContent;
+        S.tab = "trades"; renderAll(true); out[k].st = H.el("#tradesStrat").innerHTML; }}
+      S.btImp = {{impulso: null, lab: null, seis: null, seis2: null, ruptura3: null, seis4r: null, seis4r3: null}}; S.openings = opn(S4R3_P);
+      S.tab = "bt"; S.btSig = null; renderAll(true); out.vacio = {{top: !H.el("#btS4r3TopP").hidden, html: H.el("#btS4r3Top").innerHTML}};
+      S.tab = "trades"; renderAll(true); out.vacio.st = H.el("#tradesStrat").innerHTML;
+      return out;""", live=False)
+    assert r["nm"]["seis4r3"] == apertura.PRESETS["seis4r3"]["nombre"] and r["nm"]["seis4r"] == apertura.PRESETS["seis4r"]["nombre"]
+    assert r["tuyo"]["seis4r3"] == "6 diarias 4R · stop 3 %"
+    a, b = r["s4r3"], r["s4r"]
+    assert a["top3"] and not a["alt3"] and not a["top2"] and a["alt2"]
+    h = a["h3"]
+    for t in ("Fuera de muestra gana", "+0,09 R por operación en 505 operaciones", "(+0,09 R con funding)", "1,65 por jornada",
+              "≈ +0,08 % de la cuenta por jornada", "Dentro de muestra también gana, pero no es una prueba aparte", "+0,09 R en 1019 operaciones",
+              "Se eligió mirando los dos tramos: que gane en los dos no la confirma.", "Elegida después de ver los datos: una de 50.",
+              "ni Holm ni FDR", "No es una ventaja demostrada", "Fuera de muestra gana por los cortos", "cortos +0,28 R (243 op.) y largos -0,05 R (262 op.)",
+              "con los costes de hoy del paper (OKX EU con X-Perps) da +0,11 R fuera y +0,11 R dentro",
+              "sin cuenta X-Perps (contado 0,35 % por lado y sin cortos) pierde: -0,38 R fuera y -0,01 R dentro",
+              "el objetivo de 4R (+12 %) se cobra en 16 % de las operaciones", "o gana 4R o pierde 1R", "stop 3,00 % y objetivo 4,0 R (+12,00 %)",
+              "como mucho 7 días", "Está en tu cartera paper por tu decisión", "Réplica del motor con SEIS4R3 &lt;b&gt;", "<small>Antes de costes</small>"):
+        assert t in h, t
+    assert "378" not in h and "Pero dentro de muestra" not in h and "--preset seis4r3" not in h   # está en marcha: no se ofrece activarla
+    assert "Frágil: es la mejor de 378 salidas" in a["h2"] and "Si la activas (scripts/activar_estrategia.py --preset seis4r)" in a["h2"]
+    assert a["r3title"].startswith("Estrategia anterior: Ruptura V3") and "hasta que pasaste a «6 diarias 4R»" in a["r3"]
+    assert a["e2"].startswith("Estrategia anterior (E2)") and "«6 diarias 4R · stop 3 %»" in a["e2sub"]
+    assert a["sub"].startswith("Modo impulso «6 diarias 4R · stop 3 %» (paper, por tu decisión)") and "stop 3 % y objetivo 4R (+12 %)" in a["sub"]
+    assert "en el backtest hizo ≈ 1,65 operaciones por jornada fuera de muestra (2,18 dentro)" in a["sub"]
+    st = a["st"]
+    assert "6 diarias 4R · stop 3 %: stop 3 %, objetivo 4R, hasta 7 días" in st and "preset 6 diarias 4R · stop 3 %" in st
+    assert "no llega a 6 al día: en el backtest hizo ≈ 1,65 operaciones por jornada fuera de muestra" in st
+    assert "+0,09 R por operación fuera de muestra" in st and "una de 50 combinaciones" in st and "378" not in st
+    # con «6 diarias 4R» (stop 2 %) en marcha, la de stop 3 % sale abajo, como medida, y se puede activar
+    assert b["top2"] and not b["alt2"] and not b["top3"] and b["alt3"]
+    assert "Si la activas (scripts/activar_estrategia.py --preset seis4r3)" in b["h3"] and "Elegida después de ver los datos: una de 50." in b["h3"]
+    assert b["sub"].startswith("Modo impulso «6 diarias 4R» (paper") and "«6 diarias 4R»" in b["e2sub"]
+    # sin su resumen: ni su resultado ni su frecuencia
+    v = r["vacio"]
+    assert v["top"] and "Esta demostración no trae el backtest de «6 diarias 4R · stop 3 %»." in v["html"]
+    assert "su backtest aún no ha llegado a la web" in v["st"] and "pierde" not in v["st"] and "hizo ≈" not in v["st"]
+    _sin_null(h, a["h2"], a["sub"], st, b["h3"], v["html"], v["st"])
+    # en directo, sin su resumen, se dice cómo se escribe
+    s = run(FIAB + S4R + S4R3 + """H.open(); reset();
+      S.btImp = {impulso: null, lab: null, seis: null, seis2: null, ruptura3: null, seis4r: null, seis4r3: null};
+      S.openings = opn(S4R3_P); S.tab = "bt"; S.btSig = null; renderAll(true); return H.el("#btS4r3Top").innerHTML;""")
+    assert ("Aún no hay backtest de «6 diarias 4R · stop 3 %»: lo escribe scripts/replica_seis4r.py --preset seis4r3 en "
+            "BACKTEST_DIR/seis4r3_resumen.json.") in s
+    if 'id="seis4r3Data"' in page:   # el resumen real incrustado (scripts/incrustar_backtest.py en el PC)
+        blob = page.split('<script type="application/json" id="seis4r3Data">', 1)[1].split("</script>", 1)[0]
+        r2 = run("const now = Date.now();" + FIAB + S4R + S4R3 + f"""S.btImp = {{impulso: null, lab: null, seis: null, seis2: null, ruptura3: null, seis4r: null, seis4r3: {blob}}}; S.openings = opn(S4R3_P); S.tab = "bt"; S.btSig = null; renderAll(true);
+          return H.el("#btS4r3Top").innerHTML + H.el("#btS4r3Kpis").innerHTML;""", live=False)
+        for t in ("Fuera de muestra", "Elegida después de ver los datos: una de 50.", "Lo que se llevan los costes", "por tu decisión", "sin cuenta X-Perps"):
             assert t in r2, t
         _sin_null(r2)
 

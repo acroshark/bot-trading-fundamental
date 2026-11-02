@@ -333,10 +333,10 @@ def velas_respuesta(get, coin: str, desde: int, hasta: int, tf: str) -> dict | N
             "recortada": a > a0, "n": len(rows), "velas": rows}
 
 
-# Datos incrustados de la demostración que en directo sobran (llegan por la API): el backtest, y los ejemplos del
-# ranking (rankingData) y del laboratorio vivo (labVivoData)
+# Datos incrustados de la demostración que en directo sobran (llegan por la API): el backtest (también seis4rData y
+# seis4r3Data, las dos «6 diarias 4R»), y los ejemplos del ranking (rankingData) y del laboratorio vivo (labVivoData)
 BT_BLOCK = re.compile(r'<script type="application/json" id="(?:bt(?:Open)?Data|impulsoData|seis2?Data|ruptura3Data'
-                      r'|seis4rData|rankingData|labVivoData)">.*?</script>', re.S)
+                      r'|seis4r3?Data|rankingData|labVivoData)">.*?</script>', re.S)
 
 
 def make_app(bus: Bus, health, services: Services | None = None) -> web.Application:
@@ -918,10 +918,10 @@ def make_app(bus: Bus, health, services: Services | None = None) -> web.Applicat
         return j(res)
 
     async def api_bt_impulso(_request: web.Request) -> web.Response:
-        """La estrategia del motor (E2, variante de 7 días), las de «6 diarias», «6 diarias v2», «Ruptura V3» y
-        «6 diarias 4R» y el resumen del laboratorio."""
+        """La estrategia del motor (E2, variante de 7 días), las de «6 diarias», «6 diarias v2», «Ruptura V3», «6 diarias
+        4R» y «6 diarias 4R · stop 3 %» y el resumen del laboratorio. 404 solo si no hay ninguno."""
         res = await asyncio.to_thread(resumen_backtest.load)
-        if all(res.get(k) is None for k in ("impulso", "lab", "seis", "seis2", "ruptura3", "seis4r")):
+        if all(res.get(k) is None for k in ("impulso", "lab", "seis", "seis2", "ruptura3", "seis4r", "seis4r3")):
             raise web.HTTPNotFound(text="Aún no hay backtest del motor: python -m bot.laboratorio y controles/compara_impulso.py")
         return j(res)
 

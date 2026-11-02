@@ -330,3 +330,64 @@ async def test_seis4r_en_la_ruta_y_en_la_demostracion(tmp_path, monkeypatch):
     async with TestClient(TestServer(make_app(Bus(store2), lambda: {}))) as client:
         assert (await client.get("/api/backtest/impulso")).status == 404
     store2.close()
+
+
+def _s4r3() -> dict:
+    """Con la forma del resumen de scripts/replica_seis4r.py --preset seis4r3 («6 diarias 4R · stop 3 %»)."""
+    d = _s4r()
+    d.update(sl_pct=3.0, nota="réplica del motor con SEIS4R3", nombre="6 diarias 4R · stop 3 %: stop 3 %, objetivo 4R, hasta 7 días",
+             params={**d["params"], "sl_pct": 3.0, "preset": "seis4r3"})
+    d["fuera"].update(mean_R=0.0902, paper_R_funding=0.0915, op_jornada=1.65)
+    d["dentro"].update(mean_R=0.0881, paper_R_funding=0.0875)
+    return d
+
+
+async def test_seis4r3_en_la_ruta_y_en_la_demostracion(tmp_path, monkeypatch):
+    """seis4r3_resumen.json («6 diarias 4R · stop 3 %», la de la cartera paper) sale en /api/backtest/impulso y
+    scripts/incrustar_backtest.py lo incrusta en la demostración (seis4r3Data) justo detrás de seis4rData (sin él, detrás
+    del último bloque); otra vez, lo reemplaza; en vivo, server.BT_BLOCK lo quita. Sin el resumen, la página tal cual."""
+    import importlib.util
+    from pathlib import Path
+    from bot import server
+    monkeypatch.setattr(config, "BACKTEST_DIR", tmp_path)
+    store = Store(tmp_path / "bot.db")
+    (tmp_path / rb.SEIS4R3_FILE).write_text(json.dumps(_s4r3()), encoding="utf-8")
+    assert rb.SEIS4R3_FILE == "seis4r3_resumen.json"
+    res = rb.load()
+    assert res["seis4r"] is None and res["seis4r3"]["params"]["preset"] == "seis4r3" and res["seis4r3"]["sl_pct"] == 3.0
+    async with TestClient(TestServer(make_app(Bus(store), lambda: {}))) as client:
+        r = await client.get("/api/backtest/impulso")   # solo con «6 diarias 4R · stop 3 %» ya responde
+        assert r.status == 200
+        j = await r.json()
+        assert j["seis4r3"]["fuera"]["mean_R"] == 0.0902 and j["seis4r3"]["fuera"]["op_jornada"] == 1.65
+    store.close()
+    root = Path(__file__).resolve().parents[1]
+    spec = importlib.util.spec_from_file_location("incrustar_backtest", root / "scripts" / "incrustar_backtest.py")
+    inc = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(inc)
+    page = tmp_path / "radar.html"
+    page.write_text('<html><!--BT--></html>', encoding="utf-8")
+    bt = tmp_path / "bt"
+    bt.mkdir()
+    (bt / "resultados.json").write_text(json.dumps({"strategies": []}), encoding="utf-8")
+    (bt / rb.SEIS4R3_FILE).write_text(json.dumps(_s4r3()), encoding="utf-8")
+    monkeypatch.setattr(inc, "PAGE", page)
+    monkeypatch.setattr(config, "BACKTEST_DIR", bt)
+    inc.main()                                         # sin seis4rData: detrás del último bloque (btData)
+    html = page.read_text(encoding="utf-8")
+    m5, m0 = inc.BLOCK_S4R3.search(html), inc.BLOCK.search(html)
+    assert m5 and '"preset":"seis4r3"' in m5.group(0) and m0.end() < m5.start() and not inc.BLOCK_S4R.search(html)
+    (bt / rb.SEIS4R_FILE).write_text(json.dumps(_s4r()), encoding="utf-8")
+    page.write_text('<html><!--BT--></html>', encoding="utf-8")
+    inc.main()                                         # con las dos: seis4r3Data justo detrás de seis4rData
+    html = page.read_text(encoding="utf-8")
+    m5, m4 = inc.BLOCK_S4R3.search(html), inc.BLOCK_S4R.search(html)
+    assert m5 and m4 and m4.end() < m5.start() and html[m4.end():m5.start()] == "\n"
+    assert '"preset":"seis4r"' in m4.group(0) and '"preset":"seis4r3"' not in m4.group(0)
+    inc.main()                                         # otra vez: se reemplaza
+    html = page.read_text(encoding="utf-8")
+    assert html.count('id="seis4r3Data"') == 1 and html.count('id="seis4rData"') == 1
+    live = server.BT_BLOCK.sub("<!--BT-->", html)
+    assert "seis4r3Data" not in live and "seis4rData" not in live   # en vivo llegan por /api/backtest/impulso
+    (bt / rb.SEIS4R3_FILE).unlink()                    # sin el resumen, la página tal cual
+    assert inc.incrustar_seis4r3("<html>x</html>") == "<html>x</html>"

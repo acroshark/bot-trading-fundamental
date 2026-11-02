@@ -42,6 +42,7 @@ import re
 import threading
 import time
 from datetime import date, datetime, timedelta
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -93,9 +94,10 @@ ID_RE = re.compile(r"^.{1,300}$", re.S)
 ORIGEN_RE = re.compile(r"^[a-z0-9_]{1,40}$")
 DIA_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 LAB_VIVO_ID = re.compile(r"^h-(\d{4})(\d{2})(\d{2})-")
-NOTA = ("Ordenado por beneficio fuera de muestra con costes: % de la cuenta por jornada con 0,5 % de riesgo por "
-        "operación, sin interés compuesto. Entran las que no pierden fuera de muestra. Cada fila va con los costes de su "
-        "estudio, que no son los mismos para todas. Lo de arriba con poca muestra o frágil suele ser suerte: ninguna ha "
+NOTA = ("Ordenado por beneficio fuera de muestra, neto de comisiones, deslizamiento y funding: % de la cuenta por "
+        "jornada con 0,5 % de riesgo por operación (1R = 0,5 % de la cuenta), sin interés compuesto. Entran las que no "
+        "pierden fuera de muestra. Cada fila va con los costes de su estudio, que no son los mismos para todas (el "
+        "laboratorio de 2.000 no lleva funding). Lo de arriba con poca muestra o frágil suele ser suerte: ninguna ha "
         "demostrado ventaja y nada de esto promete rentabilidad (todo es paper).")
 CRITERIO = {"orden": "pct_dia (fuera de muestra, neto de costes) de mayor a menor; desempate op_dia y n fuera",
             "entra": "fuera.R ≥ 0 (no pierde fuera de muestra, neto de costes)",
@@ -144,6 +146,14 @@ def _n(x, d: int = 2, signo: bool = False) -> str:
         return "–"
     s = f"{v:+.{d}f}" if signo else f"{v:.{d}f}"
     return s.replace("-", "−").replace(".", ",")
+
+
+def _pct_op(R: float) -> str:
+    """El R por operación en % de la cuenta (R × RIESGO_PCT), con signo y 3 decimales, redondeado como la web (el
+    decimal más corto y la mitad hacia fuera, como toLocaleString): el texto del bot y las cifras de la web dicen lo mismo
+    también en los empates (−0,075 R → −0,038 %)."""
+    q = Decimal(repr(float(R) * RIESGO_PCT)).quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)
+    return _n(float(q), 3, True)
 
 
 def _dia(x) -> date | None:
@@ -876,6 +886,8 @@ class Ranking:
             self._guardar_estado()
 
     def _en_marcha(self, f: dict | None, act: dict, n_ranking: int) -> dict:
+        """La que está en marcha, con su puesto o por qué no entra. El texto habla en % de la cuenta por operación y neto
+        de costes (R × RIESGO_PCT), como la web: el usuario pidió que el ranking le hable en neto, después de costes."""
         preset = act.get("preset")
         out = {"id": f["id"] if f else PRESET_FILA.get(preset), "preset": preset,
                "nombre": (f or {}).get("nombre") or act.get("nombre"), "desde": act.get("desde"),
@@ -894,11 +906,13 @@ class Ranking:
         elif R is None:
             out["texto"] = "Fuera del ranking: sin medida fuera de muestra"
         elif R < 0:
-            out["texto"] = f"Fuera del ranking: pierde fuera de muestra ({_n(R, 3, True)} R por operación)"
+            out["texto"] = (f"Fuera del ranking: pierde fuera de muestra ({_pct_op(R)} % de la cuenta por "
+                            "operación, neto de costes)")
         else:   # no pierde, pero no se puede poner en su puesto (sin operaciones, o sin las de cada jornada)
             falta = ("no tiene operaciones fuera de muestra" if not fu.get("n")
                      else "le faltan las operaciones por jornada para calcular su % de la cuenta al día")
-            out["texto"] = f"Fuera del ranking: no pierde ({_n(R, 3, True)} R por operación), pero {falta}"
+            out["texto"] = (f"Fuera del ranking: no pierde ({_pct_op(R)} % de la cuenta por operación, "
+                            f"neto de costes), pero {falta}")
         return out
 
     def resultado(self, vivo: dict | None = None) -> dict:
