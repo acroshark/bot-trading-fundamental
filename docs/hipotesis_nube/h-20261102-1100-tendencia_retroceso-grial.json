@@ -11,9 +11,21 @@
   "por_que_ahora": "Es la familia «tendencia_retroceso» que docs/07 (6.6) dejó prevista para la fase 2 antes de medir nada; ninguna de las 31 familias entra en la reanudación tras un retroceso a la media.",
   "por_que_vale_con_costes": "Busca la continuación de una tendencia de 4 h, que dura días: el cerrojo se activa a 3R (al menos 4,5 % con el stop mínimo de 1,5 %) y desde ahí sigue a 2R, así que las que salen bien recorren varios puntos y el coste de ida y vuelta (≈ 0,24 %) pesa poco. El stop va detrás del mínimo del retroceso: si pasa del 5 %, la operación no entra.",
   "fuentes": [
-   {"tipo": "libro", "cita": "Connors, L. A. y Raschke, L. B. (1995). Street Smarts: High Probability Short-Term Trading Strategies. M. Gordon Publishing Group (capítulo «The Holy Grail»).", "nota": "ADX(14) por encima de 30, retroceso a la EMA de 20 y compra por encima del máximo de la barra previa, con el stop en el mínimo del retroceso. Aquí, en barras de 4 h (y de 1 h en V2), con el cierre como confirmación."},
-   {"tipo": "libro", "cita": "Wilder, J. W. (1978). New Concepts in Technical Trading Systems. Trend Research.", "nota": "El ADX y los indicadores direccionales +DI y −DI."},
-   {"tipo": "articulo", "cita": "Liu, Y. y Tsyvinski, A. (2021). Risks and Returns of Cryptocurrency. The Review of Financial Studies, 34(6).", "nota": "El momento de series temporales en cripto."}
+   {
+    "tipo": "libro",
+    "cita": "Connors, L. A. y Raschke, L. B. (1995). Street Smarts: High Probability Short-Term Trading Strategies. M. Gordon Publishing Group (capítulo «The Holy Grail»).",
+    "nota": "ADX(14) por encima de 30, retroceso a la EMA de 20 y compra por encima del máximo de la barra previa, con el stop en el mínimo del retroceso. Aquí, en barras de 4 h (y de 1 h en V2), con el cierre como confirmación."
+   },
+   {
+    "tipo": "libro",
+    "cita": "Wilder, J. W. (1978). New Concepts in Technical Trading Systems. Trend Research.",
+    "nota": "El ADX y los indicadores direccionales +DI y −DI."
+   },
+   {
+    "tipo": "articulo",
+    "cita": "Liu, Y. y Tsyvinski, A. (2021). Risks and Returns of Cryptocurrency. The Review of Financial Studies, 34(6).",
+    "nota": "El momento de series temporales en cripto."
+   }
   ],
   "prediccion": "Entre 0,3 y 0,8 señales al día con las 4 monedas en 4 h (unas cuatro veces más en 1 h, V2), a cualquier hora. Ganadoras del 35 al 45 %, con pocas de muchos R gracias al cerrojo; mejor con ADX ≥ 30 que con ≥ 25 (V3) y con la tendencia diaria de BTC a favor (V4). Correlación diaria baja con el impulso de las aperturas.",
   "falsacion": "Se descarta si fuera de muestra no bate a su base emparejada, si depende de sus 5 mayores operaciones o de su mejor semana, o si no aguanta los estreses de costes. Contradice el mecanismo, aunque gane, que con ADX ≥ 25 vaya igual o mejor que con ≥ 30 (la fuerza de la tendencia no importaría) o que la horquilla de 3R (V6) gane más que el cerrojo (no habría tendencia que dejar correr).",
@@ -33,31 +45,144 @@
    "falsacion": "base emparejada (B1) y las variantes V3 y V6, que el mecanismo predice peores"
   }
  },
- "datos": ["velas_1m"],
- "universo": {"monedas": ["BTC", "ETH", "SOL", "XRP"], "momento": "continuo"},
- "variantes": [
-  {"id": "V1", "texto": "La base: 4 h, ADX ≥ 30, reanudación en ≤ 3 barras, cerrojo a 3R y seguimiento a 2R",
-   "params": {"tf_min": 240, "adx_min": 30.0, "espera": 3},
-   "salida": {"tipo": "C", "sl": "estructural", "sl_max": 5.0, "lock_r": 3.0, "trail_r": 2.0, "suelo": "F", "max_hold_h": 72, "max_hold_active_h": 168}},
-  {"id": "V2", "texto": "Barras de 1 h (más señales, tramos más cortos)",
-   "params": {"tf_min": 60, "adx_min": 30.0, "espera": 3},
-   "salida": {"tipo": "C", "sl": "estructural", "sl_max": 5.0, "lock_r": 3.0, "trail_r": 2.0, "suelo": "F", "max_hold_h": 72, "max_hold_active_h": 168}},
-  {"id": "V3", "texto": "ADX ≥ 25 (tendencias menos fuertes)",
-   "params": {"tf_min": 240, "adx_min": 25.0, "espera": 3},
-   "salida": {"tipo": "C", "sl": "estructural", "sl_max": 5.0, "lock_r": 3.0, "trail_r": 2.0, "suelo": "F", "max_hold_h": 72, "max_hold_active_h": 168}},
-  {"id": "V4", "texto": "Con la tendencia diaria de BTC a favor",
-   "params": {"tf_min": 240, "adx_min": 30.0, "espera": 3, "regimen_btc": "a_favor"},
-   "salida": {"tipo": "C", "sl": "estructural", "sl_max": 5.0, "lock_r": 3.0, "trail_r": 2.0, "suelo": "F", "max_hold_h": 72, "max_hold_active_h": 168}},
-  {"id": "V5", "texto": "Salida A: la mitad en 3R y la otra mitad con el cerrojo",
-   "params": {"tf_min": 240, "adx_min": 30.0, "espera": 3},
-   "salida": {"tipo": "A", "sl": "estructural", "sl_max": 5.0, "trail_r": 2.0, "suelo": "F", "max_hold_h": 72, "max_hold_active_h": 168}},
-  {"id": "V6", "texto": "Horquilla de 3R a 72 h (sin dejar correr)",
-   "params": {"tf_min": 240, "adx_min": 30.0, "espera": 3},
-   "salida": {"tipo": "H", "sl": "estructural", "sl_max": 5.0, "target_r": 3.0, "max_hold_h": 72}}
+ "datos": [
+  "velas_1m"
  ],
- "reglas": {"riesgo_pct": 0.5, "max_entradas_dia": 6, "max_riesgo_dia_pct": 3.0, "largos": "spot", "cortos": "perp", "una_por_moneda": true},
+ "universo": {
+  "monedas": [
+   "BTC",
+   "ETH",
+   "SOL",
+   "XRP"
+  ],
+  "momento": "continuo"
+ },
+ "variantes": [
+  {
+   "id": "V1",
+   "texto": "La base: 4 h, ADX ≥ 30, reanudación en ≤ 3 barras, cerrojo a 3R y seguimiento a 2R",
+   "params": {
+    "tf_min": 240,
+    "adx_min": 30.0,
+    "espera": 3
+   },
+   "salida": {
+    "tipo": "C",
+    "sl": "estructural",
+    "sl_max": 5.0,
+    "lock_r": 3.0,
+    "trail_r": 2.0,
+    "suelo": "F",
+    "max_hold_h": 72,
+    "max_hold_active_h": 168
+   }
+  },
+  {
+   "id": "V2",
+   "texto": "Barras de 1 h (más señales, tramos más cortos)",
+   "params": {
+    "tf_min": 60,
+    "adx_min": 30.0,
+    "espera": 3
+   },
+   "salida": {
+    "tipo": "C",
+    "sl": "estructural",
+    "sl_max": 5.0,
+    "lock_r": 3.0,
+    "trail_r": 2.0,
+    "suelo": "F",
+    "max_hold_h": 72,
+    "max_hold_active_h": 168
+   }
+  },
+  {
+   "id": "V3",
+   "texto": "ADX ≥ 25 (tendencias menos fuertes)",
+   "params": {
+    "tf_min": 240,
+    "adx_min": 25.0,
+    "espera": 3
+   },
+   "salida": {
+    "tipo": "C",
+    "sl": "estructural",
+    "sl_max": 5.0,
+    "lock_r": 3.0,
+    "trail_r": 2.0,
+    "suelo": "F",
+    "max_hold_h": 72,
+    "max_hold_active_h": 168
+   }
+  },
+  {
+   "id": "V4",
+   "texto": "Con la tendencia diaria de BTC a favor",
+   "params": {
+    "tf_min": 240,
+    "adx_min": 30.0,
+    "espera": 3,
+    "regimen_btc": "a_favor"
+   },
+   "salida": {
+    "tipo": "C",
+    "sl": "estructural",
+    "sl_max": 5.0,
+    "lock_r": 3.0,
+    "trail_r": 2.0,
+    "suelo": "F",
+    "max_hold_h": 72,
+    "max_hold_active_h": 168
+   }
+  },
+  {
+   "id": "V5",
+   "texto": "Salida A: la mitad en 3R y la otra mitad con el cerrojo",
+   "params": {
+    "tf_min": 240,
+    "adx_min": 30.0,
+    "espera": 3
+   },
+   "salida": {
+    "tipo": "A",
+    "sl": "estructural",
+    "sl_max": 5.0,
+    "trail_r": 2.0,
+    "suelo": "F",
+    "max_hold_h": 72,
+    "max_hold_active_h": 168
+   }
+  },
+  {
+   "id": "V6",
+   "texto": "Horquilla de 3R a 72 h (sin dejar correr)",
+   "params": {
+    "tf_min": 240,
+    "adx_min": 30.0,
+    "espera": 3
+   },
+   "salida": {
+    "tipo": "H",
+    "sl": "estructural",
+    "sl_max": 5.0,
+    "target_r": 3.0,
+    "max_hold_h": 72
+   }
+  }
+ ],
+ "reglas": {
+  "riesgo_pct": 0.5,
+  "max_entradas_dia": 6,
+  "max_riesgo_dia_pct": 3.0,
+  "largos": "spot",
+  "cortos": "perp",
+  "una_por_moneda": true
+ },
  "prioridad": 3,
- "frecuencia_esperada": {"op_dia": 0.4, "como": "estimación del coordinador sin datos reales (no se ha contado ninguna señal): la cuenta la hace A9"},
+ "frecuencia_esperada": {
+  "op_dia": 0.4,
+  "como": "estimación del coordinador sin datos reales (no se ha contado ninguna señal): la cuenta la hace A9"
+ },
  "cumple_reglas": true,
  "fuera_de_reglas": false,
  "exploratoria": false,

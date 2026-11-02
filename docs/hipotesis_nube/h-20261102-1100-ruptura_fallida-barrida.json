@@ -11,10 +11,26 @@
   "por_que_ahora": "El apalancamiento en perpetuos sigue alto y los extremos de varios días son los niveles que más se miran para operar rupturas: sus fallos son justo lo que esta regla opera.",
   "por_que_vale_con_costes": "Busca el recorrido de un rango de dos días, no unos pb: el stop va detrás de la barrida (como mínimo 1,5 %) y la horquilla pide 3R (al menos 4,5 % bruto), un movimiento que estas cuatro monedas hacen a menudo en uno o dos días. El coste de ida y vuelta (≈ 0,24 % en contado, menos en X-Perps) es menos del 6 % de ese objetivo. Con la salida OBJ, el libro solo deja entrar si el otro lado del rango da ≥ 2R y ≥ 3 % neto.",
   "fuentes": [
-   {"tipo": "libro", "cita": "Connors, L. A. y Raschke, L. B. (1995). Street Smarts: High Probability Short-Term Trading Strategies. M. Gordon Publishing Group (capítulos «Turtle Soup» y «Turtle Soup Plus One»).", "nota": "La regla original: comprar cuando el precio hace un mínimo de 20 días (con el anterior hecho hace ≥ 4 días) y vuelve por encima de ese mínimo. Aquí, en velas de 1 h y ventanas de 24 a 96 h, con el cierre como confirmación."},
-   {"tipo": "articulo", "cita": "Osler, C. L. (2003). Currency Orders and Exchange Rate Dynamics: An Explanation for the Predictive Success of Technical Analysis. The Journal of Finance, 58(5).", "nota": "Las órdenes stop se amontonan justo detrás de los niveles visibles y aceleran el precio cuando se cruzan."},
-   {"tipo": "articulo", "cita": "Osler, C. L. (2005). Stop-loss orders and price cascades in currency markets. Journal of International Money and Finance, 24(2).", "nota": "Las cascadas de stops: el movimiento que provocan no es información."},
-   {"tipo": "libro", "cita": "Faith, C. (2007). Way of the Turtle. McGraw-Hill.", "nota": "Las reglas de ruptura de las «tortugas», las que la Turtle Soup opera a la contra cuando fallan."}
+   {
+    "tipo": "libro",
+    "cita": "Connors, L. A. y Raschke, L. B. (1995). Street Smarts: High Probability Short-Term Trading Strategies. M. Gordon Publishing Group (capítulos «Turtle Soup» y «Turtle Soup Plus One»).",
+    "nota": "La regla original: comprar cuando el precio hace un mínimo de 20 días (con el anterior hecho hace ≥ 4 días) y vuelve por encima de ese mínimo. Aquí, en velas de 1 h y ventanas de 24 a 96 h, con el cierre como confirmación."
+   },
+   {
+    "tipo": "articulo",
+    "cita": "Osler, C. L. (2003). Currency Orders and Exchange Rate Dynamics: An Explanation for the Predictive Success of Technical Analysis. The Journal of Finance, 58(5).",
+    "nota": "Las órdenes stop se amontonan justo detrás de los niveles visibles y aceleran el precio cuando se cruzan."
+   },
+   {
+    "tipo": "articulo",
+    "cita": "Osler, C. L. (2005). Stop-loss orders and price cascades in currency markets. Journal of International Money and Finance, 24(2).",
+    "nota": "Las cascadas de stops: el movimiento que provocan no es información."
+   },
+   {
+    "tipo": "libro",
+    "cita": "Faith, C. (2007). Way of the Turtle. McGraw-Hill.",
+    "nota": "Las reglas de ruptura de las «tortugas», las que la Turtle Soup opera a la contra cuando fallan."
+   }
   ],
   "prediccion": "Entre 0,5 y 1,5 señales al día con las 4 monedas, repartidas por todas las horas (no se concentran en las aperturas). Ganadoras del 35 al 45 % con la horquilla de 3R; el R medio sube con niveles más viejos (V3, 96 h, frente a V2, 24 h) y con volumen en la barrida (V4). Correlación diaria baja con el impulso de las aperturas («6 diarias») y negativa con la ruptura del canal.",
   "falsacion": "Se descarta si fuera de muestra no bate a su base emparejada (el sentido al azar en las mismas horas, monedas y stops), si lo que gana depende de sus 5 mayores operaciones o de su mejor semana, o si no aguanta el estrés de deslizamiento y stops (SOL y XRP tienen menos libro en OKX). Contradice el mecanismo, aunque gane, que las barridas con volumen (V4) vayan peor que todas o que la ventana de 24 h vaya mejor que la de 96 h: entonces no son los stops de los niveles viejos.",
@@ -36,31 +52,126 @@
    "falsacion": "base emparejada (B1) y las variantes V3 y V4, que el mecanismo predice mejores"
   }
  },
- "datos": ["velas_1m"],
- "universo": {"monedas": ["BTC", "ETH", "SOL", "XRP"], "momento": "continuo"},
- "variantes": [
-  {"id": "V1", "texto": "La base: nivel de 48 h, vuelve dentro en ≤ 3 h, horquilla de 3R a 72 h",
-   "params": {"horas": 48, "velas_max": 3},
-   "salida": {"tipo": "H", "sl": "estructural", "sl_max": 5.0, "target_r": 3.0, "max_hold_h": 72}},
-  {"id": "V2", "texto": "Ventana de 24 h (niveles más recientes, más señales)",
-   "params": {"horas": 24, "velas_max": 3},
-   "salida": {"tipo": "H", "sl": "estructural", "sl_max": 5.0, "target_r": 3.0, "max_hold_h": 72}},
-  {"id": "V3", "texto": "Ventana de 96 h (niveles más viejos, menos señales)",
-   "params": {"horas": 96, "velas_max": 3},
-   "salida": {"tipo": "H", "sl": "estructural", "sl_max": 5.0, "target_r": 3.0, "max_hold_h": 72}},
-  {"id": "V4", "texto": "Solo barridas con volumen ≥ 1,5 × la mediana de 30 días",
-   "params": {"horas": 48, "velas_max": 3, "vol_x": 1.5},
-   "salida": {"tipo": "H", "sl": "estructural", "sl_max": 5.0, "target_r": 3.0, "max_hold_h": 72}},
-  {"id": "V5", "texto": "Objetivo en el otro lado de la ventana (OBJ), 72 h",
-   "params": {"horas": 48, "velas_max": 3},
-   "salida": {"tipo": "OBJ", "sl": "estructural", "sl_max": 5.0, "max_hold_h": 72}},
-  {"id": "V6", "texto": "Sin objetivo: cerrojo a 3R y seguimiento a 2R (dejar correr)",
-   "params": {"horas": 48, "velas_max": 3},
-   "salida": {"tipo": "C", "sl": "estructural", "sl_max": 5.0, "lock_r": 3.0, "trail_r": 2.0, "suelo": "F", "max_hold_h": 72, "max_hold_active_h": 168}}
+ "datos": [
+  "velas_1m"
  ],
- "reglas": {"riesgo_pct": 0.5, "max_entradas_dia": 6, "max_riesgo_dia_pct": 3.0, "largos": "spot", "cortos": "perp", "una_por_moneda": true},
+ "universo": {
+  "monedas": [
+   "BTC",
+   "ETH",
+   "SOL",
+   "XRP"
+  ],
+  "momento": "continuo"
+ },
+ "variantes": [
+  {
+   "id": "V1",
+   "texto": "La base: nivel de 48 h, vuelve dentro en ≤ 3 h, horquilla de 3R a 72 h",
+   "params": {
+    "horas": 48,
+    "velas_max": 3
+   },
+   "salida": {
+    "tipo": "H",
+    "sl": "estructural",
+    "sl_max": 5.0,
+    "target_r": 3.0,
+    "max_hold_h": 72
+   }
+  },
+  {
+   "id": "V2",
+   "texto": "Ventana de 24 h (niveles más recientes, más señales)",
+   "params": {
+    "horas": 24,
+    "velas_max": 3
+   },
+   "salida": {
+    "tipo": "H",
+    "sl": "estructural",
+    "sl_max": 5.0,
+    "target_r": 3.0,
+    "max_hold_h": 72
+   }
+  },
+  {
+   "id": "V3",
+   "texto": "Ventana de 96 h (niveles más viejos, menos señales)",
+   "params": {
+    "horas": 96,
+    "velas_max": 3
+   },
+   "salida": {
+    "tipo": "H",
+    "sl": "estructural",
+    "sl_max": 5.0,
+    "target_r": 3.0,
+    "max_hold_h": 72
+   }
+  },
+  {
+   "id": "V4",
+   "texto": "Solo barridas con volumen ≥ 1,5 × la mediana de 30 días",
+   "params": {
+    "horas": 48,
+    "velas_max": 3,
+    "vol_x": 1.5
+   },
+   "salida": {
+    "tipo": "H",
+    "sl": "estructural",
+    "sl_max": 5.0,
+    "target_r": 3.0,
+    "max_hold_h": 72
+   }
+  },
+  {
+   "id": "V5",
+   "texto": "Objetivo en el otro lado de la ventana (OBJ), 72 h",
+   "params": {
+    "horas": 48,
+    "velas_max": 3
+   },
+   "salida": {
+    "tipo": "OBJ",
+    "sl": "estructural",
+    "sl_max": 5.0,
+    "max_hold_h": 72
+   }
+  },
+  {
+   "id": "V6",
+   "texto": "Sin objetivo: cerrojo a 3R y seguimiento a 2R (dejar correr)",
+   "params": {
+    "horas": 48,
+    "velas_max": 3
+   },
+   "salida": {
+    "tipo": "C",
+    "sl": "estructural",
+    "sl_max": 5.0,
+    "lock_r": 3.0,
+    "trail_r": 2.0,
+    "suelo": "F",
+    "max_hold_h": 72,
+    "max_hold_active_h": 168
+   }
+  }
+ ],
+ "reglas": {
+  "riesgo_pct": 0.5,
+  "max_entradas_dia": 6,
+  "max_riesgo_dia_pct": 3.0,
+  "largos": "spot",
+  "cortos": "perp",
+  "una_por_moneda": true
+ },
  "prioridad": 2,
- "frecuencia_esperada": {"op_dia": 0.7, "como": "estimación del coordinador sin datos reales (no se ha contado ninguna señal): la cuenta la hace A9"},
+ "frecuencia_esperada": {
+  "op_dia": 0.7,
+  "como": "estimación del coordinador sin datos reales (no se ha contado ninguna señal): la cuenta la hace A9"
+ },
  "cumple_reglas": true,
  "fuera_de_reglas": false,
  "exploratoria": false,

@@ -4,8 +4,10 @@ derivan). Datos: noticias_3a (las historias en racimo con el triaje de la IA loc
 
 Al cierre de cada vela de 1 h (alineada a UTC):
 1. Movimiento: r = ln(C / C de hace «horas_mov» velas) y z = r / (σ × √horas_mov), con σ la desviación de los
-   rendimientos de 1 h de las 720 velas anteriores. Evento: |z| ≥ k por primera vez (por flanco), con las «horas_mov»
-   velas válidas, y no otro de la misma moneda hasta que pasen «horas_mov» velas (sería el mismo movimiento).
+   rendimientos de 1 h de las 720 velas anteriores. Evento: |z| ≥ k por primera vez (por flanco), con las velas del
+   movimiento y la de su base (la de hace «horas_mov» velas) válidas: tras un hueco de datos, la base sería el último
+   cierre antes del hueco y el movimiento, uno que nadie vio en esas horas. Un flanco a menos de «horas_mov» velas del
+   anterior de la misma moneda (dé señal o no) no decide: es el mismo movimiento, que la ventana móvil vuelve a ver.
 2. Noticias: las historias×moneda (las que nombran la moneda y, con generales «todas», las que no nombran ninguna:
    cripto en general y macro) en racimo de ≥ n medios que ya se podían usar en [decisión − ventana_h, decisión). No se
    mira su sentido (el de los titulares no anticipa: docs/05, sección 22): solo si las hay.
@@ -71,9 +73,10 @@ class ExtremoNoticias(Familia):
             tc = np.asarray(b.t_cierre)
             v0 = validas(b)
             ok = v0.copy()
-            for q in range(1, w):                       # las «horas_mov» velas del movimiento, válidas
+            for q in range(1, w + 1):                   # las velas del movimiento y la de su base, válidas
                 ok &= np.r_[np.zeros(q, bool), v0[:-q]]
             sd = ind.desv_previa(ind.retornos_log(cl), 720)
+            atr4 = atr_pct_en(m, c, 240, tc) if p["modo"] == "favor" else None   # una vez por moneda, no por evento
             with np.errstate(divide="ignore", invalid="ignore"):
                 r = np.r_[np.full(w, np.nan), np.log(cl[w:] / cl[:-w])]
                 z = r / (sd * np.sqrt(w))
@@ -82,9 +85,9 @@ class ExtremoNoticias(Familia):
             ts, ds, ss, obs, pr = [], [], [], [], []
             ultimo = -10 ** 9
             for i in np.flatnonzero(up | dn):
-                if i - ultimo < w:                      # el mismo movimiento
+                previo, ultimo = ultimo, i
+                if i - previo < w:                      # el mismo movimiento (cuenta desde el flanco anterior)
                     continue
-                ultimo = i
                 t = int(tc[i])
                 if np.searchsorted(t_todas, t, "left") == np.searchsorted(t_todas, t - GUARDA_MS, "left"):
                     continue                            # un hueco del histórico: no se sabe si había noticias
@@ -98,7 +101,7 @@ class ExtremoNoticias(Familia):
                     sl = abs(ext - cl[i]) / cl[i] * 100 + COLCHON_PCT
                     ob = abs(cl[i] - cl[i - w]) / cl[i] * 100 / max(SL_MIN, sl)
                 else:
-                    sl = 1.5 * float(atr_pct_en(m, c, 240, np.array([t], np.int64))[0])
+                    sl = 1.5 * float(atr4[i])
                     ob = np.nan
                 if not np.isfinite(sl) or sl <= 0:
                     continue

@@ -82,7 +82,28 @@ def test_un_nivel_reciente_no_vale(reglas):  # noqa: F811
     p = {"monedas": ["BTC"]}
     s = recorte_en_cada_senal(FAM, m, p, T0, T0 + len(c) * MIN)
     assert len(s) == 1 and s.t[0] == T0 + 3 * DAY + 7 * H   # solo la de las 05:00 (vuelve dentro en la vela de 06:00)
-    assert s.stop_pct[0] == pytest.approx((100 - 99 * (1 - R)) + 0.1, rel=1e-9)
+    sl = (100 - 99 * (1 - R)) + 0.1
+    assert s.stop_pct[0] == pytest.approx(sl, rel=1e-9) and sl < 1.5
+    assert s.objetivo_r[0] == pytest.approx(100 * R / 1.5, rel=1e-9)   # en R del stop del libro (subido a 1,5 %)
+
+
+def test_objetivo_y_stop_desde_la_vela_de_la_barrida(reglas):  # noqa: F811
+    """El objetivo es el otro lado de la ventana EN LA VELA DE LA BARRIDA (que aún ve el pico de la vela 34) y el stop,
+    el mínimo desde la barrida (98, más bajo que el de la vela que vuelve dentro, 98,5)."""
+    c = plano(4)
+    c[minuto(1, 10):minuto(1, 10, 30)] = 102.0  # pico en la vela 34: la ventana de la barrida (34 a 81) lo ve; la siguiente, no
+    c[minuto(1, 20):minuto(1, 21)] = 99.0       # el mínimo viejo
+    c[minuto(3, 10):minuto(3, 10, 30)] = 98.0   # la barrida (vela 82) …
+    c[minuto(3, 10, 30):minuto(3, 11, 30)] = 98.5   # … cierra fuera, y la vela 83 vuelve dentro a las 11:30
+    m = datos.Mercado(velas_mano(c))
+    p = {"monedas": ["BTC"]}
+    s = recorte_en_cada_senal(FAM, m, p, T0, T0 + len(c) * MIN)
+    assert len(s) == 1 and s.dir[0] == 1 and s.t[0] == T0 + 3 * DAY + 12 * H
+    b = m.barras("BTC", 60)
+    assert b.l[82] < b.l[83] and np.asarray(b.h[34:82]).max() > np.asarray(b.h[35:83]).max()   # el caso discrimina
+    sl = (100 - 98 * (1 - R)) + 0.1
+    assert s.stop_pct[0] == pytest.approx(sl, rel=1e-9)
+    assert s.objetivo_r[0] == pytest.approx((102 * (1 + R) - 100) / sl, rel=1e-9)
 
 
 def test_barrida_de_un_maximo_viejo_corto(reglas):  # noqa: F811

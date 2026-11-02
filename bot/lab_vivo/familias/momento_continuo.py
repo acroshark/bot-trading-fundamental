@@ -10,7 +10,8 @@ Al cierre de cada barra de tf_min (a las 00:00 UTC con las diarias), con L = ven
    favor); cerca de 0 o positivo: a saltos (pocas barras grandes y muchas en contra).
 3. Señal: |z| ≥ z_min e ID ≤ −id_min, en el sentido de PRET. «estado»: una decisión en cada barra mientras se cumpla
    (el libro solo entra con la moneda libre: vuelve a entrar tras una salida si la tendencia sigue); «flanco»: solo la
-   primera barra.
+   primera barra. Una barra sin datos (menos del 90 % de sus velas) no decide, pero tampoco parte la racha: el flanco
+   se mira sobre la condición.
 Stop: k_atr × ATR(14) diario (el último día UTC cerrado). Prioridad: −ID (lo más continuo primero)."""
 import numpy as np
 
@@ -79,10 +80,11 @@ class MomentoContinuo(Familia):
             with np.errstate(divide="ignore", invalid="ignore"):
                 z = pret / (sd * np.sqrt(L))
                 continuo = idd <= -p["id_min"] + 1e-12
-                up = ok & np.isfinite(z) & (z >= p["z_min"]) & continuo
-                dn = ok & np.isfinite(z) & (z <= -p["z_min"]) & continuo
-            if p["modo"] == "flanco":
+                up = np.isfinite(z) & (z >= p["z_min"]) & continuo
+                dn = np.isfinite(z) & (z <= -p["z_min"]) & continuo
+            if p["modo"] == "flanco":   # el flanco, sobre la condición: una barra sin datos no parte la racha en dos
                 up, dn = flancos_dobles(up, dn)
+            up, dn = up & ok, dn & ok
             sel = np.flatnonzero(up | dn)
             if not len(sel):
                 continue

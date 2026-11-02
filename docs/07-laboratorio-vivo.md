@@ -2205,7 +2205,7 @@ v1, los cupos, el catálogo de salidas ni las familias que ya había.
 |---|---|---|---|
 | `ruptura_fallida` | Velas de 1 h. Una vela perfora el mínimo (o el máximo) de las `horas` anteriores, hecho hace ≥ 20 % de la ventana, y en esa vela o las `velas_max` − 1 siguientes cierra otra vez dentro: a la contra. Stop detrás de la barrida + 0,1 %. Con la salida OBJ, el objetivo es el otro lado de la ventana. | `horas` {24, 48, 96}; `velas_max` {1, 3, 6}; filtro propio `vol_x` {—; 1,5; 2} (volumen de la vela de la barrida frente a la mediana de 30 días) | Connors y Raschke (1995), «Turtle Soup»; Osler (2003 y 2005) |
 | `tendencia_retroceso` | Barras de 4 h (o 1 h). ADX(14) ≥ `adx_min` con el DI a favor; la primera barra que toca la EMA(20) y, en las `espera` barras siguientes, el primer cierre más allá del extremo de la barra anterior: a favor. Stop detrás del retroceso + 0,1 %. Es la `tendencia_retroceso` prevista en 6.6. | `tf_min` {60, 240}; `adx_min` {25, 30}; `espera` {3, 6} | Connors y Raschke (1995), «Holy Grail»; Wilder (1978) |
-| `extremo_noticias` | Velas de 1 h. |z| ≥ `k` del movimiento de `horas_mov` h (σ de las 720 h previas). «sin»: solo si no hay historias de la moneda (ni generales) en las `ventana_h` previas; «con»: solo si las hay; «da_igual»: todas (el control). Sentido «contra» o «favor». Sin ninguna historia en 24 h (un hueco del histórico) no decide. A la contra: stop detrás del extremo + 0,2 % y, con OBJ, el objetivo es deshacer el movimiento; a favor: 1,5 × ATR(14) de 4 h. Datos: `noticias_3a`. | `noticias` {sin, con, da_igual}; `modo` {contra, favor}; `horas_mov` {1, 4}; `k` {3, 4}; `ventana_h` {6, 12}; `n` {2, 3}; `generales` {todas, no} | Chan (2003); Savor (2012) |
+| `extremo_noticias` | Velas de 1 h. |z| ≥ `k` del movimiento de `horas_mov` h (σ de las 720 h previas), con sus velas y la de su base válidas (tras un hueco de datos no hay movimiento que medir). «sin»: solo si no hay historias de la moneda (ni generales) en las `ventana_h` previas; «con»: solo si las hay; «da_igual»: todas (el control). Sentido «contra» o «favor». Sin ninguna historia en 24 h (un hueco del histórico) no decide. A la contra: stop detrás del extremo + 0,2 % y, con OBJ, el objetivo es deshacer el movimiento; a favor: 1,5 × ATR(14) de 4 h. Datos: `noticias_3a`. | `noticias` {sin, con, da_igual}; `modo` {contra, favor}; `horas_mov` {1, 4}; `k` {3, 4}; `ventana_h` {6, 12}; `n` {2, 3}; `generales` {todas, no} | Chan (2003); Savor (2012) |
 | `momento_continuo` | Diario a las 00:00 UTC (o cada 4 h). z del rendimiento de `ventana_d` días ≥ `z_min` y discreción de la información ID ≤ −`id_min` (la mayoría de las barras a favor): a favor. «estado»: cada barra mientras se cumpla; «flanco»: solo la primera. Stop `k_atr` × ATR(14) diario. | `tf_min` {240, 1440}; `ventana_d` {14, 28}; `z_min` {0,5; 1}; `id_min` {0,1; 0,2; 0,3}; `modo`; `k_atr` {0,5; 0,75; 1} | Da, Gurun y Warachka (2014), «Frog in the Pan» |
 
 - **Solo `extremo_noticias` declara `noticias_3a`.** La A6 con datos (`etapas.admision`) mira la familia: si las otras
@@ -2221,10 +2221,13 @@ v1, los cupos, el catálogo de salidas ni las familias que ya había.
 |---|---|---|
 | `h-20261102-1100-ruptura_fallida-barrida` | V1 nivel de 48 h, vuelve dentro en ≤ 3 h, horquilla de 3R a 72 h con el stop estructural; V2 24 h; V3 96 h; V4 volumen ≥ 1,5; V5 OBJ (el otro lado del rango); V6 cerrojo a 3R y seguimiento a 2R | Contraria a la ruptura y a cualquier hora: más operaciones al día, poco correlacionadas con las aperturas |
 | `h-20261102-1100-tendencia_retroceso-grial` | V1 4 h, ADX ≥ 30, espera 3, cerrojo a 3R y seguimiento a 2R; V2 1 h; V3 ADX ≥ 25; V4 tendencia de BTC a favor; V5 salida A; V6 horquilla de 3R | Más R por cada tramo de tendencia (el stop detrás del retroceso) y dejar correr |
-| `h-20261102-1100-extremo_noticias-sin` | V1 1 h, z ≥ 3, sin noticias en 6 h, a la contra con OBJ (deshacer el movimiento); V2 z ≥ 4; V3 4 h; V4 sin noticias en 12 h; V5 horquilla de 3R; V6 el control sin mirar las noticias | Las noticias para reforzar: separar la liquidez (vuelve) de la información (sigue), sin usar el sentido de los titulares |
+| `h-20261102-1100-extremo_noticias-sin` | V1 1 h, z ≥ 3, sin noticias en 6 h, a la contra con la horquilla de 3R a 72 h; V2 z ≥ 4; V3 4 h; V4 sin noticias en 12 h; V5 OBJ (deshacer el movimiento: solo entran los de más de ≈ 3,3 %); V6 el control sin mirar las noticias | Las noticias para reforzar: separar la liquidez (vuelve) de la información (sigue), sin usar el sentido de los titulares |
 | `h-20261102-1100-momento_continuo-rana` | V1 diario, 28 días, z ≥ 0,5, ID ≤ −0,2, cada día mientras dure, cerrojo a 3R y seguimiento a 2R (168 h sin activar, 336 h activado); V2 14 días; V3 ID ≤ −0,3; V4 ID ≤ −0,1; V5 z ≥ 1; V6 salida A | Recorrido largo en las tendencias que llegan poco a poco; V4 < V1 < V3 es la escala que predice el mecanismo |
 
 - 24 variantes, todas dentro de reglas y con 1 filtro como mucho. Contarán en el N acumulado cuando las mida el corredor.
+- En `extremo_noticias-sin` la base es la horquilla de 3R y no deshacer el movimiento (OBJ, V5): con OBJ el libro solo deja
+  entrar los movimientos de más de ≈ 3,3 % (el plan exige ≥ 3 % neto), que en BTC y ETH casi no se dan en 1 h, y la
+  hipótesis podría no llegar a las 100 operaciones fuera de muestra (K1). Se decidió antes de medir nada.
 - `momento_continuo` también admite barras de 4 h (`tf_min` 240), pero con ellas la fracción de barras a favor se acerca
   al 50 % y el mismo umbral de ID casi no se cumple (en las velas sintéticas, ninguna señal): por eso todas sus variantes
   son diarias. Se cambió antes de medir nada.
@@ -2248,7 +2251,20 @@ v1, los cupos, el catálogo de salidas ni las familias que ya había.
    a `cola\entrada\` cuando `validar` deje de decir NO VALE por A6 (el archivo de noticias compilado). Si entrara antes, el
    corredor la rechazaría entera y su id ya no se podría usar.
 
-### 22.4 Arreglo de Li y Ji (`laboratorio.effective_trials`)
+### 22.4 Revisión independiente (02-11-2026, antes de medir nada)
+
+Una revisión de las cuatro familias, sin las conclusiones de quien las escribió, no encontró ninguna mirada al futuro
+(un corte en cada cierre de hora de un tramo de 20 días, en las 24 variantes: 0 diferencias). Sí encontró esto, ya
+arreglado en la versión 1, que aún no se ha registrado ni medido:
+
+| Hallazgo | Arreglo |
+|---|---|
+| `extremo_noticias`: no se exigía válida la vela base del movimiento; tras un hueco de datos, el último cierre antes del hueco hacía de base y salía un movimiento que nadie vio | Las velas del movimiento y su base, válidas; un flanco a menos de `horas_mov` velas del anterior, aunque ese no diera señal, no decide (la ventana móvil volvía a ver el mismo movimiento) |
+| `momento_continuo` en «flanco»: un día sin datos a mitad de racha la partía en dos y volvía a entrar | El flanco se mira sobre la condición; el día sin datos solo no decide |
+| Las pruebas no fijaban el escalado √w, el z y su σ, el ATR diario y `k_atr`, el umbral de ADX, el objetivo con el stop subido a 1,5 % ni el stop desde la barrida (13 de los 21 cambios del código que probó pasaban las pruebas) | Casos nuevos hechos a mano y con la definición escrita aparte: las 24 mutaciones de la revisión y de los arreglos las caza ya alguna prueba |
+| `extremo_noticias` recalculaba el ATR de 4 h en cada evento a favor (≈ 5-8 s con 3 años) | Una vez por moneda |
+
+### 22.5 Arreglo de Li y Ji (`laboratorio.effective_trials`)
 
 En la nube (Linux, numpy 2.3.4) la suite fallaba en `test_lab_vivo_medidas.py::test_n_efectivo`: con tres series
 iguales, el autovalor 3 salía 2,9999999999999996 y f(λ) = [λ ≥ 1] + (λ − ⌊λ⌋), que salta en cada entero ≥ 2, daba N = 2

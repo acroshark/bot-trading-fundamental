@@ -17,15 +17,17 @@ B4 = 240 * MIN
 
 
 def camino(planas: int = 1, bajista: bool = False) -> np.ndarray:
-    """Tendencia, retroceso en la barra 180, «planas» barras quietas abajo, reanudación (vuelve a la mitad del
-    retroceso en 30 min) y 6 barras más de tendencia. bajista: el mismo camino invertido (40.000 / precio)."""
+    """Tendencia, retroceso en la barra 180 (cae un 4,25 % en la primera hora y recupera hasta −3,825 % al cierre: su
+    mínimo es el único más bajo), «planas» barras quietas abajo, reanudación (vuelve a la mitad del retroceso en 30 min)
+    y 6 barras más de tendencia. bajista: el mismo camino invertido (40.000 / precio)."""
     c = 100 * np.exp(G * (np.arange(NB * 240) + 1) / 240)
     P = c[-1]
-    ret = np.full(240, P * (1 - DELTA))
-    ret[:60] = np.linspace(P, P * (1 - DELTA), 61)[1:]
-    quietas = np.full(240 * planas, P * (1 - DELTA))
+    abajo = P * (1 - 0.9 * DELTA)
+    ret = np.linspace(P * (1 - DELTA), abajo, 181)[1:]
+    ret = np.r_[np.linspace(P, P * (1 - DELTA), 61)[1:], ret]
+    quietas = np.full(240 * planas, abajo)
     rea = np.full(240, P * (1 - DELTA / 2))
-    rea[:30] = np.linspace(P * (1 - DELTA), P * (1 - DELTA / 2), 31)[1:]
+    rea[:30] = np.linspace(abajo, P * (1 - DELTA / 2), 31)[1:]
     sigue = P * (1 - DELTA / 2) * np.exp(G * (np.arange(6 * 240) + 1) / 240)
     cc = np.r_[c, ret, quietas, rea, sigue]
     return 40000.0 / cc if bajista else cc
@@ -58,9 +60,10 @@ def test_retroceso_a_la_ema_y_reanudacion_alcista(reglas):  # noqa: F811
     s = recorte_en_cada_senal(FAM, m, {}, a, b)
     assert len(s) == 1 and s.dir[0] == 1 and s.moneda[0] == 0
     assert s.t[0] == T0 + (s0 + 3) * B4                             # el cierre de la barra s0 + 2
-    sl = (cl[s0 + 2] - l[s0:s0 + 3].min()) / cl[s0 + 2] * 100 + 0.1
+    assert l[s0] < min(l[s0 + 1], l[s0 + 2])                        # el stop tiene que mirar la barra del retroceso
+    sl = (cl[s0 + 2] - l[s0]) / cl[s0 + 2] * 100 + 0.1
     assert s.stop_pct[0] == pytest.approx(sl, rel=1e-9) and 1.5 < sl < 5
-    assert s.prioridad[0] == pytest.approx(ax[s0])
+    assert ax[s0] != pytest.approx(ax[s0 + 2]) and s.prioridad[0] == pytest.approx(ax[s0])   # el ADX del retroceso
     assert not len(FAM.senales(m, {"lados": "cortos"}, a, b))
     assert not set(FAM.parametros) & set(filtros.PARAMS)            # ningún parámetro tapa un filtro común
 
@@ -83,7 +86,26 @@ def test_espejo_bajista_da_el_corto(reglas):  # noqa: F811
     a, b = T0, T0 + len(cc) * MIN
     s = recorte_en_cada_senal(FAM, m, {}, a, b)
     assert len(s) == 1 and s.dir[0] == -1 and s.t[0] == T0 + (s0 + 3) * B4
-    assert s.stop_pct[0] == pytest.approx((h[s0:s0 + 3].max() - cl[s0 + 2]) / cl[s0 + 2] * 100 + 0.1, rel=1e-9)
+    assert h[s0] > max(h[s0 + 1], h[s0 + 2])
+    assert s.stop_pct[0] == pytest.approx((h[s0] - cl[s0 + 2]) / cl[s0 + 2] * 100 + 0.1, rel=1e-9)
+
+
+def test_el_umbral_de_adx_decide(reglas):  # noqa: F811
+    """Un camino al azar con deriva (semilla fija) tiene un retroceso, el de la barra 95, con ADX 29,15: con adx_min 30
+    no entra y con 25 sí (en la barra 97). Lo demás del camino da lo mismo con los dos umbrales."""
+    rng = np.random.default_rng(3)
+    P = 100 * np.exp(np.r_[0, np.cumsum(rng.normal(0.003, 0.012, 240))])
+    cc = np.concatenate([np.linspace(P[k], P[k + 1], 241)[1:] for k in range(len(P) - 1)])
+    m = datos.Mercado(velas_mano(cc, monedas=("BTC",)))
+    h, l, cl, ax, pdi, mdi, e20 = barras(m)
+    s0 = 95
+    assert l[s0 - 1] > e20[s0 - 1] and l[s0] <= e20[s0] and pdi[s0] > mdi[s0] and 25 <= ax[s0] < 30
+    assert cl[s0 + 1] <= h[s0] and cl[s0 + 2] > h[s0 + 1]
+    a, b = T0, T0 + len(cc) * MIN
+    s30 = recorte_en_cada_senal(FAM, m, {"adx_min": 30.0}, a, b)
+    s25 = FAM.senales(m, {"adx_min": 25.0}, a, b)
+    assert sorted(set(s25.t.tolist()) - set(s30.t.tolist())) == [T0 + (s0 + 3) * B4]
+    assert set(s30.t.tolist()) <= set(s25.t.tolist())
 
 
 def test_sin_el_di_a_favor_no_es_un_retroceso(reglas):  # noqa: F811
