@@ -3634,6 +3634,102 @@ def test_seis4r_nombre_descripcion_y_backtest():
         _sin_null(r2)
 
 
+S4R3 = r"""
+const S4R3_P = {...S4R_P, sl_pct: 3, avg_hold_h: 59, preset: "seis4r3", nombre: "6 diarias 4R · stop 3 %: stop 3 %, objetivo 4R, hasta 7 días"};
+"""
+# Con la forma del resumen de scripts/replica_seis4r.py --preset seis4r3 y las cifras de docs/05, sección 26
+S4R3_BT = {"generated": 1793310000000, "split": 1755295200000, "sl_pct": 3.0, "nota": "Réplica del motor con SEIS4R3 <b>",
+           "nombre": "6 diarias 4R · stop 3 %: stop 3 %, objetivo 4R, hasta 7 días",
+           "params": {**S4R_BT["params"], "sl_pct": 3.0, "avg_hold_h": 59.0, "preset": "seis4r3"},
+           "fuera": {"n": 505, "mean_R": 0.0902, "win_rate": 0.33, "max_R": 3.93, "paper_R_funding": 0.0915, "op_jornada": 1.65,
+                     "salidas": {"stop": 343, "objetivo": 81, "tiempo": 81}, "horas_media": 72.0,
+                     "largos": {"n": 262, "mean_R": -0.05}, "cortos": {"n": 243, "mean_R": 0.28},
+                     "desde": 1755476100000, "hasta": 1792653300000, "curva_R": [[1755480600000, -1.0], [1792653300000, 45.55]],
+                     "max_dd_R": 30.4, "total_R": 45.55, "ganadoras_n": 167, "ganadoras_bajo_2R": 30, "ganadoras_bajo_1R": 12,
+                     "antes_de_costes": {"n": 505, "R_bruto": 0.179, "deslizamiento_R": -0.019, "comisiones_R": -0.0667,
+                                         "funding_R": -0.0013, "R_neto": 0.0915, "costes_R": -0.0875, "gana_bruto_pct": 34.1,
+                                         "op_jornada": 1.65, "cuenta_jornada_neto_pct": 0.0755},
+                     "perfiles": {"sin_costes": {"n": 505, "R": 0.179}, "backtest": {"n": 505, "R": 0.0902},
+                                  "okx_eu_con_xperps": {"n": 505, "R": 0.107}, "okx_eu_sin_xperps": {"n": 262, "R": -0.382}}},
+           "dentro": {"n": 1019, "mean_R": 0.0881, "win_rate": 0.29, "paper_R_funding": 0.0875, "desde": 1698624900000,
+                      "hasta": 1755487200000, "curva_R": [[1698646140000, 1.0], [1755487200000, 89.2]], "max_dd_R": 61.0,
+                      "largos": {"n": 560, "mean_R": 0.12}, "cortos": {"n": 459, "mean_R": 0.05},
+                      "antes_de_costes": {"n": 1019, "R_bruto": 0.159, "deslizamiento_R": -0.017, "comisiones_R": -0.0545,
+                                          "funding_R": 0.0005, "R_neto": 0.0875, "costes_R": -0.0715, "op_jornada": 2.18,
+                                          "cuenta_jornada_neto_pct": 0.0954},
+                      "perfiles": {"okx_eu_con_xperps": {"n": 1019, "R": 0.106}, "okx_eu_sin_xperps": {"n": 560, "R": -0.007}}}}
+
+
+def test_seis4r3_nombre_descripcion_y_backtest():
+    """Con el preset «seis4r3» («6 diarias 4R · stop 3 %», la de la cartera paper desde el 29-10-2026) la web la nombra
+    como apertura.PRESETS, la explica en Mercado y aperturas y abre arriba su backtest (leído de /api/backtest/impulso)
+    con lo que es verdad de ella: gana en los dos tramos, pero se eligió mirándolos entre 50 combinaciones (no las 378
+    salidas de la de stop 2 %). La de stop 2 % pasa a medida y la Ruptura V3, a anterior. Con «seis4r» en marcha, la de
+    stop 3 % sale abajo como medida. Sin su resumen no se inventa nada: ni su resultado ni cuántas hace al día."""
+    from bot import apertura
+    page = HTML.read_text(encoding="utf-8")
+    r = run("const now = Date.now();" + FIAB + SEIS2 + RUP3 + S4R + S4R3 + f"""S.btImp = {{impulso: {json.dumps(IMP_BT)}, lab: null, seis: {json.dumps(SEIS_BT)}, seis2: {json.dumps(SEIS2_BT)}, ruptura3: {json.dumps(RUP3_BT)}, seis4r: {json.dumps(S4R_BT)}, seis4r3: {json.dumps(S4R3_BT)}}};
+      const out = {{nm: PRESET_NM, tuyo: PRESET_TUYO}};
+      for (const [k, m] of [["s4r3", opn(S4R3_P, {{params_source: "usuario"}})], ["s4r", opn(S4R_P, {{params_source: "usuario"}})]]){{
+        S.openings = m; S.tab = "bt"; S.btSig = null; renderAll(true);
+        out[k] = {{top3: !H.el("#btS4r3TopP").hidden, alt3: !H.el("#btS4r3AltP").hidden, top2: !H.el("#btS4rTopP").hidden, alt2: !H.el("#btS4rAltP").hidden,
+          h3: H.el("#btS4r3Top").innerHTML + H.el("#btS4r3Alt").innerHTML + H.el("#btS4r3Kpis").innerHTML,
+          h2: H.el("#btS4rTop").innerHTML + H.el("#btS4rAlt").innerHTML, r3title: H.el("#btRup3Title").textContent, r3: H.el("#btRup3").innerHTML,
+          e2: H.el("#btLiveTitle").textContent, e2sub: H.el("#btLiveSub").textContent}};
+        S.tab = "market"; renderAll(true); out[k].sub = H.el("#openSub").textContent;
+        S.tab = "trades"; renderAll(true); out[k].st = H.el("#tradesStrat").innerHTML; }}
+      S.btImp = {{impulso: null, lab: null, seis: null, seis2: null, ruptura3: null, seis4r: null, seis4r3: null}}; S.openings = opn(S4R3_P);
+      S.tab = "bt"; S.btSig = null; renderAll(true); out.vacio = {{top: !H.el("#btS4r3TopP").hidden, html: H.el("#btS4r3Top").innerHTML}};
+      S.tab = "trades"; renderAll(true); out.vacio.st = H.el("#tradesStrat").innerHTML;
+      return out;""", live=False)
+    assert r["nm"]["seis4r3"] == apertura.PRESETS["seis4r3"]["nombre"] and r["nm"]["seis4r"] == apertura.PRESETS["seis4r"]["nombre"]
+    assert r["tuyo"]["seis4r3"] == "6 diarias 4R · stop 3 %"
+    a, b = r["s4r3"], r["s4r"]
+    assert a["top3"] and not a["alt3"] and not a["top2"] and a["alt2"]
+    h = a["h3"]
+    for t in ("Fuera de muestra gana", "+0,09 R por operación en 505 operaciones", "(+0,09 R con funding)", "1,65 por jornada",
+              "≈ +0,08 % de la cuenta por jornada", "Dentro de muestra también gana, pero no es una prueba aparte", "+0,09 R en 1019 operaciones",
+              "Se eligió mirando los dos tramos: que gane en los dos no la confirma.", "Elegida después de ver los datos: una de 50.",
+              "ni Holm ni FDR", "No es una ventaja demostrada", "Fuera de muestra gana por los cortos", "cortos +0,28 R (243 op.) y largos -0,05 R (262 op.)",
+              "con los costes de hoy del paper (OKX EU con X-Perps) da +0,11 R fuera y +0,11 R dentro",
+              "sin cuenta X-Perps (contado 0,35 % por lado y sin cortos) pierde: -0,38 R fuera y -0,01 R dentro",
+              "el objetivo de 4R (+12 %) se cobra en 16 % de las operaciones", "o gana 4R o pierde 1R", "stop 3,00 % y objetivo 4,0 R (+12,00 %)",
+              "como mucho 7 días", "Está en tu cartera paper por tu decisión", "Réplica del motor con SEIS4R3 &lt;b&gt;", "<small>Antes de costes</small>"):
+        assert t in h, t
+    assert "378" not in h and "Pero dentro de muestra" not in h and "--preset seis4r3" not in h   # está en marcha: no se ofrece activarla
+    assert "Frágil: es la mejor de 378 salidas" in a["h2"] and "Si la activas (scripts/activar_estrategia.py --preset seis4r)" in a["h2"]
+    assert a["r3title"].startswith("Estrategia anterior: Ruptura V3") and "hasta que pasaste a «6 diarias 4R»" in a["r3"]
+    assert a["e2"].startswith("Estrategia anterior (E2)") and "«6 diarias 4R · stop 3 %»" in a["e2sub"]
+    assert a["sub"].startswith("Modo impulso «6 diarias 4R · stop 3 %» (paper, por tu decisión)") and "stop 3 % y objetivo 4R (+12 %)" in a["sub"]
+    assert "en el backtest hizo ≈ 1,65 operaciones por jornada fuera de muestra (2,18 dentro)" in a["sub"]
+    st = a["st"]
+    assert "6 diarias 4R · stop 3 %: stop 3 %, objetivo 4R, hasta 7 días" in st and "preset 6 diarias 4R · stop 3 %" in st
+    assert "no llega a 6 al día: en el backtest hizo ≈ 1,65 operaciones por jornada fuera de muestra" in st
+    assert "+0,09 R por operación fuera de muestra" in st and "una de 50 combinaciones" in st and "378" not in st
+    # con «6 diarias 4R» (stop 2 %) en marcha, la de stop 3 % sale abajo, como medida, y se puede activar
+    assert b["top2"] and not b["alt2"] and not b["top3"] and b["alt3"]
+    assert "Si la activas (scripts/activar_estrategia.py --preset seis4r3)" in b["h3"] and "Elegida después de ver los datos: una de 50." in b["h3"]
+    assert b["sub"].startswith("Modo impulso «6 diarias 4R» (paper") and "«6 diarias 4R»" in b["e2sub"]
+    # sin su resumen: ni su resultado ni su frecuencia
+    v = r["vacio"]
+    assert v["top"] and "Esta demostración no trae el backtest de «6 diarias 4R · stop 3 %»." in v["html"]
+    assert "su backtest aún no ha llegado a la web" in v["st"] and "pierde" not in v["st"] and "hizo ≈" not in v["st"]
+    _sin_null(h, a["h2"], a["sub"], st, b["h3"], v["html"], v["st"])
+    # en directo, sin su resumen, se dice cómo se escribe
+    s = run(FIAB + S4R + S4R3 + """H.open(); reset();
+      S.btImp = {impulso: null, lab: null, seis: null, seis2: null, ruptura3: null, seis4r: null, seis4r3: null};
+      S.openings = opn(S4R3_P); S.tab = "bt"; S.btSig = null; renderAll(true); return H.el("#btS4r3Top").innerHTML;""")
+    assert ("Aún no hay backtest de «6 diarias 4R · stop 3 %»: lo escribe scripts/replica_seis4r.py --preset seis4r3 en "
+            "BACKTEST_DIR/seis4r3_resumen.json.") in s
+    if 'id="seis4r3Data"' in page:   # el resumen real incrustado (scripts/incrustar_backtest.py en el PC)
+        blob = page.split('<script type="application/json" id="seis4r3Data">', 1)[1].split("</script>", 1)[0]
+        r2 = run("const now = Date.now();" + FIAB + S4R + S4R3 + f"""S.btImp = {{impulso: null, lab: null, seis: null, seis2: null, ruptura3: null, seis4r: null, seis4r3: {blob}}}; S.openings = opn(S4R3_P); S.tab = "bt"; S.btSig = null; renderAll(true);
+          return H.el("#btS4r3Top").innerHTML + H.el("#btS4r3Kpis").innerHTML;""", live=False)
+        for t in ("Fuera de muestra", "Elegida después de ver los datos: una de 50.", "Lo que se llevan los costes", "por tu decisión", "sin cuenta X-Perps"):
+            assert t in r2, t
+        _sin_null(r2)
+
+
 def test_seis4r_en_el_ranking_de_la_demostracion_marca_su_fila():
     """El mapa preset → fila de la web (RK_ID_PRESET) es el de bot/ranking.PRESET_FILA: con «6 diarias 4R» en marcha, la
     fila en marcha es la de su salida en salidas_motor.py (la n.º 1), no otra."""

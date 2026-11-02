@@ -940,6 +940,7 @@ tr[data-lv-sel]{cursor:pointer}
 
   <!-- BACKTEST -->
   <section class="view" id="v-bt" hidden>
+    <div class="panel" id="btS4r3TopP" hidden><div class="panel-h"><h2>Estrategia en marcha: 6 diarias 4R · stop 3 % (stop 3 %, objetivo 4R, hasta 7 días)</h2><p>Lo que opera ahora el motor de aperturas, por tu decisión («la que más ganancias dé»), para medirlo en la cartera paper: las mismas entradas que «6 diarias» (impulso de los 15 primeros minutos sin filtros, entrada a +15 min a favor, largos al contado y cortos en perpetuo, como mucho 6 entradas y 3 % de riesgo al día, veto de noticias fiables en contra) con una horquilla pura: stop 3 % y objetivo 4R (+12 %), sin salida parcial, sin cerrojo y sin break-even. Si a los 7 días no ha tocado ninguno de los dos, se cierra con lo que haya. Con los costes del paper es la que más ganó en 3 años de lo medido con tus reglas (sin contar E2), pero se eligió después de ver los dos tramos, entre 50 combinaciones de stop y objetivo, y ninguna pasa la corrección por número de pruebas. Réplica del propio motor con las velas de 1 minuto de Binance de 3 años, con comisiones, deslizamiento y funding.</p></div><div class="panel-b" id="btS4r3Top"></div></div>
     <div class="panel" id="btS4rTopP" hidden><div class="panel-h"><h2>Estrategia en marcha: 6 diarias 4R (stop 2 %, objetivo 4R, hasta 7 días)</h2><p>Lo que opera ahora el motor de aperturas, por tu decisión, para medirlo en la cartera paper: las mismas entradas que «6 diarias» (impulso de los 15 primeros minutos sin filtros, entrada a +15 min a favor, largos al contado y cortos en perpetuo, como mucho 6 entradas y 3 % de riesgo al día, veto de noticias fiables en contra) con una horquilla pura: stop 2 % y objetivo 4R (+8 %), sin salida parcial, sin cerrojo y sin break-even. Si a los 7 días no ha tocado ninguno de los dos, se cierra con lo que haya. Era la n.º 1 del ranking de estrategias el 29-10-2026, pero frágil: la mejor fuera de muestra (en % de la cuenta por jornada; la 2.ª en R por operación) de 378 salidas medidas sobre las mismas entradas, elegida después de ver los datos, y dentro de muestra pierde. Réplica del propio motor con las velas de 1 minuto de Binance de 3 años, con comisiones, deslizamiento y funding.</p></div><div class="panel-b" id="btS4rTop"></div></div>
     <div class="panel" id="btRup3P" hidden><div class="panel-h"><h2 id="btRup3Title">Ruptura V3: rango de apertura con tendencia, volumen y régimen</h2><p id="btRup3Sub">Solo la moneda con el régimen cripto a favor (largos en RISK_ON, cortos en RISK_OFF) y su tendencia diaria y de 4 h en ese sentido con ADX ≥ 25; entra si una vela de 5 min cierra fuera del rango de los 15 primeros minutos con volumen ≥ 1,5 × el del rango y expansión ≥ 1,5 ATR, antes de +240 min. Stop 2-3 % (el otro lado del rango), como mucho 2 por apertura, y la salida de «6 diarias v2» (la mitad en 3R y el resto corre con el cerrojo). Réplica del propio motor con las velas de 1 minuto de Binance de 3 años, con comisiones, deslizamiento y funding.</p></div><div class="panel-b" id="btRup3"></div></div>
     <div class="panel" id="btSeis2TopP" hidden><div class="panel-h"><h2>Estrategia en marcha: 6 diarias v2</h2><p>Lo que opera ahora el motor de aperturas, por tu decisión, para medirlo en la cartera paper: las mismas entradas que «6 diarias» (impulso de los 15 primeros minutos sin filtros, entrada a +15 min a favor, largos al contado y cortos en perpetuo, como mucho 6 entradas y 3 % de riesgo al día, veto de noticias fiables en contra) con otra salida: stop 2 %; la mitad sale en 3R (+6 %) y la otra mitad corre: al llegar a +3R su stop sube a +2R y lo sigue a 2R por detrás. Antes de +3R el stop no se mueve (sin break-even). Como mucho 24 h si no llega a +3R y 7 días si llega. Velas de 1 minuto de Binance de 3 años, con comisiones y deslizamiento.</p></div><div class="panel-b" id="btSeis2Top"></div></div>
@@ -948,6 +949,7 @@ tr[data-lv-sel]{cursor:pointer}
     <div class="panel" id="btSeisAltP" hidden><div class="panel-h"><h2 id="btSeisAltTitle">Medida en backtest, no está en marcha: 6 diarias</h2><p id="btSeisAltSub">La variante de unas 6 operaciones al día: impulso de los 15 primeros minutos sin filtros, entrada a +15 min, stop 1,5 % y objetivo 3R, como mucho 24 h, con veto de noticias fiables en contra. El motor no la opera ahora; se enseña para comparar.</p></div><div class="panel-b" id="btSeisAlt"></div></div>
     <div class="panel" id="btSeis2AltP" hidden><div class="panel-h"><h2>Medida en backtest, no está en marcha: 6 diarias v2</h2><p>Las entradas de «6 diarias» con otra salida: stop 2 %, la mitad sale en 3R y la otra mitad corre con su stop subido a +2R desde +3R (sin break-even antes). El motor no la opera ahora; se enseña para comparar.</p></div><div class="panel-b" id="btSeis2Alt"></div></div>
     <div class="panel" id="btS4rAltP" hidden><div class="panel-h"><h2>Medida en backtest, no está en marcha: 6 diarias 4R (stop 2 %, objetivo 4R, hasta 7 días)</h2><p>Las entradas de «6 diarias» con una horquilla pura: stop 2 % y objetivo 4R (+8 %), sin parcial ni cerrojo, como mucho 7 días. Era la n.º 1 del ranking de estrategias el 29-10-2026, pero frágil: la mejor fuera de muestra (en % de la cuenta por jornada; la 2.ª en R por operación) de 378 salidas medidas sobre las mismas entradas, elegida después de ver los datos, y dentro de muestra pierde. El motor no la opera ahora; se enseña para comparar.</p></div><div class="panel-b" id="btS4rAlt"></div></div>
+    <div class="panel" id="btS4r3AltP" hidden><div class="panel-h"><h2>Medida en backtest, no está en marcha: 6 diarias 4R · stop 3 % (stop 3 %, objetivo 4R, hasta 7 días)</h2><p>Las entradas de «6 diarias» con una horquilla pura: stop 3 % y objetivo 4R (+12 %), sin parcial ni cerrojo, como mucho 7 días. Con los costes del paper es la que más ganó en 3 años de lo medido con tus reglas (sin contar E2), pero se eligió después de ver los dos tramos, entre 50 combinaciones de stop y objetivo, y ninguna pasa la corrección por número de pruebas. El motor no la opera ahora; se enseña para comparar.</p></div><div class="panel-b" id="btS4r3Alt"></div></div>
     <div class="panel"><div class="panel-h"><h2>Laboratorio: 2.000 estrategias inventadas</h2><p>Noticia → tendencia de la apertura → momento, volumen y volatilidad → entrada, stop y objetivo, con tus reglas. Elegidas con el 60 % inicial de los datos y medidas en el 40 % final, que no se usó para elegir nada.</p></div><div class="panel-b" id="btLab"></div></div>
     <div class="panel"><div class="panel-h"><h2>Motor anterior (v2 «ruptura»): ya no opera</h2><p>Se guarda como referencia: perdía fuera de muestra y lo sustituyó el modo impulso de arriba. Señal → ruptura del rango de apertura confirmada con volumen y presión → entrada → stop dinámico → reentradas mientras haya volumen. 24 meses de Binance, comisiones y deslizamiento reales, parámetros elegidos solo con el 70 % inicial y medidos en el 30 % final.</p></div><div class="panel-b" id="btOpen"></div></div>
     <div class="panel"><div class="kpis kpis6" id="btKpis"></div></div>
@@ -3007,7 +3009,10 @@ const OPEN_SUB = {impulso:"Modo impulso (paper): mide el movimiento de los prime
   // Ruptura V3 (preset ruptura3 de bot/apertura.py)
   ruptura3:"Ruptura V3 (paper, por tu decisión): solo mira la moneda con el régimen cripto a favor (largos en RISK_ON, cortos en RISK_OFF) y su tendencia diaria y de 4 h en ese sentido con ADX ≥ 25; entra si una vela de 5 min cierra fuera del rango de los 15 primeros minutos con volumen ≥ 1,5 × el del rango y expansión ≥ 1,5 ATR, antes de +240 min. Stop 2-3 % (el otro lado del rango), como mucho 2 por apertura; la mitad sale en 3R y el resto corre con el cerrojo (sin break-even). Veta la entrada si hay una noticia corroborada en contra.",
   // «6 diarias 4R» (preset seis4r de bot/apertura.py)
-  seis4r:"Modo impulso «6 diarias 4R» (paper, por tu decisión): mide el movimiento de los 15 primeros minutos de cada apertura y entra a +15 min a favor, sin filtros (largos al contado, cortos en perpetuo), con stop 2 % y objetivo 4R (+8 %): horquilla pura, sin parcial, cerrojo, break-even ni stop dinámico, y como mucho 7 días; veta la entrada si hay una noticia fiable en contra. No llega a 6 al día: en el backtest hizo ≈ 2,5 operaciones por jornada fuera de muestra (3,3 dentro), porque cada posición ocupa su moneda hasta 7 días."};
+  seis4r:"Modo impulso «6 diarias 4R» (paper, por tu decisión): mide el movimiento de los 15 primeros minutos de cada apertura y entra a +15 min a favor, sin filtros (largos al contado, cortos en perpetuo), con stop 2 % y objetivo 4R (+8 %): horquilla pura, sin parcial, cerrojo, break-even ni stop dinámico, y como mucho 7 días; veta la entrada si hay una noticia fiable en contra. No llega a 6 al día: en el backtest hizo ≈ 2,5 operaciones por jornada fuera de muestra (3,3 dentro), porque cada posición ocupa su moneda hasta 7 días.",
+  // «6 diarias 4R · stop 3 %» (preset seis4r3; cifras de su réplica, docs/05, sección 26)
+  seis4r3:"Modo impulso «6 diarias 4R · stop 3 %» (paper, por tu decisión): mide el movimiento de los 15 primeros minutos de cada apertura y entra a +15 min a favor, sin filtros (largos al contado, cortos en perpetuo), con stop 3 % y objetivo 4R (+12 %): horquilla pura, sin parcial, cerrojo, break-even ni stop dinámico, y como mucho 7 días; veta la entrada si hay una noticia fiable en contra. No llega a 6 al día: en el backtest hizo ≈ 1,65 operaciones por jornada fuera de muestra (2,18 dentro), porque cada posición ocupa su moneda hasta 7 días."};
+const OPEN_SUB_PRESET = new Set(["seis", "ruptura3", "seis4r", "seis4r3"]);   // presets con su texto en OPEN_SUB (seis2 lo arma subSeis2)
 const STEP_TXT = {hora:"entra a la hora fijada", retroceso:"espera el retroceso", reanudacion:"espera la reanudación", ruptura:"espera la ruptura"};
 const INST_TXT = {spot:"contado", perp:"perpetuo"}, INST_A = {spot:"al contado", perp:"en perpetuo"};
 const NEWS_TAG = {a_favor:["good","Noticia a favor"], neutral:["muted","Sin noticia clara"], en_contra:["bad","Noticia en contra"]};
@@ -3101,7 +3106,7 @@ function impParams(p){
   if (x){ if (isNum(p.sl_pct)) f.push(`stop ${nf(p.sl_pct,2)}${rp3 && isNum(p.rp_stop_max_pct) ? `-${nf(p.rp_stop_max_pct,2)} % (el otro lado del rango)` : " %"}`); f.push(x.part, x.rest); if (x.hold) f.push(x.hold); }   // salida con parcial y cerrojo
   else {
     if (isNum(p.sl_pct)) f.push(`stop ${nf(p.sl_pct,2)} %${isNum(p.target_r) ? ` y objetivo ${nf(p.target_r,1)} R (+${nf(p.sl_pct*p.target_r,2)} %)` : ""}`);
-    if (isNum(p.max_hold_h)) f.push(p.max_hold_h >= 168 ? (p.tope_propio===true || p.preset==="seis4r" ? `como mucho ${nf(p.max_hold_h/24,0)} días`   // «6 diarias 4R» (tope_propio): 7 días es su tope
+    if (isNum(p.max_hold_h)) f.push(p.max_hold_h >= 168 ? (p.tope_propio===true || p.preset==="seis4r" || p.preset==="seis4r3" ? `como mucho ${nf(p.max_hold_h/24,0)} días`   // las «6 diarias 4R» (tope_propio): 7 días es su tope
       : "sin tope de tiempo (7 días de seguridad)") : `como mucho ${nf(p.max_hold_h,0)} h`); }
   if (isNum(p.min_net_pct)) f.push(`≥ ${nf(p.min_net_pct,1)} % neto de costes`);
   if (p.long_instrument || p.short_instrument) f.push(`largos ${INST_A[p.long_instrument] || "al contado"}, cortos ${INST_A[p.short_instrument] || "en perpetuo"}`);
@@ -3238,7 +3243,7 @@ function subSeis2(P){
 function renderOpenings(){
   const box = $("#openings"), O = motorO(), head = isObj(O) ? openHead(O) : "", imp = isObj(O) && O.strategy==="impulso", pre = motorPreset().preset;
   const wins = isObj(O) && Array.isArray(O.windows) ? O.windows.filter(isObj) : [];
-  $("#openSub").textContent = !imp ? OPEN_SUB.ruptura : pre==="seis2" ? subSeis2(O.params) : OPEN_SUB[pre==="seis" || pre==="ruptura3" || pre==="seis4r" ? pre : "impulso"];
+  $("#openSub").textContent = !imp ? OPEN_SUB.ruptura : pre==="seis2" ? subSeis2(O.params) : OPEN_SUB[OPEN_SUB_PRESET.has(pre) ? pre : "impulso"];
   const demo = isObj(O) && O.demo ? `<p class="note"><span class="pill warn">Ejemplo inventado</span> En la demostración el motor es simulado, con «${esc(motorPreset().nombre || "6 diarias v2")}» como ejemplo (no es por fuerza la estrategia que tiene el bot): aperturas de verdad, pero impulsos y decisiones de mentira. Lo que hizo en las aperturas pasadas está en «Por qué entra o no».</p>` : "";
   if (!wins.length){ box.innerHTML = demo + head + `<p class="note">${S.live ? (imp ? "El motor de aperturas aún no ha publicado ninguna ventana: arma cada apertura antes de que abra y mide el impulso de sus primeros minutos." : "El motor de aperturas aún no ha publicado ninguna ventana: se arma 15 min antes de cada apertura con señal.") : "En las próximas 24 h no hay ninguna apertura que opere el motor simulado."}</p>`; return; }
   if (imp){ box.innerHTML = demo + head + impTable(wins, O); return; }
@@ -3849,8 +3854,8 @@ const fiabStory = t => isFiableTrade(t) ? (strOk(isObj(t.tags) ? t.tags.story : 
 // Estrategia que opera el motor de aperturas (mensaje «openings»: params.preset «seis2», «seis» o «impulso» y
 // params.nombre). En la demostración, sin mensaje del bot, la del motor simulado (demoMotor: «6 diarias v2»).
 const PRESET_NM = {impulso:"Impulso de los primeros minutos (E2)", seis:"6 diarias", seis2:"6 diarias v2", ruptura3:"Ruptura V3: rango de apertura con tendencia, volumen y régimen",
-  seis4r:"6 diarias 4R: stop 2 %, objetivo 4R, hasta 7 días"};
-const PRESET_TUYO = {seis:"6 diarias", seis2:"6 diarias v2", ruptura3:"Ruptura V3", seis4r:"6 diarias 4R"};   // puestas por tu decisión (scripts/activar_estrategia.py)
+  seis4r:"6 diarias 4R: stop 2 %, objetivo 4R, hasta 7 días", seis4r3:"6 diarias 4R · stop 3 %: stop 3 %, objetivo 4R, hasta 7 días"};   // los de apertura.PRESETS
+const PRESET_TUYO = {seis:"6 diarias", seis2:"6 diarias v2", ruptura3:"Ruptura V3", seis4r:"6 diarias 4R", seis4r3:"6 diarias 4R · stop 3 %"};   // puestas por tu decisión (scripts/activar_estrategia.py)
 const motorO = () => isObj(S.openings) ? S.openings : S.live ? null : demoMotor(S.vnow);
 function motorPreset(){
   const O = motorO(), P = O && isObj(O.params) ? O.params : {};
@@ -3863,14 +3868,17 @@ function stratNow(){
   const base = PRESET_TUYO[preset], P = isObj(O.params) ? O.params : {};
   const lbl = base && !nm.toLowerCase().includes(base.toLowerCase()) ? `${base}: ${nm}` : nm, ec = isObj(O.estrategia_cargada) ? O.estrategia_cargada : {};
   const fuera = k => isObj(S.btImp) && isObj(S.btImp[k]) && isObj(S.btImp[k].fuera) && isNum(S.btImp[k].fuera.mean_R) ? S.btImp[k].fuera.mean_R : null;
-  const bt = k => `en el backtest ${fuera(k)!=null ? `da ${rT(fuera(k))} por operación fuera de muestra` : "pierde fuera de muestra"} (pestaña Backtest).`;
-  const s4 = isObj(S.btImp) && isObj(S.btImp.seis4r) && isObj(S.btImp.seis4r.fuera) ? S.btImp.seis4r.fuera : {};
-  const opj4 = numOf(s4.op_jornada, isObj(s4.antes_de_costes) ? s4.antes_de_costes.op_jornada : null);   // «6 diarias 4R»
+  // sin su resumen no se dice nada de su resultado (antes decía «pierde», y de una que gana sería mentira)
+  const bt = k => fuera(k)!=null ? `en el backtest da ${rT(fuera(k))} por operación fuera de muestra (pestaña Backtest).` : "su backtest aún no ha llegado a la web (pestaña Backtest).";
+  const opjOf = k => { const f = isObj(S.btImp) && isObj(S.btImp[k]) && isObj(S.btImp[k].fuera) ? S.btImp[k].fuera : {};
+    return numOf(f.op_jornada, isObj(f.antes_de_costes) ? f.antes_de_costes.op_jornada : null); };   // las «6 diarias 4R»
+  const opj4 = opjOf("seis4r"), opj43 = opjOf("seis4r3");
   const xa = exitA({...P, preset});
   const extra = preset==="seis" ? `Puesta por tu decisión para medirla en la cartera paper; ${bt("seis")}`
     : preset==="seis2" ? `Puesta por tu decisión para medirla en la cartera paper${xa ? ` (stop ${isNum(P.sl_pct) ? nR(P.sl_pct) : nR(xa.sl)} %, ${exitAParts(xa).short})` : ""}; ${bt("seis2")}`
     : preset==="ruptura3" ? `Puesta por tu decisión para medirla en la cartera paper (solo con el régimen y la tendencia a favor y una ruptura del rango con volumen; stop 2-3 %, ${xa ? exitAParts(xa).short : "la mitad en 3R y el resto corre"}); ${bt("ruptura3")} Dentro de muestra no gana: no es una ventaja demostrada.`
-    : preset==="seis4r" ? `Puesta por tu decisión para medirla en la cartera paper (las entradas de «6 diarias» con stop ${isNum(P.sl_pct) ? nR(P.sl_pct) : "2"} % y objetivo ${isNum(P.target_r) ? nR(P.target_r) : "4"}R, como mucho 7 días); no llega a 6 al día: ${opj4!=null ? `en el backtest hizo ≈ ${nf(opj4,1)} operaciones por jornada fuera de muestra, ` : ""}cada posición ocupa su moneda hasta 7 días; ${bt("seis4r")} Dentro de muestra pierde y es la mejor de 378 salidas fuera de muestra (en % de la cuenta por jornada), elegida después de ver los datos: frágil, no es una ventaja demostrada.` : "";
+    : preset==="seis4r" ? `Puesta por tu decisión para medirla en la cartera paper (las entradas de «6 diarias» con stop ${isNum(P.sl_pct) ? nR(P.sl_pct) : "2"} % y objetivo ${isNum(P.target_r) ? nR(P.target_r) : "4"}R, como mucho 7 días); no llega a 6 al día: ${opj4!=null ? `en el backtest hizo ≈ ${nf(opj4,1)} operaciones por jornada fuera de muestra, ` : ""}cada posición ocupa su moneda hasta 7 días; ${bt("seis4r")} Dentro de muestra pierde y es la mejor de 378 salidas fuera de muestra (en % de la cuenta por jornada), elegida después de ver los datos: frágil, no es una ventaja demostrada.`
+    : preset==="seis4r3" ? `Puesta por tu decisión («la que más ganancias dé») para medirla en la cartera paper (las entradas de «6 diarias» con stop ${isNum(P.sl_pct) ? nR(P.sl_pct) : "3"} % y objetivo ${isNum(P.target_r) ? nR(P.target_r) : "4"}R, como mucho 7 días); no llega a 6 al día: ${opj43!=null ? `en el backtest hizo ≈ ${nf(opj43,2)} operaciones por jornada fuera de muestra, ` : ""}cada posición ocupa su moneda hasta 7 días; ${bt("seis4r3")} Se eligió después de ver los dos tramos, una de 50 combinaciones de stop y objetivo que no pasa la corrección por número de pruebas: no es una ventaja demostrada.` : "";
   return `<b>Estrategia activa del motor de aperturas:</b> ${esc(lbl)}${preset ? ` <span class="pill ${base ? "warn" : "info"}">preset ${esc(base || preset)}</span>` : ""}${O.demo ? ' <span class="pill warn">Ejemplo</span>' : ""}${O.paused===true || ec.pausada===true ? ' <span class="pill bad">Pausada</span>' : ""}${extra ? ` <span class="note">${esc(extra)}</span>` : ""}`;
 }
 
@@ -4658,7 +4666,7 @@ function renderAll(force){
   if (S.tab==="ranking") safe(() => renderRanking(force));
   // La firma incluye los tres backtests: llegan por separado y cualquiera puede llegar después del primer pintado.
   const btSig = [S.backtest ? S.backtest.generated + JSON.stringify(S.btFilter) + S.btSel : "x", (S.btOpen||{}).generated,
-                 ((S.btImp||{}).impulso||{}).generated, ((S.btImp||{}).lab||{}).generated, ((S.btImp||{}).seis||{}).generated, ((S.btImp||{}).seis2||{}).generated, ((S.btImp||{}).ruptura3||{}).generated, ((S.btImp||{}).seis4r||{}).generated, motorPreset().preset].join("|");
+                 ((S.btImp||{}).impulso||{}).generated, ((S.btImp||{}).lab||{}).generated, ((S.btImp||{}).seis||{}).generated, ((S.btImp||{}).seis2||{}).generated, ((S.btImp||{}).ruptura3||{}).generated, ((S.btImp||{}).seis4r||{}).generated, ((S.btImp||{}).seis4r3||{}).generated, motorPreset().preset].join("|");
   if (S.tab==="bt" && S.btSig !== btSig){ S.btSig = btSig; safe(renderBacktest); }
 }
 
@@ -6258,24 +6266,36 @@ function renderBtRup3(box, I, mode){   // mode: "on" (en marcha; también true),
 // «6 diarias 4R» (preset seis4r de bot/apertura.py; resumen BACKTEST_DIR/seis4r_resumen.json con la forma de
 // seis2_resumen.json, de scripts/replica_seis4r.py, con «antes_de_costes» y «perfiles» en fuera y dentro). Tal cual: fuera
 // de muestra gana (por los cortos), dentro pierde, y es la mejor de 378 salidas elegida después de ver los datos (frágil).
+// «6 diarias 4R · stop 3 %» (seis4r3; seis4r3_resumen.json, de scripts/replica_seis4r.py --preset seis4r3): el mismo
+// panel (S4R_VAR); gana en los dos tramos, pero se eligió mirándolos, entre 50 combinaciones.
 const S4R_SAL = {stop:"stop", objetivo:"objetivo 4R", tiempo:"7 días sin tocar ninguno", "fin de datos":"fin de datos"};
-function renderBtS4r(box, I, on){
-  const RISK = BT_RISK, sR = btSR, sh = btSh, dmy = btDmy;
+// Las dos «6 diarias 4R»: la de stop 2 % (seis4r) y la de stop 3 % (seis4r3, la de la cartera paper desde el 29-10-2026,
+// 23:59; docs/05, sección 26). El mismo panel: las cifras salen del resumen; lo que no sale de él (nombre, archivo, preset
+// y cómo se eligió) va aquí, para que sea verdad de cada una.
+const S4R_VAR = {
+  seis4r:{id:"btS4r", nombre:"6 diarias 4R", preset:"seis4r", sl:2, archivo:"seis4r_resumen.json", orden:"scripts/replica_seis4r.py",
+    eleccion:"<b>Frágil: es la mejor de 378 salidas.</b> Las mismas entradas se midieron con 378 combinaciones de stop, objetivo y tope de tiempo, y esta es la mejor fuera de muestra en % de la cuenta por jornada (el criterio del ranking; en R por operación, la 2.ª), elegida después de ver los datos y sin corrección por haber probado tantas: la mejor de muchas suele ser suerte. No es una ventaja demostrada."},
+  seis4r3:{id:"btS4r3", nombre:"6 diarias 4R · stop 3 %", preset:"seis4r3", sl:3, archivo:"seis4r3_resumen.json", orden:"scripts/replica_seis4r.py --preset seis4r3",
+    dosTramos:true,   // se eligió mirando dentro y fuera de muestra: que gane en los dos no es una prueba aparte
+    eleccion:"<b>Elegida después de ver los datos: una de 50.</b> Con los costes del paper es la que más ganó en 3 años de lo medido con tus reglas (sin contar E2, que descartaste), pero se eligió mirando los dos tramos entre las 50 combinaciones de stop y objetivo de controles/anchos, y ninguna pasa la corrección por número de pruebas (ni Holm ni FDR): la mejor de muchas suele ser suerte. No es una ventaja demostrada."}};
+function renderBtS4r(box, I, on, v = "seis4r"){
+  const RISK = BT_RISK, sR = btSR, sh = btSh, dmy = btDmy, V = S4R_VAR[v] || S4R_VAR.seis4r;
   if (!btOk(I)){
-    box.innerHTML = `<p class="note">${S.live ? "Aún no hay backtest de «6 diarias 4R»: lo escribe scripts/replica_seis4r.py en BACKTEST_DIR/seis4r_resumen.json." : "Esta demostración no trae el backtest de «6 diarias 4R»."}</p>`; return; }
+    box.innerHTML = `<p class="note">${esc(S.live ? `Aún no hay backtest de «${V.nombre}»: lo escribe ${V.orden} en BACKTEST_DIR/${V.archivo}.` : `Esta demostración no trae el backtest de «${V.nombre}».`)}</p>`; return; }
   const {F, N, X, Lg, Ct, cf, cd, tot, dd} = btStats(I);
   const cF = isObj(F.antes_de_costes) ? F.antes_de_costes : {}, cN = isObj(N.antes_de_costes) ? N.antes_de_costes : {};
   const pf = isObj(F.perfiles) ? F.perfiles : {}, pn = isObj(N.perfiles) ? N.perfiles : {}, NL = isObj(N.largos) ? N.largos : {}, NC = isObj(N.cortos) ? N.cortos : {};
   const prR = (p, k) => isObj(p[k]) && isNum(p[k].R) ? p[k].R : null;
-  const P = isObj(I.params) ? I.params : {}, sl = isNum(P.sl_pct) ? P.sl_pct : isNum(I.sl_pct) ? I.sl_pct : 2, k = isNum(P.target_r) ? P.target_r : 4;
+  const P = isObj(I.params) ? I.params : {}, sl = isNum(P.sl_pct) ? P.sl_pct : isNum(I.sl_pct) ? I.sl_pct : V.sl, k = isNum(P.target_r) ? P.target_r : 4;
   const sal = Object.entries(X).filter(([, v]) => isNum(v)).map(([kk, v]) => `${S4R_SAL[kk] || kk} ${nf(v,0)}`).join(" · ");
-  const best = numOf(F.max_R, F.mejor_R, F.max), opj = numOf(F.op_jornada, cF.op_jornada), ps = Object.keys(P).length ? impParams({...P, preset:"seis4r"}) : "";
+  const best = numOf(F.max_R, F.mejor_R, F.max), opj = numOf(F.op_jornada, cF.op_jornada), ps = Object.keys(P).length ? impParams({...P, preset:V.preset}) : "";
   const pJ = numOf(cF.cuenta_jornada_neto_pct) ?? (isNum(F.mean_R) && opj!=null ? F.mean_R * RISK * opj : null), pN = numOf(cN.cuenta_jornada_neto_pct);
   const objPct = isNum(X.objetivo) && F.n ? X.objetivo / F.n : null, ddN = numOf(N.max_dd_R);
   // caída en % de la cuenta con interés compuesto: el paper calcula el tamaño sobre el capital de cada momento (como el
   // ranking y docs/05): 1 − (1 − riesgo)^R; sin él (R × riesgo) saldría más (172 R: 86 % en vez de 58 %)
   const ddC = x => 100 * (1 - Math.pow(1 - RISK / 100, x));
-  const gana = isNum(F.mean_R) && F.mean_R > 0;
+  const gana = isNum(F.mean_R) && F.mean_R > 0, ganaN = isNum(N.mean_R) && N.mean_R > 0;
+  const dentroT = ganaN && V.dosTramos ? "Dentro de muestra también gana, pero no es una prueba aparte" : `Pero dentro de muestra ${ganaN ? "apenas gana" : "pierde"}`;
   // lo que se dice de largos y cortos, solo si los datos lo dicen (fuera ganan los cortos y los largos no; dentro, al revés)
   const porCortos = isNum(Ct.mean_R) && isNum(Lg.mean_R) && Ct.mean_R > 0 && Lg.mean_R <= 0;
   const alReves = porCortos && isNum(NL.mean_R) && isNum(NC.mean_R) && NL.mean_R > NC.mean_R;
@@ -6284,23 +6304,23 @@ function renderBtS4r(box, I, on){
   const okx = prR(pf, "okx_eu_con_xperps"), sx = prR(pf, "okx_eu_sin_xperps"), sxN = prR(pn, "okx_eu_sin_xperps");
   const perf = [okx!=null ? `con los costes de hoy del paper (OKX EU con X-Perps) da ${sR(okx)} fuera${prR(pn, "okx_eu_con_xperps")!=null ? ` y ${sR(prR(pn, "okx_eu_con_xperps"))} dentro` : ""}` : "",
     sx!=null ? `sin cuenta X-Perps (contado 0,35 % por lado y sin cortos) pierde: ${sR(sx)} fuera${sxN!=null ? ` y ${sR(sxN)} dentro` : ""}` : ""].filter(Boolean).join("; ");
-  box.innerHTML = `<div class="kpis kpis6" id="btS4rKpis"></div>
-    <h3 style="margin:14px 0 6px;font-size:14px">R acumulado desde el ${dmy(N.desde || F.desde)} (dentro de muestra hasta el ${dmy(I.split)}; fuera de muestra después)</h3><div id="btS4rCurve"></div>
+  box.innerHTML = `<div class="kpis kpis6" id="${V.id}Kpis"></div>
+    <h3 style="margin:14px 0 6px;font-size:14px">R acumulado desde el ${dmy(N.desde || F.desde)} (dentro de muestra hasta el ${dmy(I.split)}; fuera de muestra después)</h3><div id="${V.id}Curve"></div>
     <h3 style="margin:14px 0 6px;font-size:14px">Lo que dicen los datos</h3>
     <ul class="checks">
       <li><span class="${gana ? "ok" : "ko"}">${gana ? "✓" : "!"}</span><span><b>Fuera de muestra ${gana ? "gana" : "no gana"}:</b> ${sR(F.mean_R)} por operación en ${nf(F.n,0)} operaciones${isNum(F.paper_R_funding) ? ` (${sR(F.paper_R_funding)} con funding)` : ""}, ${opj!=null ? nf(opj,2) : "–"} por jornada: con ${nf(RISK,1)} % de riesgo, ≈ ${pJ!=null ? pct(pJ,2) : "–"} de la cuenta por jornada de aperturas, sin interés compuesto${dd!=null ? `, con una caída de hasta −${nf(dd,1)} R (≈ −${nf(ddC(dd),1)} % de la cuenta, con el tamaño sobre el capital de cada momento, como el paper)` : ""}.</span></li>
-      <li><span class="ko">!</span><span><b>Pero dentro de muestra ${isNum(N.mean_R) && N.mean_R > 0 ? "apenas gana" : "pierde"}:</b> ${sR(N.mean_R)} en ${nf(N.n||0,0)} operaciones${isNum(N.paper_R_funding) ? ` (${sR(N.paper_R_funding)} con funding)` : ""}${pN!=null ? `, ${pct(pN,2)} de la cuenta por jornada` : ""}${ddN!=null ? `; llegó a caer ${nf(ddN,0)} R (≈ ${nf(ddC(ddN),0)} % de la cuenta, con el tamaño sobre el capital de cada momento, como el paper) desde su mejor momento` : ""}.</span></li>
-      <li><span class="ko">!</span><span><b>Frágil: es la mejor de 378 salidas.</b> Las mismas entradas se midieron con 378 combinaciones de stop, objetivo y tope de tiempo, y esta es la mejor fuera de muestra en % de la cuenta por jornada (el criterio del ranking; en R por operación, la 2.ª), elegida después de ver los datos y sin corrección por haber probado tantas: la mejor de muchas suele ser suerte. No es una ventaja demostrada.</span></li>
+      <li><span class="ko">!</span><span><b>${dentroT}:</b> ${sR(N.mean_R)} en ${nf(N.n||0,0)} operaciones${isNum(N.paper_R_funding) ? ` (${sR(N.paper_R_funding)} con funding)` : ""}${pN!=null ? `, ${pct(pN,2)} de la cuenta por jornada` : ""}${ddN!=null ? `; llegó a caer ${nf(ddN,0)} R (≈ ${nf(ddC(ddN),0)} % de la cuenta, con el tamaño sobre el capital de cada momento, como el paper) desde su mejor momento` : ""}.${ganaN && V.dosTramos ? " Se eligió mirando los dos tramos: que gane en los dos no la confirma." : ""}</span></li>
+      <li><span class="ko">!</span><span>${V.eleccion}</span></li>
       <li><span class="ko">!</span><span><b>${porCortos ? "Fuera de muestra gana por los cortos" : "Largos y cortos fuera de muestra"}:</b> cortos ${sR(Ct.mean_R)} (${nf(Ct.n||0,0)} op.) y largos ${sR(Lg.mean_R)} (${nf(Lg.n||0,0)} op.); dentro de muestra${alReves ? ", al revés" : ""}: largos ${sR(NL.mean_R)} y cortos ${sR(NC.mean_R)}.${alReves ? " Depende de cómo vaya el mercado, no de la estrategia." : ""}</span></li>
       ${cTxt ? `<li><span class="ko">!</span><span><b>Lo que se llevan los costes.</b> ${esc(cTxt)}.${perf ? ` Y ${esc(perf)}.` : ""}</span></li>` : ""}
       <li><span class="ko">!</span><span><b>${isNum(X.stop) && X.stop > F.n / 2 ? "La mayoría toca el stop" : "Salidas"}:</b> el objetivo de ${nR(k)}R (+${nR(sl*k)} %) se cobra en ${objPct!=null ? sh(objPct) : "–"} de las operaciones fuera de muestra${sal ? ` (salidas: ${esc(sal)})` : ""}${best!=null ? `; la mejor, ${sR(best)}` : ""}.</span></li>
       <li><span class="ok">✓</span><span><b>Tus reglas no se tocan:</b> stop ${nR(sl)} % (nunca menos del 1,5 %) y objetivo ${nR(k)}R (+${nR(sl*k)} %, más del 3 % neto de costes); sin parcial, sin cerrojo y sin break-even: o gana ${nR(k)}R o pierde 1R. La excepción conocida: si a los 7 días no ha tocado ninguno de los dos, se cierra con lo que haya, gane o pierda${btTimeWins(F)}.</span></li>
       <li><span class="ko">!</span><span><b>El backtest no lleva el veto de noticias fiables:</b> en los 3 años de velas no hay noticias grabadas. Lo que aporte el veto solo se verá en vivo, y sin grupos fiables no veta nada.</span></li>
-      <li><span class="ok">✓</span><span>${on ? "Está en tu cartera paper por tu decisión, para medirla en vivo" : "Si la activas (scripts/activar_estrategia.py --preset seis4r), será por tu decisión, para medirla en vivo"}: la única prueba que vale es lo que pase ahí (pestaña Resultados).</span></li>
+      <li><span class="ok">✓</span><span>${on ? "Está en tu cartera paper por tu decisión, para medirla en vivo" : `Si la activas (scripts/activar_estrategia.py --preset ${V.preset}), será por tu decisión, para medirla en vivo`}: la única prueba que vale es lo que pase ahí (pestaña Resultados).</span></li>
     </ul>
     ${ps ? `<p class="note"><b>Parámetros del backtest:</b> ${esc(ps)}</p>` : ""}
     <p class="note">Generado ${I.generated ? `el ${dmy(I.generated)} a las ${hm(tsOf(I.generated))} UTC` : "–"} · ${esc(I.nota || "")}</p>${btCostTxt(I)}`;
-  kpiRow($("#btS4rKpis"), [
+  kpiRow($(`#${V.id}Kpis`), [
     ["Fuera de muestra", `<span class="${isNum(F.mean_R) && F.mean_R >= 0 ? "pos" : "neg"}">${sR(F.mean_R)}</span>`, `por operación · ${nf(F.n,0)} op. desde el ${dmy(F.desde)}${isNum(F.paper_R_funding) ? ` · con funding ${sR(F.paper_R_funding)}` : ""}`],
     ["Dentro de muestra", `<span class="${isNum(N.mean_R) && N.mean_R >= 0 ? "pos" : "neg"}">${sR(N.mean_R)}</span>`, `${nf(N.n||0,0)} op. · ${sh(N.win_rate)} ganadoras${isNum(N.paper_R_funding) ? ` · con funding ${sR(N.paper_R_funding)}` : ""}`],
     ["Por jornada", pJ!=null ? `<span class="${pJ>=0?"pos":"neg"}">${pct(pJ,2)}</span>` : "–", `de la cuenta fuera de muestra · ${opj!=null ? nf(opj,2) : "–"} operaciones con ${nf(RISK,1)} % de riesgo${pN!=null ? ` · dentro ${pct(pN,2)}` : ""}`],
@@ -6308,7 +6328,7 @@ function renderBtS4r(box, I, on){
     ["Ganadoras", sh(F.win_rate), `fuera de muestra · ${esc(sal)}`],
     ["Largos / cortos", `${sR(Lg.mean_R)} / ${sR(Ct.mean_R)}`, `${nf(Lg.n||0,0)} / ${nf(Ct.n||0,0)} operaciones fuera de muestra${isNum(tot) ? ` · acumulado ${sR(tot)}` : ""}`]]);
   const base = cd.length ? cd[cd.length-1][1] : 0;
-  lineChart($("#btS4rCurve"), [...cd, ...cf.map(([t, v]) => [t, v + base])], 0, v => sR(v));
+  lineChart($(`#${V.id}Curve`), [...cd, ...cf.map(([t, x]) => [t, x + base])], 0, x => sR(x));
 }
 // La estrategia que opera el motor (E2, variante de 7 días, «6 diarias», «6 diarias v2», la Ruptura V3 o «6 diarias 4R») y el laboratorio. Cifras reales del backtest; ninguna promesa.
 function renderBtLive(){
@@ -6317,8 +6337,9 @@ function renderBtLive(){
   const dmy = t => { if (!t) return "–"; const d = new Date(tsOf(t)); return `${dm(d.getTime())}-${d.getUTCFullYear()}`; };
   const RISK = 0.5;   // % de la cuenta arriesgado por operación (config.RISK_PER_TRADE_PCT)
   // con «6 diarias» o «6 diarias v2» en marcha, E2 pasa a ser la anterior (y con la v2, también «6 diarias»)
-  const pre = motorPreset().preset, seis = pre==="seis", seis2 = pre==="seis2", rup3 = pre==="ruptura3", s4r = pre==="seis4r";
-  $("#btLiveTitle").textContent = seis || seis2 || rup3 || s4r ? E2_TITLE_ANT : E2_TITLE; $("#btLiveSub").textContent = seis || seis2 || rup3 || s4r ? E2_SUB_ANT(s4r ? "6 diarias 4R" : rup3 ? "Ruptura V3" : seis2 ? "6 diarias v2" : "6 diarias") : E2_SUB;
+  const pre = motorPreset().preset, seis = pre==="seis", seis2 = pre==="seis2", rup3 = pre==="ruptura3", s4r = pre==="seis4r", s4r3 = pre==="seis4r3";
+  const otra = seis || seis2 || rup3 || s4r || s4r3;   // E2 ya no opera
+  $("#btLiveTitle").textContent = otra ? E2_TITLE_ANT : E2_TITLE; $("#btLiveSub").textContent = otra ? E2_SUB_ANT(s4r3 ? "6 diarias 4R · stop 3 %" : s4r ? "6 diarias 4R" : rup3 ? "Ruptura V3" : seis2 ? "6 diarias v2" : "6 diarias") : E2_SUB;
   if (!I || !I.fuera || !I.fuera.n){ box.innerHTML = `<p class="note">${S.live ? "Aún no hay backtest del motor en vivo: lo genera la réplica BACKTEST_DIR/controles/compara_impulso.py." : "Esta demostración no trae el backtest del motor en vivo."}</p>`; }
   else {
     const F = I.fuera, N = I.dentro || {}, X = F.salidas || {};
@@ -6361,14 +6382,18 @@ function renderBtLive(){
   $("#btSeis2TopP").hidden = !seis2; $("#btSeis2AltP").hidden = seis2 || !hasS2;
   $("#btSeis2Top").innerHTML = ""; $("#btSeis2Alt").innerHTML = "";
   if (seis2 || hasS2) safe(() => renderBtSeis2(seis2 ? $("#btSeis2Top") : $("#btSeis2Alt"), S2, seis2));
-  const R3 = D.ruptura3; $("#btRup3P").hidden = !rup3 && !btOk(R3); $("#btRup3").innerHTML = "";   // Ruptura V3: arriba (con «6 diarias 4R», la anterior)
-  $("#btRup3Title").textContent = (rup3 ? "Estrategia en marcha: " : s4r ? "Estrategia anterior: " : "Medida en backtest, no está en marcha: ") + "Ruptura V3 (rango de apertura con tendencia, volumen y régimen)";
-  if (rup3 || btOk(R3)) safe(() => renderBtRup3($("#btRup3"), R3, rup3 ? "on" : s4r ? "ant" : "off"));
-  // «6 diarias 4R»: arriba del todo si la opera el motor; si no y hay backtest, debajo de «6 diarias v2», como medida
-  const S4 = D.seis4r, hasS4 = btOk(S4);
-  $("#btS4rTopP").hidden = !s4r; $("#btS4rAltP").hidden = s4r || !hasS4;
-  $("#btS4rTop").innerHTML = ""; $("#btS4rAlt").innerHTML = "";
-  if (s4r || hasS4) safe(() => renderBtS4r(s4r ? $("#btS4rTop") : $("#btS4rAlt"), S4, s4r));
+  // Ruptura V3: arriba si la opera el motor; con una de las «6 diarias 4R» (que vinieron después), la anterior
+  const R3 = D.ruptura3, trasR3 = s4r || s4r3; $("#btRup3P").hidden = !rup3 && !btOk(R3); $("#btRup3").innerHTML = "";
+  $("#btRup3Title").textContent = (rup3 ? "Estrategia en marcha: " : trasR3 ? "Estrategia anterior: " : "Medida en backtest, no está en marcha: ") + "Ruptura V3 (rango de apertura con tendencia, volumen y régimen)";
+  if (rup3 || btOk(R3)) safe(() => renderBtRup3($("#btRup3"), R3, rup3 ? "on" : trasR3 ? "ant" : "off"));
+  // «6 diarias 4R» (stop 2 %) y «6 diarias 4R · stop 3 %»: arriba del todo la que opera el motor; la otra, si hay
+  // backtest, debajo de «6 diarias v2», como medida
+  for (const [k, on] of [["seis4r", s4r], ["seis4r3", s4r3]]){
+    const X4 = D[k], id = S4R_VAR[k].id, has = btOk(X4);
+    $(`#${id}TopP`).hidden = !on; $(`#${id}AltP`).hidden = on || !has;
+    $(`#${id}Top`).innerHTML = ""; $(`#${id}Alt`).innerHTML = "";
+    if (on || has) safe(() => renderBtS4r(on ? $(`#${id}Top`) : $(`#${id}Alt`), X4, on, k));
+  }
   if (!L || !L.summary){ lab.innerHTML = `<p class="note">${S.live ? "Aún no hay laboratorio: python -m bot.laboratorio" : "Esta demostración no trae el laboratorio."}</p>`; return; }
   const sm = L.summary, list = [...(L.robust || []), ...(L.promising || [])];
   lab.innerHTML = `<div class="kpis" id="btLabKpis"></div>
@@ -7234,7 +7259,8 @@ if (!LIVE){ try { const b = document.getElementById("btData"); if (b) S.backtest
   try { const x = document.getElementById("seisData"); if (x && S.btImp) S.btImp.seis = JSON.parse(x.textContent); } catch(e){}   // backtest real de «6 diarias»
   try { const y = document.getElementById("seis2Data"); if (y && S.btImp) S.btImp.seis2 = JSON.parse(y.textContent); } catch(e){}   // backtest real de «6 diarias v2»
   try { const z = document.getElementById("ruptura3Data"); if (z && S.btImp) S.btImp.ruptura3 = JSON.parse(z.textContent); } catch(e){}   // backtest real de la Ruptura V3
-  try { const q = document.getElementById("seis4rData"); if (q && S.btImp) S.btImp.seis4r = JSON.parse(q.textContent); } catch(e){} }   // backtest real de «6 diarias 4R»
+  try { const q = document.getElementById("seis4rData"); if (q && S.btImp) S.btImp.seis4r = JSON.parse(q.textContent); } catch(e){}   // backtest real de «6 diarias 4R»
+  try { const q3 = document.getElementById("seis4r3Data"); if (q3 && S.btImp) S.btImp.seis4r3 = JSON.parse(q3.textContent); } catch(e){} }   // y de «6 diarias 4R · stop 3 %» (scripts/incrustar_backtest.py)
 if (LIVE){
   Object.assign(S, {live:true, source:"ws", vnow:Date.now(), warm:false, prices:{}, p0:{}});
   for (const c of COINS){ S.flow[c] = {}; S.hist[c] = []; }

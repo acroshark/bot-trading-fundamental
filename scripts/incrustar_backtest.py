@@ -6,7 +6,8 @@ También incrusta un resumen ligero del laboratorio (labData): el ejemplo de la 
 nombres y las cifras fuera de muestra reales de sus estrategias prometedoras (todo lo demás del ejemplo es inventado).
 Y el backtest del motor en vivo (impulsoData, E2) y los de las estrategias «6 diarias» (seisData, de
 seis_diarias_resumen.json), «6 diarias v2» (seis2Data, de seis2_resumen.json), «Ruptura V3» (ruptura3Data, de
-ruptura3_resumen.json) y «6 diarias 4R» (seis4rData, de seis4r_resumen.json), con la curva de R reducida.
+ruptura3_resumen.json), «6 diarias 4R» (seis4rData, de seis4r_resumen.json) y «6 diarias 4R · stop 3 %» (seis4r3Data, de
+seis4r3_resumen.json, la de la cartera paper desde el 29-10-2026), con la curva de R reducida. Lo que falte se deja tal cual.
 """
 import json
 import re
@@ -16,7 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from bot import config  # noqa: E402
-from bot.resumen_backtest import (RUPTURA3_FILE, SEIS2_FILE, SEIS4R_FILE, SEIS_FILE,  # noqa: E402
+from bot.resumen_backtest import (RUPTURA3_FILE, SEIS2_FILE, SEIS4R3_FILE, SEIS4R_FILE, SEIS_FILE,  # noqa: E402
                                   impulso_summary, lab_summary, seis_summary)
 
 PAGE = ROOT / "dashboard" / "radar.html"
@@ -28,6 +29,7 @@ BLOCK_SEIS = re.compile(r'<script type="application/json" id="seisData">.*?</scr
 BLOCK_SEIS2 = re.compile(r'<script type="application/json" id="seis2Data">.*?</script>', re.S)
 BLOCK_RUP3 = re.compile(r'<script type="application/json" id="ruptura3Data">.*?</script>', re.S)
 BLOCK_S4R = re.compile(r'<script type="application/json" id="seis4rData">.*?</script>', re.S)
+BLOCK_S4R3 = re.compile(r'<script type="application/json" id="seis4r3Data">.*?</script>', re.S)
 POINTS = 40
 
 
@@ -111,7 +113,7 @@ def main() -> None:
                  or BLOCK_OPEN.search(html) or BLOCK.search(html))
             html = html[:m.end()] + "\n" + tag6 + html[m.end():]
         print(f"Incrustado el backtest de «6 diarias v2» ({len(tag6) / 1024:.1f} KB)")
-    html = incrustar_seis4r(incrustar_ruptura3(html))
+    html = incrustar_seis4r3(incrustar_seis4r(incrustar_ruptura3(html)))
     PAGE.write_text(html, encoding="utf-8")
 
 
@@ -146,6 +148,24 @@ def incrustar_seis4r(html: str) -> str:
     if not m:
         raise SystemExit("No encuentro ningún bloque de datos del backtest en la web")
     print(f"Incrustado el backtest de «6 diarias 4R» ({len(tag) / 1024:.1f} KB)")
+    return html[:m.end()] + "\n" + tag + html[m.end():]
+
+
+def incrustar_seis4r3(html: str) -> str:
+    """El bloque seis4r3Data («6 diarias 4R · stop 3 %», la de la cartera paper desde el 29-10-2026: réplica de 3 años con
+    scripts/replica_seis4r.py --preset seis4r3; gana en los dos tramos, pero se eligió mirándolos entre 50 combinaciones),
+    justo detrás de seis4rData o del último bloque de datos. Sin seis4r3_resumen.json, la página tal cual."""
+    src = config.BACKTEST_DIR / SEIS4R3_FILE
+    if not src.exists():
+        return html
+    tag = _tag("seis4r3Data", seis_summary(json.loads(src.read_text(encoding="utf-8"))))
+    if BLOCK_S4R3.search(html):
+        return BLOCK_S4R3.sub(lambda _: tag, html)
+    m = (BLOCK_S4R.search(html) or BLOCK_RUP3.search(html) or BLOCK_SEIS2.search(html) or BLOCK_SEIS.search(html)
+         or BLOCK_IMP.search(html) or BLOCK_LAB.search(html) or BLOCK_OPEN.search(html) or BLOCK.search(html))
+    if not m:
+        raise SystemExit("No encuentro ningún bloque de datos del backtest en la web")
+    print(f"Incrustado el backtest de «6 diarias 4R · stop 3 %» ({len(tag) / 1024:.1f} KB)")
     return html[:m.end()] + "\n" + tag + html[m.end():]
 
 
