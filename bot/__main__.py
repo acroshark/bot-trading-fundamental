@@ -11,7 +11,8 @@ Modo real con OKX EU (docs/06): el conector (RealBroker) se construye siempre y 
 (secretos/okx.env): no hace ninguna petición privada. Los tickets van al paper (BOT_BROKER=paper, por defecto); con
 BOT_BROKER=real irían al conector, que además necesita las claves, BOT_MODO_REAL=1 y la confirmación escrita en la web.
 Comisiones (bot/comisiones.py): el perfil de OKX EU en uso; si el conector lee la comisión real de la cuenta (solo
-lectura), manda esa. La gráfica de cada operación usa las velas públicas de OKX EU del par (bot/velas_okx.py).
+lectura), manda esa. La gráfica de cada operación usa las velas públicas de OKX EU del par (bot/velas_okx.py), y
+el paper, al arrancar, revisa con sus velas de 1 min lo que tocaron las posiciones abiertas con el bot apagado.
 Ranking de estrategias (bot/ranking.py): las filas de BACKTEST_DIR/ranking, las tarjetas del laboratorio vivo y lo que
 opera en el paper o en la prueba en avance, ordenadas por beneficio fuera de muestra con costes (mensaje «ranking»).
 Laboratorio vivo (docs/07): va en un proceso aparte (scripts/lab-vivo.ps1); el bot solo lee sus archivos
@@ -157,7 +158,12 @@ async def main() -> None:
         decs = optional("Las decisiones de las aperturas", lambda: Decisiones(bus, store))
         if decs is not None:
             observe_bus(bus, decs.observe)
-        broker = PaperBroker(bus, store, lambda: state("market", {}), lambda: state("orderflow", {}))
+        # Velas públicas de OKX EU del par que se operaría (sin claves, con caché y límite de peticiones): la gráfica de
+        # cada posición (GET /api/velas) y la revisión del paper al arrancar (lo que tocaron las abiertas con el bot
+        # apagado, con las velas de 1 min desde la última vez que las vio). Una sola, para las dos.
+        vokx = VelasOKX(session)
+        broker = PaperBroker(bus, store, lambda: state("market", {}), lambda: state("orderflow", {}),
+                             get_bars=lambda c, a, b: vokx.velas(c, a, b, "1m"))
         # Modo real con OKX EU (docs/06, contrato de cableado): sin secretos/okx.env queda apagado y no hace ninguna
         # petición privada. Con las claves del usuario lee su cuenta en solo lectura (saldo y comisiones); opera solo con
         # BOT_MODO_REAL=1 y su confirmación escrita en la web. Mismo mercado del bus que el paper.
@@ -255,7 +261,7 @@ async def main() -> None:
                             reflejo=refl, fiables=fiab, entrada_noticias=entrada, decisiones=decs,
                             velas=velas_de(lambda c: vigil.bars.get(c),
                                            CacheBars(live=lambda c: vigil.bars.get(c), keep=8).get),
-                            velas_okx=VelasOKX(session), real=real, ranking=rank, lab_vivo=labv)
+                            velas_okx=vokx, real=real, ranking=rank, lab_vivo=labv)
         runner = web.AppRunner(make_app(bus, health, services))
         await runner.setup()
         await web.TCPSite(runner, config.HOST, config.PORT).start()

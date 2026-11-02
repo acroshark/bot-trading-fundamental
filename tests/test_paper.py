@@ -1812,3 +1812,372 @@ def test_programada_con_cerrojo_que_el_perfil_nuevo_no_admite_no_entra(env_okx, 
     assert "n1" not in b.positions and "n1" not in b.scheduled
     bl = env.evs("blocked", "n1")[0]
     assert bl["patch"]["exec"]["motivo_codigo"] == "reglas" and "el cerrojo no vale" in bl["text"]
+
+
+# ---------------------------------------------------------------- revisión al arrancar (02-11-2026)
+# El PC del usuario se apaga a veces: al arrancar, las abiertas se revisan con las velas de 1 min de OKX EU desde la
+# última vez que el bot las vio. Velas de mentira, sin red; sin deslizamiento ni diferencial (salvo donde se indica).
+
+class VelasFalsas:
+    """get_bars(moneda, desde, hasta) como velas_okx.velas(..., "1m"), sin red: las velas de cada moneda que abren en
+    [desde, hasta). fallos: cuántas peticiones fallan («OKX no responde») antes de contestar."""
+
+    def __init__(self, velas: dict | None = None, fallos: int = 0):
+        self.velas, self.fallos, self.pedidas = velas or {}, fallos, []
+
+    async def __call__(self, coin, a, b):
+        self.pedidas.append((coin, a, b))
+        if self.fallos:
+            self.fallos -= 1
+            raise RuntimeError("OKX no responde")
+        return [list(r) for r in self.velas.get(coin, []) if a <= r[0] < b]
+
+
+def velas(desde: int, hasta: int, px: float = 101.0, cambios: dict | None = None) -> list[list]:
+    """Velas de 1 min [t, o, h, l, c] de T0 + desde a T0 + hasta (en minutos), quietas en px salvo las de cambios
+    {minuto: (o, h, l, c)}."""
+    cambios = cambios or {}
+    return [[T0 + m * MIN, *cambios.get(m, (px, px, px, px))] for m in range(desde, hasta)]
+
+
+async def _sin_espera(_s):
+    return None
+
+
+def arranca(env, minutos: float, bars, **px) -> PaperBroker:
+    """El bot vuelve a arrancar a T0 + minutos (apagado desde su última ronda) con estas velas de 1 min."""
+    env.clock.t = T0 + int(minutos * MIN)
+    env.prices.update(px)
+    env.broker = PaperBroker(env.bus, env.store, env.market, lambda: {"coins": {}}, clock=env.clock,
+                             slip_bps=lambda: env.slip, get_bars=bars, dormir=_sin_espera)
+    return env.broker
+
+
+def t4r3(coin="BTC", side="long", **kw) -> dict:
+    """Un ticket de «6 diarias 4R · stop 3 %» (seis4r3, la de la cartera): stop 3 %, objetivo 4R (+12 %), como mucho
+    7 días; horquilla pura (sin parcial, cerrojo, break-even ni stop dinámico); los cortos, en perpetuo."""
+    base = {"winEnd": T0 + 168 * H, "holdLabel": "como mucho 7 días", **kw}
+    return ticket(coin=coin, side=side, stop=3.0, tp2=4.0, tp1R=None, beR=None, trailStartR=None,
+                  instrument="spot" if side == "long" else "perp", **base)
+
+
+@pytest.fixture
+def reglas(monkeypatch):
+    monkeypatch.setattr(config, "USER_RULES", True)
+
+
+def _abierta(env, t=None, story="n1", visto=2, **px) -> dict:
+    """Abre la posición a T0 y la gestiona por última vez a T0 + visto min."""
+    assert env.broker.submit(t or t4r3(), story)
+    env.at(visto, **({"BTC": 101.0} | px))
+    p = env.broker.positions[story]
+    assert p["seen"] == T0 + visto * MIN
+    return p
+
+
+async def test_al_arrancar_aplica_el_stop_que_se_toco_con_el_bot_apagado(env, reglas):
+    """Con el bot apagado, una compra tocó el stop y volvió a subir. Al arrancar, antes de gestionarla, se revisan las
+    velas desde la última vez que el bot la vio: sale a su precio (no al mínimo de la vela ni al de ahora), a la hora de
+    esa vela, y la operación lo dice; el evento sale ahora. Mientras se revisa no se gestiona ni se cierra a mano."""
+    p = _abierta(env)
+    q, sl = p["qty"], p["sl"]
+    assert sl == pytest.approx(97) and p["tp2"] == pytest.approx(112)
+    bars = VelasFalsas({"BTC": velas(0, 90, cambios={30: (99.0, 99.2, 96.5, 98.0)})})
+    b = arranca(env, 60, bars, BTC=101)
+    assert set(b._revision) == {"n1"} and b._revision["n1"]["desde"] == T0 + 2 * MIN
+    env.at(60, BTC=101)                                 # una ronda antes de revisar: no se toca
+    assert "n1" in b.positions and not b.close("n1")    # tampoco a mano: primero, lo que pasó con el bot apagado
+    assert b.portfolio()["positions"][0]["revisando"] is True
+    assert await b.revisar_arranque() == 1
+    assert "n1" not in b.positions and not b._revision
+    assert bars.pedidas == [("BTC", T0 + 2 * MIN, T0 + 60 * MIN)]   # desde que la vio hasta el último minuto cerrado
+    t = b.closed[-1]
+    assert t["reason"] == ("Stop de pérdida (con el bot apagado, el 23-10 a las 10:30: visto al arrancar en las velas de "
+                           "1 min de OKX EU)")
+    assert t["exit"] == pytest.approx(97) and t["closed"] == T0 + 30 * MIN       # a su precio, a la hora de la vela
+    assert t["pnl"] == pytest.approx(-3 * q - fees(q, 100, 97), abs=1e-3) and t["costes"]["salida_tipo"] == "tomador"
+    [rv] = t["revision_arranque"]
+    assert rv["estado"] == "completa" and rv["salida"] == "stop" and rv["salida_at"] == T0 + 30 * MIN
+    assert rv["salida_px"] == pytest.approx(97) and rv["desde"] == T0 + 2 * MIN and rv["fin"] == T0 + 60 * MIN
+    assert rv["velas"] == 58 and rv["fuente"] == "velas de 1 min de OKX EU, BTC-USDC" and rv["revisado"] == T0 + 60 * MIN
+    ev = env.evs("closed", "n1")[-1]
+    assert ev["ts"] == T0 + 60 * MIN and ev["patch"]["result"]["closedAt"] == T0 + 30 * MIN
+    assert ev["text"].startswith("Stop de pérdida (con el bot apagado, el 23-10 a las 10:30")
+    rows = env.store.db.execute("SELECT closed FROM trades WHERE story = 'n1'").fetchall()
+    assert rows == [(T0 + 30 * MIN,)]
+    b2 = env.new()                                       # otro reinicio: sigue cerrada, con su revisión
+    assert not b2.positions and b2.closed[-1]["revision_arranque"][0]["salida"] == "stop"
+    assert b2.results()["trades"][0]["revision_arranque"][0]["estado"] == "completa"
+
+
+async def test_si_una_vela_toca_el_stop_y_el_objetivo_sale_por_el_stop(env, reglas):
+    """La regla pesimista: con 1 min no se sabe qué tocó antes; si una vela toca los dos, el stop."""
+    _abierta(env)
+    bars = VelasFalsas({"BTC": velas(0, 60, cambios={20: (101.0, 113.0, 96.0, 112.5)})})
+    b = arranca(env, 60, bars, BTC=112.5)
+    assert await b.revisar_arranque() == 1
+    t = b.closed[-1]
+    assert t["reason"].startswith("Stop de pérdida (con el bot apagado") and t["exit"] == pytest.approx(97)
+    assert t["closed"] == T0 + 20 * MIN
+    assert env.bus.state["agent:exec"]["patch"]["now"] == ("Revisión al arrancar con las velas de 1 min de OKX EU: 1 cerrada "
+                                                           "con el bot apagado")
+
+
+async def test_al_arrancar_aplica_el_objetivo_que_se_toco_con_el_bot_apagado(env, reglas):
+    """El objetivo (orden límite) sale a su precio, con comisión de creador, aunque la vela fuera más allá."""
+    p = _abierta(env)
+    q = p["qty"]
+    bars = VelasFalsas({"BTC": velas(0, 60, cambios={25: (105.0, 113.5, 104.8, 113.0), 26: (113.0, 113.0, 99.0, 99.0)})})
+    b = arranca(env, 60, bars, BTC=99)
+    assert await b.revisar_arranque() == 1
+    t = b.closed[-1]
+    assert t["reason"].startswith("Objetivo (4,0 R) (con el bot apagado, el 23-10 a las 10:25")
+    assert t["exit"] == pytest.approx(112) and t["closed"] == T0 + 25 * MIN and t["costes"]["salida_tipo"] == "creador"
+    assert t["pnl"] == pytest.approx(12 * q - fees(q, 100, 112), abs=1e-3)
+    assert t["revision_arranque"][0]["salida"] == "objetivo"
+
+
+async def test_la_vela_que_abre_mas_alla_del_stop_sale_a_su_apertura(env, reglas):
+    """Un salto: la vela abre ya por debajo del stop; un stop a mercado no sale a 97 sino a lo que hay (95)."""
+    _abierta(env)
+    bars = VelasFalsas({"BTC": velas(0, 60, cambios={40: (95.0, 95.5, 94.0, 95.2)})})
+    b = arranca(env, 60, bars, BTC=95)
+    assert await b.revisar_arranque() == 1
+    t = b.closed[-1]
+    assert t["reason"].startswith("Stop de pérdida") and t["exit"] == pytest.approx(95) and t["closed"] == T0 + 40 * MIN
+
+
+async def test_el_tope_de_tiempo_cumplido_con_el_bot_apagado_sale_a_la_apertura_de_la_vela(env, reglas):
+    """El tope de tiempo pasó con el bot apagado: sale a la apertura de la primera vela desde el tope, con su hora."""
+    _abierta(env, t4r3(winEnd=T0 + 30 * MIN, holdLabel="tope de prueba"))
+    bars = VelasFalsas({"BTC": velas(0, 60, cambios={30: (101.5, 101.6, 101.4, 101.5)})})
+    b = arranca(env, 60, bars, BTC=99)
+    assert await b.revisar_arranque() == 1
+    t = b.closed[-1]
+    assert t["reason"].startswith("Cierre por tiempo (tope de prueba) (con el bot apagado, el 23-10 a las 10:30")
+    assert t["exit"] == pytest.approx(101.5) and t["closed"] == T0 + 30 * MIN
+    assert t["revision_arranque"][0]["salida"] == "tiempo"
+
+
+async def test_sin_velas_se_avisa_y_no_se_inventa_nada(env, reglas):
+    """Sin velas del rato con el bot apagado no se aplica nada: la posición sigue tal cual (stop, extremo…), se avisa en
+    la web y queda apuntado en la operación; desde ahora sigue en vivo, con el precio de ahora."""
+    p = _abierta(env)
+    q, sl, hw = p["qty"], p["sl"], p["high_water"]
+    bars = VelasFalsas({})                               # OKX contesta, pero sin velas de ese rato
+    b = arranca(env, 60, bars, BTC=96)                   # ahora está por debajo del stop
+    assert await b.revisar_arranque() == 0
+    p = b.positions["n1"]
+    assert p["sl"] == sl and p["high_water"] == hw and p["seen"] == T0 + 2 * MIN
+    [rv] = p["revision_arranque"]
+    assert rv["estado"] == "sin_velas" and rv["velas"] == 0 and rv["salida"] is None and "error" not in rv
+    m = env.evs("manage", "n1")[-1]
+    assert m["title"] == "BTC: sin velas del rato con el bot apagado" and m["ts"] == T0 + 60 * MIN
+    assert "No se inventa nada: sigue abierta y en vivo desde ahora" in m["text"] and m["patch"]["revision_arranque"] == rv
+    assert env.bus.state["agent:exec"]["patch"]["now"] == ("Revisión al arrancar con las velas de 1 min de OKX EU: 1 sigue "
+                                                           "abierta, 1 sin todas las velas de ese rato (no se inventa nada: "
+                                                           "en vivo desde ahora)")
+    assert b.portfolio()["positions"][0]["revisando"] is False
+    env.at(61, BTC=96)                                   # en vivo: sale al precio de ahora, como siempre
+    t = b.closed[-1]
+    assert t["reason"] == "Stop de pérdida" and t["exit"] == pytest.approx(96) and t["closed"] == T0 + 61 * MIN
+    assert t["pnl"] == pytest.approx(-4 * q - fees(q, 100, 96), abs=1e-3)
+    assert t["revision_arranque"][0]["estado"] == "sin_velas"   # la operación dice que ese rato no se pudo revisar
+
+
+async def test_si_okx_no_responde_se_reintenta_y_al_final_se_avisa(env, reglas):
+    """OKX falla al arrancar: se reintenta tras unas esperas; si contesta, se revisa; si no contesta nunca, sin velas
+    (con el error) y sigue en vivo."""
+    _abierta(env)
+    bars = VelasFalsas({"BTC": velas(0, 60, cambios={30: (99.0, 99.2, 96.5, 98.0)})}, fallos=2)
+    b = arranca(env, 60, bars, BTC=101)
+    assert await b.revisar_arranque() == 1 and len(bars.pedidas) == 3
+    assert b.closed[-1]["exit"] == pytest.approx(97)
+    _abierta(env, t4r3(coin="ETH"), story="n2", ETH=101.0)
+    nunca = VelasFalsas({}, fallos=99)
+    b = arranca(env, 120, nunca, ETH=101)
+    assert await b.revisar_arranque() == 0 and len(nunca.pedidas) == 1 + len(paper.REVISION_ESPERAS_S)
+    rv = b.positions["n2"]["revision_arranque"][-1]
+    assert rv["estado"] == "sin_velas" and rv["error"] == "RuntimeError: OKX no responde" and not b._revision
+    assert "(RuntimeError: OKX no responde)" in env.evs("manage", "n2")[-1]["text"]
+
+
+async def test_tras_un_hueco_en_las_velas_no_se_aplica_lo_de_despues(env, reglas):
+    """Las velas tienen un hueco: se aplica el tramo seguido desde el principio y lo de después no, porque en el hueco
+    pudo pasar cualquier cosa (no se sabe si tocó antes el objetivo). Queda «incompleta» y sigue en vivo."""
+    p = _abierta(env)
+    sl = p["sl"]
+    rows = velas(0, 20) + velas(40, 60, cambios={45: (98.0, 98.2, 96.0, 97.5)})   # sin velas de 10:20 a 10:40
+    b = arranca(env, 60, VelasFalsas({"BTC": rows}), BTC=101)
+    assert await b.revisar_arranque() == 0
+    p = b.positions["n1"]
+    [rv] = p["revision_arranque"]
+    assert rv["estado"] == "incompleta" and rv["hasta"] == T0 + 20 * MIN and rv["velas"] == 18 and p["sl"] == sl
+    assert p["seen"] == T0 + 20 * MIN
+    m = env.evs("manage", "n1")[-1]
+    assert m["title"] == "BTC: revisada solo en parte al arrancar" and "faltan velas" in m["text"]
+    assert "no se sabe y no se inventa" in m["text"]
+
+
+async def test_sin_tocar_nada_sigue_abierta_y_lo_dice(env, reglas):
+    """Con todas las velas y sin tocar nada: sigue abierta, se dice y la siguiente revisión parte del final de esta."""
+    _abierta(env)
+    b = arranca(env, 60, VelasFalsas({"BTC": velas(0, 60, cambios={10: (101.0, 108.0, 99.0, 107.0)})}), BTC=104)
+    assert await b.revisar_arranque() == 0
+    p = b.positions["n1"]
+    [rv] = p["revision_arranque"]
+    assert rv["estado"] == "completa" and rv["hasta"] == T0 + 60 * MIN and p["seen"] == T0 + 60 * MIN
+    assert p["high_water"] == pytest.approx(108) and p["sl"] == pytest.approx(97)   # sin cerrojo: el stop no se mueve
+    m = env.evs("manage", "n1")[-1]
+    assert m["title"] == "BTC: revisada al arrancar"
+    assert "58 velas de 1 min de OKX EU desde las 10:02 del 23-10 hasta las 11:00" in m["text"]
+    assert "no tocó el stop (97,0000) ni el objetivo (112,00): sigue abierta (tope de tiempo: como mucho 7 días" in m["text"]
+    env.at(61, BTC=104)
+    assert env.broker.positions["n1"]["seen"] == T0 + 61 * MIN   # de nuevo en vivo
+
+
+async def test_un_corto_en_perpetuo_paga_el_funding_de_por_medio_con_el_precio_de_entonces(env, reglas):
+    """Un corto (perpetuo): la liquidación de las 16:00 UTC llegó con el bot apagado y se cobra con el precio de esa
+    vela; luego toca el stop (por arriba) y sale a su precio, con el funding dentro del resultado."""
+    flow = {"BTC": {"funding": 0.01}}
+    _with_flow(env, flow)
+    p = _abierta(env, t4r3(side="short"), BTC=99.0)
+    q = p["qty"]
+    assert p["instrument"] == "perp" and p["sl"] == pytest.approx(103) and p["funding_next"] == T0 + 480 * MIN
+    bars = VelasFalsas({"BTC": velas(0, 600, 99.0, {480: (98.0, 98.0, 98.0, 98.0), 550: (100.0, 103.5, 99.8, 103.2)})})
+    b = arranca(env, 600, bars, BTC=99)
+    b.get_market = lambda: {**env.market(), "flow": flow}
+    assert await b.revisar_arranque() == 1
+    t = b.closed[-1]
+    fund = q * 98 * 0.0001                                # el corto cobra con tasa positiva, sobre el nominal a 98
+    assert t["funding"] == pytest.approx(fund, abs=1e-4) and t["exit"] == pytest.approx(103)   # guardado con 4 decimales
+    assert t["closed"] == T0 + 550 * MIN and t["reason"].startswith("Stop de pérdida (con el bot apagado, el 23-10 a las 19:10")
+    assert t["revision_arranque"][0]["funding_n"] == 1 and len(bars.pedidas) == 1
+    f = [e for e in env.evs("manage", "n1") if e["title"].startswith("BTC: funding cobrado")][-1]
+    assert "Liquidación de las 18:00 (Madrid)" in f["text"] and f["ts"] == T0 + 600 * MIN
+
+
+async def test_la_parcial_y_el_cerrojo_con_el_bot_apagado_como_en_vivo(env, reglas):
+    """«6 diarias v2» (la mitad en 3R y el resto con el cerrojo): con el bot apagado llegó a 3R (sale la mitad a 106 y el
+    stop sube a +2R), siguió subiendo (el stop lo sigue a 2R) y luego bajó hasta el stop de seguimiento, que sale a su
+    precio. La misma gestión que en vivo, vela a vela."""
+    p = _abierta(env, ticket_a())
+    q0 = p["qty"]
+    cambios = {10: (101.0, 107.0, 100.5, 106.5), 20: (106.0, 109.0, 105.5, 108.8), 30: (108.0, 108.2, 104.5, 104.8)}
+    rows = velas(0, 10) + velas(10, 20, 106.5, cambios) + velas(20, 30, 108.8, cambios) + velas(30, 60, 104.8, cambios)
+    b = arranca(env, 60, VelasFalsas({"BTC": rows}), BTC=104.8)
+    assert await b.revisar_arranque() == 1
+    t = b.closed[-1]
+    [part] = t["partials"]
+    assert part["px"] == pytest.approx(106) and part["at"] == T0 + 10 * MIN and part["qty"] == pytest.approx(q0 / 2)
+    assert part["why"].startswith("Objetivo parcial (3,0 R) (con el bot apagado, el 23-10 a las 10:10")
+    assert t["exit_last"] == pytest.approx(105) and t["closed"] == T0 + 30 * MIN and t["locked"] is True
+    assert t["reason"].startswith("Stop de seguimiento (con el bot apagado, el 23-10 a las 10:30") and t["reason"].endswith(
+        "tras salida parcial")
+    rv = t["revision_arranque"][0]
+    assert rv["parcial"] is True and rv["cerrojo"] is True and rv["salida"] == "cerrojo"
+    lock = [e for e in env.evs("manage", "n1") if "lock" in e["patch"]][-1]["patch"]["lock"]
+    assert lock["at"] == T0 + 10 * MIN and lock["hold_until"] == T0 + 168 * H   # activado: 7 días
+
+
+async def test_cerrada_con_el_bot_apagado_antes_de_medianoche_no_cuenta_en_la_perdida_de_hoy(env, reglas):
+    """Pasó la noche abierta y tocó el stop ayer a las 20:00 con el bot apagado: al arrancar hoy, su pérdida es de ayer
+    y la foto del día (capital de partida) la lleva cerrada: la pérdida de hoy es cero. Las velas se piden por tramos."""
+    p = _abierta(env)
+    bars = VelasFalsas({"BTC": velas(0, 1440, cambios={600: (99.0, 99.0, 96.0, 96.5)})})
+    b = arranca(env, 1440, bars, BTC=96.5)               # 24-10 a las 10:00
+    env.at(1440, BTC=96.5)                               # la primera ronda fija la foto del día (último precio guardado)
+    assert b.day_base["origen"] == "ultimo_precio_guardado"
+    assert await b.revisar_arranque() == 1
+    t = b.closed[-1]
+    assert t["closed"] == T0 + 600 * MIN and t["closed"] < day_start_ms(env.clock.t) and t["pnl"] < 0
+    pnl, pct = b.day_pnl(env.clock.t)
+    assert pnl == pytest.approx(0, abs=1e-6) and pct == pytest.approx(0, abs=1e-6)
+    assert b.equity() == pytest.approx(b.start_equity + t["pnl"])
+    assert [x[1:] for x in bars.pedidas] == [(T0 + 2 * MIN, T0 + 1002 * MIN), (T0 + 1002 * MIN, T0 + 1440 * MIN)]
+    assert p["seen"] == T0 + 2 * MIN
+
+
+async def test_la_que_se_guardo_sin_hora_vista_parte_de_lo_ultimo_que_hizo_el_bot(env, reglas):
+    """Una posición guardada antes de que existiera «seen»: la revisión parte del último evento guardado (lo último que
+    hizo el bot), no de su entrada. La vista hace menos de 1 min no se revisa; sin get_bars no se revisa nada."""
+    _abierta(env)
+    body = json.loads(env.store.db.execute("SELECT body FROM trades WHERE story = 'n1'").fetchone()[0])
+    body.pop("seen")
+    env.store.db.execute("UPDATE trades SET body = ? WHERE story = 'n1'", (json.dumps(body),))
+    env.store.db.commit()
+    ultimo = env.store.db.execute("SELECT MAX(ts) FROM events").fetchone()[0]
+    b = arranca(env, 60, VelasFalsas({}), BTC=101)
+    assert b._revision["n1"]["desde"] == max(T0, ultimo)
+    b.positions["n1"]["seen"] = T0 + 59 * MIN + 30_000
+    b.save_positions()
+    assert not arranca(env, 60, VelasFalsas({}), BTC=101)._revision   # vista hace 30 s: no hace falta
+    assert not env.new()._revision                                    # sin velas que pedir, como antes
+
+
+async def test_el_bucle_revisa_aparte_y_no_gestiona_la_que_revisa(env, reglas, monkeypatch):
+    """run(): la revisión va en su propia tarea; mientras espera las velas, la ronda sigue sin tocar esa posición (aunque
+    el precio de ahora esté por debajo del stop); al llegar las velas, sale por el stop de entonces, a su precio."""
+    monkeypatch.setattr(paper, "STEP_EVERY_S", 0.01)
+    _abierta(env)
+    suelta = asyncio.Event()
+    rows = velas(0, 60, cambios={30: (99.0, 99.2, 96.5, 98.0)})
+
+    async def lentas(coin, a, b):
+        await suelta.wait()
+        return [r for r in rows if a <= r[0] < b]
+
+    b = arranca(env, 60, lentas, BTC=95)                 # ahora, por debajo del stop
+    task = asyncio.create_task(b.run())
+    await asyncio.sleep(0.05)
+    assert "n1" in b.positions and "n1" in b._revision and env.bus.state["portfolio"]["positions"][0]["revisando"]
+    suelta.set()
+    await asyncio.sleep(0.05)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    t = b.closed[-1]
+    assert t["exit"] == pytest.approx(97) and t["closed"] == T0 + 30 * MIN and t["reason"].startswith("Stop de pérdida (con")
+
+
+async def test_con_las_velas_de_okx_de_verdad_por_velas_okx_sin_red(env, reglas):
+    """El camino de __main__: get_bars = VelasOKX.velas(moneda, desde, hasta, "1m") con un OKX simulado (texto, de la más
+    nueva a la más vieja, «candles» con las 1.440 últimas e «history-candles» para lo anterior, confirm = "0" en la que
+    está en curso). Un apagado de 30 h: se piden las dos rutas, por tramos, y sale por el stop a su hora."""
+    from bot import velas_okx
+
+    p = _abierta(env)
+    caida = T0 + 1500 * MIN                              # el 24-10 a las 11:00 cae a 96,5
+
+    class OKX:
+        def __init__(self):
+            self.rutas = []
+
+        async def get(self, url, params):
+            self.rutas.append(url.rsplit("/", 1)[-1])
+            now, after = env.clock.t, int(params["after"])
+            filas = []
+            for t in range(T0, now // MIN * MIN + MIN, MIN):
+                px = 96.5 if t == caida else 101.0
+                filas.append([str(t), "101", "101.2", str(min(px, 100.8)), "101", "1", "1", "1",
+                              "0" if t + MIN > now else "1"])
+            filas = filas[::-1]
+            if url.endswith(velas_okx.RECIENTES):
+                filas, lim = filas[:1440], min(int(params["limit"]), 300)
+            else:
+                lim = min(int(params["limit"]), 100)
+            return {"code": "0", "msg": "", "data": [r for r in filas if int(r[0]) < after][:lim]}
+
+    okx, mono = OKX(), [0.0]
+
+    async def dormir(s):
+        mono[0] += s
+
+    v = velas_okx.VelasOKX(get_json=okx.get, clock=env.clock, mono=lambda: mono[0], dormir=dormir)
+    b = arranca(env, 1800, lambda c, a, z: v.velas(c, a, z, "1m"), BTC=101)   # 30 h después
+    assert await b.revisar_arranque() == 1
+    t = b.closed[-1]
+    assert t["exit"] == pytest.approx(97) and t["closed"] == caida and t["reason"].startswith("Stop de pérdida (con el bot")
+    rv = t["revision_arranque"][0]
+    assert rv["estado"] == "completa" and rv["velas"] == 1798 and rv["salida"] == "stop"
+    assert set(okx.rutas) == {"candles", "history-candles"} and p["sl"] == pytest.approx(97)
